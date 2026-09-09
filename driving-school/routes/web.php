@@ -50,6 +50,7 @@ Route::middleware(['auth', 'role:admin'])
         Route::resource('students', Admin\StudentController::class);
         Route::resource('instructors', Admin\InstructorController::class);
         Route::resource('vehicles', Admin\VehicleController::class);
+        Route::post('attendance/transfer', [Admin\AttendanceController::class, 'transfer'])->name('attendance.transfer');
         Route::resource('attendance', Admin\AttendanceController::class)->parameters(['attendance' => 'attendance']);
         Route::resource('lessons', Admin\LessonController::class);
 
@@ -107,6 +108,8 @@ Route::middleware(['auth', 'role:instructor', 'instructor.profile'])
         Route::get('attendance', [Instructor\AttendanceController::class, 'index'])->name('attendance.index');
         Route::get('attendance/check-in', [Instructor\AttendanceController::class, 'create'])->name('attendance.create');
         Route::post('attendance', [Instructor\AttendanceController::class, 'store'])->name('attendance.store');
+        // Moves the student, and today's attendance for them, to another instructor.
+        Route::post('attendance/transfer', [Instructor\AttendanceController::class, 'transfer'])->name('attendance.transfer');
         Route::get('attendance/{attendance}/edit', [Instructor\AttendanceController::class, 'edit'])->name('attendance.edit');
         Route::put('attendance/{attendance}', [Instructor\AttendanceController::class, 'update'])->name('attendance.update');
         Route::delete('attendance/{attendance}', [Instructor\AttendanceController::class, 'destroy'])->name('attendance.destroy');

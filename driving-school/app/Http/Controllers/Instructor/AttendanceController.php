@@ -4,18 +4,34 @@ namespace App\Http\Controllers\Instructor;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AttendanceRequest;
+use App\Http\Requests\AttendanceTransferRequest;
 use App\Models\Attendance;
+use App\Models\Instructor;
 use App\Models\Student;
 use App\Services\AuditLogger;
 use App\Services\StudentProgressService;
+use App\Services\StudentTransferService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class AttendanceController extends Controller
 {
-    public function __construct(private readonly StudentProgressService $progress) {}
+    public function __construct(
+        private readonly StudentProgressService $progress,
+        private readonly StudentTransferService $transfers,
+    ) {}
+
+    /** Active instructors this instructor may hand a student over to. */
+    private function transferTargets(Request $request): Collection
+    {
+        return Instructor::active()
+            ->whereKeyNot($request->user()->instructorId())
+            ->orderBy('full_name')
+            ->get(['id', 'full_name', 'instructor_number']);
+    }
 
     public function index(Request $request): View
     {
@@ -36,6 +52,7 @@ class AttendanceController extends Controller
         return view('instructor.attendance.index', [
             'records' => $records,
             'students' => Student::visibleTo($request->user())->orderBy('full_name')->get(),
+            'transferTargets' => $this->transferTargets($request),
         ]);
     }
 
@@ -64,6 +81,7 @@ class AttendanceController extends Controller
         return view('instructor.attendance.checkin', [
             'students' => $students,
             'checkedInIds' => $checkedInIds,
+            'transferTargets' => $this->transferTargets($request),
             'attendance' => new Attendance([
                 'attendance_date' => today()->toDateString(),
                 'check_in_time' => now()->format('H:i'),
@@ -133,5 +151,30 @@ class AttendanceController extends Controller
         });
 
         return back()->with('status', __('Attendance removed.'));
+    }
+
+    /**
+     * Hands a student, and today's attendance for that student, to another
+     * instructor.
+     *
+     * The date is fixed to today inside this action, so an earlier day can
+     * never be rewritten from the attendance screen. The request has already
+     * proven the student is currently assigned to the acting instructor.
+     */
+    public function transfer(AttendanceTransferRequest $request): RedirectResponse
+    {
+        $student = Student::findOrFail($request->integer('student_id'));
+        $target = Instructor::findOrFail($request->integer('to_instructor_id'));
+
+        $this->transfers->transfer(
+            $student,
+            $target,
+            $request->transferReason(),
+            $request->user(),
+            today(),
+            $request->input('notes'),
+        );
+
+        return back()->with('status', __('Student successfully transferred for today\'s attendance.'));
     }
 }

@@ -170,6 +170,43 @@ attendance below the requirement reopens the student.
 
 ---
 
+## Transfer attendance
+
+Attendance is owned by the instructor recorded **on the row**, so ownership is
+per date rather than per student. Transferring a student moves that date's
+attendance with them and leaves every earlier day alone.
+
+From the attendance screen (instructor or admin), **Transfer** on a student
+picks a destination instructor, confirms, and in one transaction:
+
+* closes the current assignment and opens a new one,
+* writes a `student_transfers` record,
+* re-points the student's attendance **for that date only** at the new
+  instructor, recording `transferred_from_instructor_id`, `student_transfer_id`
+  and `transferred_at` on the row.
+
+Rows are updated in place, never copied, so the student still appears exactly
+once for the day.
+
+Ahmed is with Teacher A and is transferred to Teacher B on 09/09/2026:
+
+| Date | Before | After |
+| --- | --- | --- |
+| 08/09/2026 | Teacher A | **Teacher A** — unchanged |
+| 09/09/2026 | Teacher A | **Teacher B** |
+
+So Teacher A keeps every earlier day and stops seeing Ahmed in today's list;
+Teacher B sees today, and nothing before it. The date is fixed to the current
+day inside the controller and never read from the request, so this action
+cannot rewrite an earlier day. Only the instructor a student is currently
+assigned to — or an admin — may transfer them; the destination must be a
+different, active instructor.
+
+A day that has been transferred away becomes read-only for both instructors:
+`AttendancePolicy::update` requires the row's instructor *and* the student's
+current instructor to be you, which keeps handed-over history from being
+rewritten by either side.
+
 ## Modules
 
 **Operations** — Students, Instructors, Vehicles, Attendance, Lessons,
@@ -196,7 +233,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-107 tests / 424 assertions, run against MySQL (`driving_school_test`; see
+123 tests / 478 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -205,6 +242,7 @@ php artisan test
 | `InstructorDataIsolationTest` | The mandated scenario — Xasan sees Ilyas and Maryan, never Ahmed or Fatima; every admin route returns 403; ids in the URL cannot be swapped; `instructor_id` cannot be spoofed |
 | `StudentAuthorizationTest` | Students see only their own records and are read-only |
 | `StudentTransferTest` | Transfer authorization, list movement, preserved assignment history |
+| `AttendanceTransferTest` | The 09/09 example — today's attendance moves to Teacher B, 08/09 stays with Teacher A, visibility swaps for that day only, no duplicate row, authorization and validation |
 | `CompanyDebtAccountingTest` | The mandated $500 / $200 / $300 example, transaction rollback, overpayment rejection, payment reversal |
 | `AttendanceAndLessonTest` | Duplicate-check-in prevention (with the admin override), validation, vehicle ownership |
 | `StudentProgressTest` | The 24/18/6/75% example, capping, completion and reopening |

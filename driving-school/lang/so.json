@@ -243,5 +243,16 @@
     "Generated :date": "La sameeyay :date",
     "No data matches these filters.": "Wax xog ah kuma habboona shaandhaynta.",
     "This student already has attendance recorded for that date.": "Ardaygan horey ayaa loo diiwaangeliyay xaadirinta taariikhdaas.",
-    "The student is already assigned to this instructor.": "Ardayga horey ayaa loogu qoondeeyay macalinkan."
+    "The student is already assigned to this instructor.": "Ardayga horey ayaa loogu qoondeeyay macalinkan.",
+    "Transfer for today's attendance": "Wareejinta xaadirinta maanta",
+    "Are you sure you want to transfer this student to :instructor for today's attendance?": "Ma hubtaa inaad ardaygan u wareejiso :instructor xaadirinta maanta?",
+    "Student successfully transferred for today's attendance.": "Ardayga si guul leh ayaa loo wareejiyay xaadirinta maanta.",
+    "Only today's attendance moves. Earlier days stay with the current instructor.": "Kaliya xaadirinta maanta ayaa dhaqaaqaysa. Maalmihii hore waxay la sii jiraan macalinka hadda.",
+    "Confirm Transfer": "Xaqiiji Wareejinta",
+    "Select an instructor": "Dooro macalin",
+    "Select a different instructor to transfer to.": "Dooro macalin kale oo aad u wareejiso.",
+    "The receiving instructor is not active.": "Macalinka la wareegayaa firfircoon maaha.",
+    "Transferred during attendance": "La wareejiyay inta lagu guda jiro xaadirinta",
+    "Transferred from :instructor": "Laga wareejiyay :instructor",
+    "Transferred in today": "Maanta la keenay"
 }

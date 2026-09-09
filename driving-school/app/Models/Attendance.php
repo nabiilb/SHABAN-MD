@@ -19,16 +19,22 @@ class Attendance extends Model
     protected $fillable = [
         'student_id',
         'instructor_id',
+        'transferred_from_instructor_id',
+        'student_transfer_id',
         'attendance_date',
         'check_in_time',
         'status',
         'notes',
+        'transferred_at',
         'recorded_by',
     ];
 
     protected function casts(): array
     {
-        return ['attendance_date' => 'date'];
+        return [
+            'attendance_date' => 'date',
+            'transferred_at' => 'datetime',
+        ];
     }
 
     public function student(): BelongsTo
@@ -46,9 +52,22 @@ class Attendance extends Model
         return $this->belongsTo(User::class, 'recorded_by');
     }
 
+    /** The instructor this row was moved away from, when it was transferred. */
+    public function transferredFromInstructor(): BelongsTo
+    {
+        return $this->belongsTo(Instructor::class, 'transferred_from_instructor_id');
+    }
+
+    public function studentTransfer(): BelongsTo
+    {
+        return $this->belongsTo(StudentTransfer::class, 'student_transfer_id');
+    }
+
     /**
-     * An instructor sees attendance he recorded OR attendance of a student
-     * currently assigned to him. A student sees only his own.
+     * Attendance belongs to the instructor recorded on the row, which makes
+     * ownership date-specific: transferring a student moves only that date's
+     * row, so the previous instructor keeps every earlier day and the new one
+     * sees nothing before the transfer. A student sees only his own.
      */
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
@@ -57,12 +76,7 @@ class Attendance extends Model
         }
 
         if ($user->isInstructor()) {
-            $instructorId = $user->instructorId() ?? 0;
-
-            return $query->where(function (Builder $q) use ($instructorId) {
-                $q->where('attendance.instructor_id', $instructorId)
-                    ->orWhereHas('student', fn (Builder $s) => $s->where('current_instructor_id', $instructorId));
-            });
+            return $query->where('attendance.instructor_id', $user->instructorId() ?? 0);
         }
 
         if ($user->isStudent()) {

@@ -52,6 +52,13 @@
                         <td class="max-w-48 truncate text-sm text-slate-500">{{ $record->notes }}</td>
                         <td class="whitespace-nowrap text-right">
                             <a href="{{ route('admin.attendance.edit', $record) }}" class="btn-ghost btn-sm">{{ __('Edit') }}</a>
+                            @if ($record->attendance_date?->isToday() && $record->student)
+                                <x-attendance-transfer
+                                    :student="$record->student"
+                                    :instructors="$transferTargets"
+                                    :action="route('admin.attendance.transfer')"
+                                    compact />
+                            @endif
                             <x-delete-form :action="route('admin.attendance.destroy', $record)" />
                         </td>
                     </tr>

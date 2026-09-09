@@ -12,6 +12,11 @@ class AttendancePolicy
         return $user->hasRole('admin', 'instructor', 'student');
     }
 
+    /**
+     * Ownership follows the instructor recorded on the row, not the student's
+     * current instructor — so a transfer hands over that day only, and the
+     * previous instructor keeps every earlier day.
+     */
     public function view(User $user, Attendance $attendance): bool
     {
         if ($user->isAdmin()) {
@@ -19,8 +24,7 @@ class AttendancePolicy
         }
 
         if ($user->isInstructor()) {
-            return $attendance->instructor_id === $user->instructorId()
-                || $attendance->student?->current_instructor_id === $user->instructorId();
+            return $attendance->instructor_id === $user->instructorId();
         }
 
         if ($user->isStudent()) {
@@ -35,6 +39,11 @@ class AttendancePolicy
         return $user->isAdmin() || $user->isInstructor();
     }
 
+    /**
+     * Editing additionally requires the student to still be assigned to this
+     * instructor, so days that have been transferred away become read-only
+     * history rather than something either side can rewrite.
+     */
     public function update(User $user, Attendance $attendance): bool
     {
         if ($user->isAdmin()) {
@@ -44,6 +53,16 @@ class AttendancePolicy
         return $user->isInstructor()
             && $attendance->instructor_id === $user->instructorId()
             && $attendance->student?->current_instructor_id === $user->instructorId();
+    }
+
+    /**
+     * Moving a student, and that day's attendance with them, is allowed only
+     * for the instructor the student is currently assigned to.
+     */
+    public function transfer(User $user, Attendance $attendance): bool
+    {
+        return $attendance->student !== null
+            && $user->can('transfer', $attendance->student);
     }
 
     public function delete(User $user, Attendance $attendance): bool

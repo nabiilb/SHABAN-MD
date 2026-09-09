@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AttendanceRequest;
+use App\Http\Requests\AttendanceTransferRequest;
 use App\Models\Attendance;
 use App\Models\Instructor;
 use App\Models\Student;
 use App\Services\AuditLogger;
 use App\Services\StudentProgressService;
+use App\Services\StudentTransferService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +18,10 @@ use Illuminate\View\View;
 
 class AttendanceController extends Controller
 {
-    public function __construct(private readonly StudentProgressService $progress) {}
+    public function __construct(
+        private readonly StudentProgressService $progress,
+        private readonly StudentTransferService $transfers,
+    ) {}
 
     public function index(Request $request): View
     {
@@ -45,6 +50,7 @@ class AttendanceController extends Controller
             'records' => $records,
             'students' => Student::orderBy('full_name')->get(['id', 'full_name', 'student_number']),
             'instructors' => Instructor::orderBy('full_name')->get(['id', 'full_name']),
+            'transferTargets' => Instructor::active()->orderBy('full_name')->get(['id', 'full_name', 'instructor_number']),
         ]);
     }
 
@@ -132,5 +138,26 @@ class AttendanceController extends Controller
         });
 
         return back()->with('status', __('Attendance removed.'));
+    }
+
+    /**
+     * Same-day transfer from the attendance screen. An admin may move any
+     * student, but still only today's attendance moves with them.
+     */
+    public function transfer(AttendanceTransferRequest $request): RedirectResponse
+    {
+        $student = Student::findOrFail($request->integer('student_id'));
+        $target = Instructor::findOrFail($request->integer('to_instructor_id'));
+
+        $this->transfers->transfer(
+            $student,
+            $target,
+            $request->transferReason(),
+            $request->user(),
+            today(),
+            $request->input('notes'),
+        );
+
+        return back()->with('status', __('Student successfully transferred for today\'s attendance.'));
     }
 }

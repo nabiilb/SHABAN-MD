@@ -65,6 +65,16 @@
                     {{ __('View attendance') }}
                 </a>
             @endunless
+
+            @if ($transferTargets->isNotEmpty())
+                <div class="mt-3 border-t border-slate-100 pt-3">
+                    <x-attendance-transfer
+                        :student="$student"
+                        :instructors="$transferTargets"
+                        :action="route('instructor.attendance.transfer')"
+                        compact />
+                </div>
+            @endif
         </div>
     @empty
         <div class="card p-10 text-center text-sm text-slate-400 lg:col-span-2">

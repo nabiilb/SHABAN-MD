@@ -48,6 +48,17 @@
                         <td class="whitespace-nowrap text-right">
                             @can('update', $record)
                                 <a href="{{ route('instructor.attendance.edit', $record) }}" class="btn-ghost btn-sm">{{ __('Edit') }}</a>
+                            @endcan
+                            @if ($record->attendance_date?->isToday() && $transferTargets->isNotEmpty() && $record->student)
+                                @can('transfer', $record)
+                                    <x-attendance-transfer
+                                        :student="$record->student"
+                                        :instructors="$transferTargets"
+                                        :action="route('instructor.attendance.transfer')"
+                                        compact />
+                                @endcan
+                            @endif
+                            @can('delete', $record)
                                 <x-delete-form :action="route('instructor.attendance.destroy', $record)" />
                             @endcan
                         </td>

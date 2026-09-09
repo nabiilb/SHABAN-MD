@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Attendance;
 use App\Models\Instructor;
 use App\Models\Student;
 use App\Models\StudentInstructorAssignment;
@@ -19,6 +20,10 @@ class StudentTransferService
      *
      * The historical assignment row is closed (never deleted) and a new
      * current one opened, so the student's full instructor history survives.
+     *
+     * The transfer is tied to a date: the attendance already recorded for that
+     * date moves with the student, and every earlier day stays exactly where it
+     * is. Transferring today therefore hands over today's attendance only.
      */
     public function transfer(
         Student $student,
@@ -69,16 +74,71 @@ class StudentTransferService
                 'transferred_by' => $actor->id,
             ]);
 
+            $movedAttendance = $this->moveAttendanceForDate($student, $toInstructor, $date, $transfer);
+
             AuditLogger::log(
                 'student.transferred',
                 $student,
                 "Transferred {$student->full_name} to {$toInstructor->full_name}",
                 ['current_instructor_id' => $fromInstructorId],
-                ['current_instructor_id' => $toInstructor->id, 'reason' => $reason],
+                [
+                    'current_instructor_id' => $toInstructor->id,
+                    'reason' => $reason,
+                    'transfer_date' => $date->toDateString(),
+                    'attendance_records_moved' => $movedAttendance,
+                ],
             );
 
             return $transfer;
         });
+    }
+
+    /**
+     * Re-points the student's attendance for the transfer date at the new
+     * instructor, and only that date.
+     *
+     * Existing rows are updated in place rather than copied, so the student
+     * still appears exactly once for the day and no duplicate is created.
+     * Earlier dates are never touched: they keep the instructor who taught
+     * them, which is what makes the previous instructor's history survive.
+     *
+     * @return int how many attendance rows moved
+     */
+    protected function moveAttendanceForDate(
+        Student $student,
+        Instructor $toInstructor,
+        CarbonInterface $date,
+        StudentTransfer $transfer,
+    ): int {
+        $records = Attendance::query()
+            ->where('student_id', $student->id)
+            ->whereDate('attendance_date', $date->toDateString())
+            ->where('instructor_id', '!=', $toInstructor->id)
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($records as $record) {
+            $record->forceFill([
+                'transferred_from_instructor_id' => $record->instructor_id,
+                'instructor_id' => $toInstructor->id,
+                'student_transfer_id' => $transfer->id,
+                'transferred_at' => now(),
+            ])->save();
+
+            AuditLogger::log(
+                'attendance.transferred',
+                $record,
+                __("Moved :student's attendance for :date to :instructor", [
+                    'student' => $student->full_name,
+                    'date' => $date->toDateString(),
+                    'instructor' => $toInstructor->full_name,
+                ]),
+                ['instructor_id' => $record->transferred_from_instructor_id],
+                ['instructor_id' => $toInstructor->id],
+            );
+        }
+
+        return $records->count();
     }
 
     /** Opens the very first assignment row when a student is registered. */
