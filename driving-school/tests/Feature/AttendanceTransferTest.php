@@ -7,10 +7,12 @@ use App\Models\Instructor;
 use App\Models\Role;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\ReportService;
 use App\Services\StudentTransferService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Testing\TestResponse;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -49,6 +51,11 @@ class AttendanceTransferTest extends TestCase
         $this->ahmed = $this->makeStudent('Ahmed', $this->teacherA, [
             'start_date' => Carbon::parse('2026-08-01'),
         ]);
+
+        // Students are registered with an open assignment row, as the
+        // registration flow does; the transfer closes it and opens the next.
+        app(StudentTransferService::class)
+            ->assignInitial($this->ahmed, $this->teacherA->id, $this->teacherAUser);
     }
 
     protected function tearDown(): void
@@ -332,5 +339,171 @@ class AttendanceTransferTest extends TestCase
         $this->assertSame($this->teacherA->id, $sept7->fresh()->instructor_id, '07/09 is untouched.');
         $this->assertSame($this->teacherB->id, $sept8->fresh()->instructor_id, '08/09 is the transfer date.');
         $this->assertSame($this->teacherA->id, $sept9->fresh()->instructor_id, '09/09 is a different day.');
+    }
+
+    /* ----------------------------------------------------------------
+     | Nothing is half-done, nothing is duplicated, nothing comes back
+     | ---------------------------------------------------------------- */
+
+    public function test_a_failure_part_way_through_rolls_the_whole_transfer_back(): void
+    {
+        $yesterday = $this->record('2026-09-08');
+        $today = $this->record('2026-09-09');
+
+        // Blow up exactly as the attendance move is being written — after the
+        // assignment, the student and the transfer record have all been
+        // changed, which is the worst possible moment for consistency.
+        Attendance::saving(function (Attendance $attendance) {
+            if ($attendance->isDirty('transferred_at')) {
+                throw new RuntimeException('Simulated failure mid-transfer.');
+            }
+        });
+
+        try {
+            app(StudentTransferService::class)->transfer(
+                $this->ahmed,
+                $this->teacherB,
+                'Instructor unavailable',
+                $this->teacherAUser,
+                Carbon::parse('2026-09-09'),
+            );
+            $this->fail('The transfer was expected to fail.');
+        } catch (RuntimeException $e) {
+            $this->assertSame('Simulated failure mid-transfer.', $e->getMessage());
+        } finally {
+            Attendance::flushEventListeners();
+        }
+
+        // Every part of the operation is gone.
+        $this->assertSame($this->teacherA->id, $today->fresh()->instructor_id);
+        $this->assertNull($today->fresh()->transferred_at);
+        $this->assertNull($today->fresh()->transferred_from_instructor_id);
+        $this->assertSame($this->teacherA->id, $yesterday->fresh()->instructor_id);
+        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->current_instructor_id);
+
+        $this->assertDatabaseCount('student_transfers', 0);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'attendance.transferred']);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'student.transferred']);
+        $this->assertSame(
+            1,
+            $this->ahmed->assignments()->where('is_current', true)->count(),
+            'The original assignment is still the only current one.',
+        );
+    }
+
+    public function test_reloading_the_attendance_screens_does_not_recreate_the_moved_record(): void
+    {
+        $this->record('2026-09-08');
+        $this->record('2026-09-09');
+
+        $this->transfer($this->teacherAUser);
+
+        $snapshot = Attendance::orderBy('id')
+            ->get()
+            ->map(fn (Attendance $a) => [$a->id, $a->instructor_id, $a->attendance_date->toDateString()])
+            ->all();
+
+        // Both instructors reload every attendance screen a few times over.
+        foreach (range(1, 3) as $ignored) {
+            foreach ([$this->teacherAUser, $this->teacherBUser] as $user) {
+                $this->actingAs($user->fresh())->get(route('instructor.attendance.index'))->assertOk();
+                $this->actingAs($user->fresh())->get(route('instructor.attendance.create'))->assertOk();
+                $this->actingAs($user->fresh())->get(route('instructor.dashboard'))->assertOk();
+            }
+        }
+
+        $this->assertSame(2, Attendance::count(), 'Reading pages must never write attendance.');
+        $this->assertEquals(
+            $snapshot,
+            Attendance::orderBy('id')->get()
+                ->map(fn (Attendance $a) => [$a->id, $a->instructor_id, $a->attendance_date->toDateString()])
+                ->all(),
+            'The old record must not come back and ownership must not drift.',
+        );
+    }
+
+    public function test_the_new_instructor_cannot_add_a_second_row_for_the_same_day(): void
+    {
+        $this->record('2026-09-09');
+        $this->transfer($this->teacherAUser);
+
+        $this->actingAs($this->teacherBUser->fresh())
+            ->post(route('instructor.attendance.store'), [
+                'student_id' => $this->ahmed->id,
+                'attendance_date' => '2026-09-09',
+                'status' => 'present',
+            ])
+            ->assertSessionHasErrors('attendance_date');
+
+        $this->assertSame(
+            1,
+            Attendance::where('student_id', $this->ahmed->id)->whereDate('attendance_date', '2026-09-09')->count(),
+        );
+    }
+
+    public function test_the_previous_instructor_cannot_check_the_student_in_again(): void
+    {
+        $this->record('2026-09-09');
+        $this->transfer($this->teacherAUser);
+
+        $this->actingAs($this->teacherAUser->fresh())
+            ->post(route('instructor.attendance.store'), [
+                'student_id' => $this->ahmed->id,
+                'attendance_date' => '2026-09-09',
+                'status' => 'present',
+            ])
+            ->assertForbidden();
+
+        $this->assertSame(1, Attendance::count());
+    }
+
+    public function test_submitting_the_same_transfer_twice_changes_nothing(): void
+    {
+        $this->record('2026-09-09');
+
+        $this->transfer($this->teacherAUser)->assertRedirect();
+
+        // Teacher A no longer owns Ahmed, so a repeat submit is refused.
+        $this->transfer($this->teacherAUser)->assertForbidden();
+
+        $this->assertDatabaseCount('student_transfers', 1);
+        $this->assertSame(1, Attendance::count());
+        $this->assertSame($this->teacherB->id, Attendance::first()->instructor_id);
+    }
+
+    /* ----------------------------------------------------------------
+     | The permanent reassignment must not change how history reads
+     | ---------------------------------------------------------------- */
+
+    public function test_moving_the_permanent_assignment_leaves_historical_display_alone(): void
+    {
+        $yesterday = $this->record('2026-09-08');
+        $this->record('2026-09-09');
+
+        $this->transfer($this->teacherAUser);
+
+        // The student's permanent assignment did move...
+        $this->assertSame($this->teacherB->id, $this->ahmed->fresh()->current_instructor_id);
+
+        // ...but 08/09 still reads as Teacher A's day.
+        $this->assertSame($this->teacherA->id, $yesterday->fresh()->instructor_id);
+        $this->assertSame('Teacher A', $yesterday->fresh()->instructor->full_name);
+
+        // And the reports agree: A keeps 08/09 only, B has 09/09 only.
+        $reports = app(ReportService::class);
+
+        $forA = $reports->build('my-attendance', [], $this->teacherAUser->fresh())['rows'];
+        $this->assertCount(1, $forA);
+        $this->assertSame('08/09/2026', $forA->first()[__('Date')]);
+
+        $forB = $reports->build('my-attendance', [], $this->teacherBUser->fresh())['rows'];
+        $this->assertCount(1, $forB);
+        $this->assertSame('09/09/2026', $forB->first()[__('Date')]);
+
+        // Rendered, Teacher B's report shows no trace of the earlier day.
+        $this->actingAs($this->teacherBUser->fresh())
+            ->get(route('instructor.reports.show', 'my-attendance'))
+            ->assertOk()
+            ->assertDontSee('08/09/2026');
     }
 }
