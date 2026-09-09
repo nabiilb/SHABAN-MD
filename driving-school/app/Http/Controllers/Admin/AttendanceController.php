@@ -7,10 +7,13 @@ use App\Http\Requests\AttendanceRequest;
 use App\Http\Requests\AttendanceTransferRequest;
 use App\Models\Attendance;
 use App\Models\Instructor;
+use App\Models\LessonTopic;
 use App\Models\Student;
+use App\Models\Vehicle;
+use App\Services\AttendanceTransferService;
 use App\Services\AuditLogger;
+use App\Services\DailyLessonService;
 use App\Services\StudentProgressService;
-use App\Services\StudentTransferService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,8 +23,17 @@ class AttendanceController extends Controller
 {
     public function __construct(
         private readonly StudentProgressService $progress,
-        private readonly StudentTransferService $transfers,
+        private readonly AttendanceTransferService $transfers,
+        private readonly DailyLessonService $lessons,
     ) {}
+
+    private function lessonOptions(): array
+    {
+        return [
+            'topics' => LessonTopic::where('is_active', true)->orderBy('sort_order')->get(),
+            'vehicles' => Vehicle::orderBy('vehicle_number')->get(),
+        ];
+    }
 
     public function index(Request $request): View
     {
@@ -29,7 +41,7 @@ class AttendanceController extends Controller
 
         $records = Attendance::query()
             ->visibleTo($request->user())
-            ->with(['student', 'instructor'])
+            ->with(['student', 'instructor', 'lesson.lessonTopic'])
             ->when($request->filled('student_id'), fn ($q) => $q->where('student_id', $request->integer('student_id')))
             ->when($request->filled('instructor_id'), fn ($q) => $q->where('instructor_id', $request->integer('instructor_id')))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
@@ -66,6 +78,7 @@ class AttendanceController extends Controller
                 'student_id' => $request->integer('student_id') ?: null,
             ]),
             'students' => Student::with('currentInstructor')->orderBy('full_name')->get(),
+            ...$this->lessonOptions(),
         ]);
     }
 
@@ -77,12 +90,15 @@ class AttendanceController extends Controller
             $student = Student::findOrFail($request->integer('student_id'));
 
             $attendance = Attendance::create([
-                ...$request->validated(),
-                // Never taken from the payload: derived from the student's
-                // current instructor (or the acting instructor).
-                'instructor_id' => $student->current_instructor_id ?? $request->user()->instructorId(),
+                ...$request->safe()->only(['student_id', 'attendance_date', 'check_in_time', 'status', 'notes']),
+                // Never taken from the payload: derived from whoever owns the
+                // student on the date being recorded.
+                'instructor_id' => $student->instructorIdOn($request->date('attendance_date'))
+                    ?? $request->user()->instructorId(),
                 'recorded_by' => $request->user()->id,
             ]);
+
+            $this->lessons->sync($attendance, $request->lessonData(), $request->user());
 
             $this->progress->recalculate($student);
             AuditLogger::created($attendance, "Attendance recorded for {$student->full_name}");
@@ -105,8 +121,9 @@ class AttendanceController extends Controller
         $this->authorize('update', $attendance);
 
         return view('admin.attendance.form', [
-            'attendance' => $attendance,
+            'attendance' => $attendance->load('lesson'),
             'students' => Student::with('currentInstructor')->orderBy('full_name')->get(),
+            ...$this->lessonOptions(),
         ]);
     }
 
@@ -116,7 +133,11 @@ class AttendanceController extends Controller
 
         DB::transaction(function () use ($request, $attendance) {
             $original = $attendance->getOriginal();
-            $attendance->update($request->validated());
+            $attendance->update($request->safe()->only([
+                'student_id', 'attendance_date', 'check_in_time', 'status', 'notes',
+            ]));
+
+            $this->lessons->sync($attendance->refresh(), $request->lessonData(), $request->user());
 
             $this->progress->recalculate($attendance->student);
             AuditLogger::updated($attendance, 'Attendance updated', $original);
@@ -131,6 +152,7 @@ class AttendanceController extends Controller
 
         DB::transaction(function () use ($attendance) {
             $student = $attendance->student;
+            $this->lessons->detach($attendance);
             $attendance->delete();
             $this->progress->recalculate($student);
 
@@ -141,8 +163,9 @@ class AttendanceController extends Controller
     }
 
     /**
-     * Same-day transfer from the attendance screen. An admin may move any
-     * student, but still only today's attendance moves with them.
+     * Same-day hand-over from the attendance screen. An admin may move any
+     * student, but still only today's attendance and its lesson move, and the
+     * student's permanent instructor is left alone.
      */
     public function transfer(AttendanceTransferRequest $request): RedirectResponse
     {
@@ -152,9 +175,9 @@ class AttendanceController extends Controller
         $this->transfers->transfer(
             $student,
             $target,
-            $request->transferReason(),
-            $request->user(),
             today(),
+            $request->user(),
+            $request->transferReason(),
             $request->input('notes'),
         );
 

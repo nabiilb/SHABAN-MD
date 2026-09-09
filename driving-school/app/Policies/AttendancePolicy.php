@@ -52,7 +52,7 @@ class AttendancePolicy
 
         return $user->isInstructor()
             && $attendance->instructor_id === $user->instructorId()
-            && $attendance->student?->current_instructor_id === $user->instructorId();
+            && $attendance->student?->instructorIdOn($attendance->attendance_date) === $user->instructorId();
     }
 
     /**
@@ -62,7 +62,7 @@ class AttendancePolicy
     public function transfer(User $user, Attendance $attendance): bool
     {
         return $attendance->student !== null
-            && $user->can('transfer', $attendance->student);
+            && $user->can('recordFor', [$attendance->student, $attendance->attendance_date]);
     }
 
     public function delete(User $user, Attendance $attendance): bool

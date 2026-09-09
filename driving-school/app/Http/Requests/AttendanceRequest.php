@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Attendance;
+use App\Models\Lesson;
 use App\Models\Setting;
 use App\Models\Student;
 use Illuminate\Foundation\Http\FormRequest;
@@ -23,11 +24,13 @@ class AttendanceRequest extends FormRequest
             return false;
         }
 
-        // The student must be one the actor is allowed to record for. This is
-        // the backend check — the form's student list is only a convenience.
+        // The student must be one the actor owns ON THE DATE BEING RECORDED.
+        // This is the backend check — the form's student list is only a
+        // convenience, and the date decides who may record it.
         $student = Student::find($this->input('student_id'));
 
-        return $student !== null && $this->user()->can('recordFor', $student);
+        return $student !== null
+            && $this->user()->can('recordFor', [$student, $this->input('attendance_date') ?: today()]);
     }
 
     public function rules(): array
@@ -38,6 +41,31 @@ class AttendanceRequest extends FormRequest
             'check_in_time' => ['nullable', 'date_format:H:i'],
             'status' => ['required', Rule::in(Attendance::STATUSES)],
             'notes' => ['nullable', 'string', 'max:1000'],
+
+            // The lesson worked on that day is part of the day's record, so a
+            // student marked present must have one.
+            'lesson_topic_id' => [
+                Rule::requiredIf(fn () => $this->input('status') === 'present'),
+                'nullable',
+                'integer',
+                Rule::exists('lesson_topics', 'id')->where('is_active', true),
+            ],
+            'performance' => ['nullable', Rule::in(Lesson::PERFORMANCES)],
+            'topic' => ['nullable', 'string', 'max:180'],
+            'duration_minutes' => ['nullable', 'integer', 'min:5', 'max:600'],
+            'vehicle_id' => ['nullable', 'integer', Rule::exists('vehicles', 'id')->whereNull('deleted_at')],
+        ];
+    }
+
+    /** The day's lesson, as posted alongside the attendance. */
+    public function lessonData(): array
+    {
+        return [
+            'lesson_topic_id' => $this->input('lesson_topic_id'),
+            'performance' => $this->input('performance'),
+            'topic' => $this->input('topic'),
+            'vehicle_id' => $this->input('vehicle_id'),
+            'duration_minutes' => $this->input('duration_minutes') ?: 60,
         ];
     }
 

@@ -42,6 +42,8 @@ class AttendanceAndLessonTest extends TestCase
             'attendance_date' => Carbon::today()->toDateString(),
             'check_in_time' => '09:00',
             'status' => 'present',
+            // A present day must say which lesson was worked on.
+            'lesson_topic_id' => LessonTopic::where('code', 'driving_practice')->value('id'),
         ], $overrides));
     }
 
@@ -83,6 +85,10 @@ class AttendanceAndLessonTest extends TestCase
             $this->checkIn([
                 'status' => $status,
                 'attendance_date' => Carbon::today()->subDays($index + 1)->toDateString(),
+                // Absent, excused and cancelled days have no lesson.
+                'lesson_topic_id' => $status === 'present'
+                    ? LessonTopic::where('code', 'driving_practice')->value('id')
+                    : null,
             ])->assertSessionHasNoErrors();
         }
 

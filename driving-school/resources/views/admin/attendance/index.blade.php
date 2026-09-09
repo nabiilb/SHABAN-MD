@@ -38,7 +38,8 @@
         <table class="table">
             <thead>
                 <tr><th>{{ __('Date') }}</th><th>{{ __('Student') }}</th><th>{{ __('Instructor') }}</th>
-                    <th>{{ __('Check-in') }}</th><th>{{ __('Status') }}</th><th>{{ __('Notes') }}</th>
+                    <th>{{ __('Check-in') }}</th><th>{{ __('Status') }}</th>
+                    <th>{{ __('Lesson') }}</th><th>{{ __('Performance') }}</th><th>{{ __('Notes') }}</th>
                     <th class="text-right">{{ __('Actions') }}</th></tr>
             </thead>
             <tbody>
@@ -49,6 +50,14 @@
                         <td class="text-sm">{{ $record->instructor?->full_name }}</td>
                         <td class="text-sm">{{ $record->check_in_time ? substr($record->check_in_time, 0, 5) : '—' }}</td>
                         <td><x-status-badge :status="$record->status" /></td>
+                        <td class="text-sm">{{ $record->lesson?->lessonTopic?->display_name ?? '—' }}</td>
+                        <td>
+                            @if ($record->lesson?->performance)
+                                <x-status-badge :status="$record->lesson->performance" />
+                            @else
+                                <span class="text-xs text-slate-400">—</span>
+                            @endif
+                        </td>
                         <td class="max-w-48 truncate text-sm text-slate-500">{{ $record->notes }}</td>
                         <td class="whitespace-nowrap text-right">
                             <a href="{{ route('admin.attendance.edit', $record) }}" class="btn-ghost btn-sm">{{ __('Edit') }}</a>
@@ -63,7 +72,7 @@
                         </td>
                     </tr>
                 @empty
-                    <x-empty-state colspan="7" />
+                    <x-empty-state colspan="9" />
                 @endforelse
             </tbody>
         </table>

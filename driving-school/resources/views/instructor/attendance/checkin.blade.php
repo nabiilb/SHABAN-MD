@@ -41,7 +41,8 @@
             </p>
 
             @unless ($alreadyIn)
-                <form method="POST" action="{{ route('instructor.attendance.store') }}" class="mt-4 space-y-3">
+                <form method="POST" action="{{ route('instructor.attendance.store') }}" class="mt-4 space-y-3"
+                      x-data="{ status: 'present' }">
                     @csrf
                     <input type="hidden" name="student_id" value="{{ $student->id }}">
                     <input type="hidden" name="attendance_date" value="{{ now()->toDateString() }}">
@@ -51,11 +52,19 @@
                         @foreach (\App\Models\Attendance::STATUSES as $index => $status)
                             <label class="flex cursor-pointer items-center justify-center rounded-lg border border-slate-300 px-2 py-2 text-xs font-semibold
                                           has-checked:border-brand-500 has-checked:bg-brand-50 has-checked:text-brand-700">
-                                <input type="radio" name="status" value="{{ $status }}" class="sr-only" @checked($index === 0)>
+                                <input type="radio" name="status" value="{{ $status }}" class="sr-only"
+                                       x-model="status" @checked($index === 0)>
                                 {{ __(ucfirst($status)) }}
                             </label>
                         @endforeach
                     </div>
+
+                    @include('partials.attendance-lesson-fields', [
+                        'topics' => $topics,
+                        'vehicles' => $vehicles,
+                        'idSuffix' => '_'.$student->id,
+                        'compact' => true,
+                    ])
 
                     <input name="notes" class="input" placeholder="{{ __('Notes (optional)') }}">
                     <button class="btn-primary w-full"><x-icon name="check" class="h-4 w-4" /> {{ __('Save Check-in') }}</button>

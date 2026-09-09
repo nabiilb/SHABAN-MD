@@ -54,15 +54,23 @@ class StudentPolicy
         return $user->isAdmin();
     }
 
-    /** Recording attendance / lessons for a student. */
-    public function recordFor(User $user, Student $student): bool
+    /**
+     * Recording attendance and the day's lesson for a student.
+     *
+     * Ownership is resolved for the date being recorded, so an instructor a
+     * student was handed to for one day can record that day, and only that day.
+     */
+    public function recordFor(User $user, Student $student, $date = null): bool
     {
         if ($user->isAdmin()) {
             return true;
         }
 
-        return $user->isInstructor()
-            && $student->current_instructor_id === $user->instructorId();
+        if (! $user->isInstructor()) {
+            return false;
+        }
+
+        return $student->instructorIdOn($date ?? today()) === $user->instructorId();
     }
 
     /** Only the instructor a student currently belongs to may transfer him. */

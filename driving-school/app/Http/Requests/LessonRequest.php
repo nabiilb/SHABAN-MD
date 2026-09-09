@@ -25,7 +25,9 @@ class LessonRequest extends FormRequest
 
         $student = Student::find($this->input('student_id'));
 
-        return $student !== null && $this->user()->can('recordFor', $student);
+        // Ownership is resolved for the lesson's own date.
+        return $student !== null
+            && $this->user()->can('recordFor', [$student, $this->input('lesson_date') ?: today()]);
     }
 
     public function rules(): array

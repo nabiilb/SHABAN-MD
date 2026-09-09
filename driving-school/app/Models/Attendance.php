@@ -19,7 +19,9 @@ class Attendance extends Model
     protected $fillable = [
         'student_id',
         'instructor_id',
+        'lesson_id',
         'transferred_from_instructor_id',
+        'attendance_transfer_id',
         'student_transfer_id',
         'attendance_date',
         'check_in_time',
@@ -50,6 +52,17 @@ class Attendance extends Model
     public function recorder(): BelongsTo
     {
         return $this->belongsTo(User::class, 'recorded_by');
+    }
+
+    /** The lesson worked on that day — part of this day's record. */
+    public function lesson(): BelongsTo
+    {
+        return $this->belongsTo(Lesson::class);
+    }
+
+    public function attendanceTransfer(): BelongsTo
+    {
+        return $this->belongsTo(AttendanceTransfer::class);
     }
 
     /** The instructor this row was moved away from, when it was transferred. */

@@ -170,51 +170,61 @@ attendance below the requirement reopens the student.
 
 ---
 
-## Transfer attendance
+## Daily attendance, lesson and hand-over
 
-Attendance is owned by the instructor recorded **on the row**, so ownership is
-per date rather than per student. Transferring a student moves that date's
-attendance with them and leaves every earlier day alone.
+Attendance is a **daily** record. Each day carries its own instructor, status,
+lesson and rating:
 
-From the attendance screen (instructor or admin), **Transfer** on a student
-picks a destination instructor, confirms, and in one transaction:
+```
+Student → attendance for a DATE → instructor for that date
+                                 → lesson worked on that day → performance
+```
 
-* closes the current assignment and opens a new one,
-* writes a `student_transfers` record,
-* re-points the student's attendance **for that date only** at the new
-  instructor, recording `transferred_from_instructor_id`, `student_transfer_id`
-  and `transferred_at` on the row.
+`attendance.lesson_id` points at the lesson taught that day, so the lesson and
+its rating belong to that day's record rather than to the student's profile.
+Marking a student **present** requires a lesson; an absent, excused or
+cancelled day has none. Editing a day updates that same lesson row instead of
+adding another, and clearing the lesson removes it.
 
-Rows are updated in place, never copied, so the student still appears exactly
-once for the day.
+### Handing a day over
 
-Ahmed is with Teacher A and is transferred to Teacher B on 09/09/2026:
+**Transfer** on the attendance screen hands **one date** to another instructor.
+It writes an `attendance_transfers` row for (student, date) and, in one
+`DB::transaction()`, re-points that date's attendance and the lesson taught on
+it. It deliberately does **not** touch the student's permanent instructor, so
+the next day they are back on their usual list with nothing to undo.
 
-| Date | Before | After |
-| --- | --- | --- |
-| 08/09/2026 | Teacher A | **Teacher A** — unchanged |
-| 09/09/2026 | Teacher A | **Teacher B** |
+| Date | Instructor | Lesson | Performance |
+| --- | --- | --- | --- |
+| 08/09/2026 | Teacher A | Parking | Excellent |
+| 09/09/2026 | **Teacher B** (handed over) | Highway Driving | Good |
+| 10/09/2026 | Teacher A (back automatically) | City Driving | Very Good |
 
-So Teacher A keeps every earlier day and stops seeing Ahmed in today's list;
-Teacher B sees today, and nothing before it. The date is fixed to the current
-day inside the controller and never read from the request, so this action
-cannot rewrite an earlier day. Only the instructor a student is currently
-assigned to — or an admin — may transfer them; the destination must be a
-different, active instructor.
+The three days stand independently — handing over 09/09 changes neither 08/09's
+lesson and rating nor 10/09's ownership.
 
-A day that has been transferred away becomes read-only for both instructors:
-`AttendancePolicy::update` requires the row's instructor *and* the student's
-current instructor to be you, which keeps handed-over history from being
-rewritten by either side.
+Ownership for a date is *permanent instructor, overridden by a hand-over for
+that date*. `Student::ownedByInstructorOn()` builds the check-in list from it
+and `Student::instructorIdOn()` answers it for a single day, which is what
+`StudentPolicy::recordFor` authorizes against. Attendance and lessons are both
+visible by the instructor recorded **on the row**, so a handed-over day moves
+whole and every other day stays put. A day handed away is read-only for both
+instructors — `AttendancePolicy::update` and `LessonPolicy::update` require the
+row's instructor *and* that date's owner to be you.
 
-The whole operation runs in one `DB::transaction()`, so a failure anywhere
-leaves no half-moved attendance, no orphaned assignment and no transfer record.
+Rows are updated in place, never copied, so a student appears exactly once per
+date; the unique key on `(student_id, attendance_date)` in `attendance_transfers`
+keeps ownership for a day unambiguous.
+
+This is distinct from the **permanent** reassignment on the admin Transfers
+page (`student_transfers`), which moves a student for good and closes their
+assignment history. That still carries its own date's attendance and lesson
+across.
 
 There is no class/section concept in this system — an instructor *is* the
-class, and `attendance.instructor_id` is what a transfer re-points. If sections
-are added later, a `section_id` on the attendance row would move alongside
-`instructor_id` in `StudentTransferService::moveAttendanceForDate()` and be
-validated in `AttendanceTransferRequest` next to the destination instructor.
+class. If sections are added later, a `section_id` on the attendance row would
+move alongside `instructor_id` in `AttendanceTransferService::moveAttendance()`
+and be validated in `AttendanceTransferRequest`.
 
 ## Modules
 
@@ -242,7 +252,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-129 tests / 527 assertions, run against MySQL (`driving_school_test`; see
+141 tests / 601 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -252,6 +262,7 @@ php artisan test
 | `StudentAuthorizationTest` | Students see only their own records and are read-only |
 | `StudentTransferTest` | Transfer authorization, list movement, preserved assignment history |
 | `AttendanceTransferTest` | The 09/09 example — today's attendance moves to Teacher B, 08/09 stays with Teacher A, visibility swaps for that day only, no duplicate row, reloading pages never recreates the old record, a mid-transfer failure rolls everything back, authorization and validation |
+| `DailyLessonAttendanceTest` | The lesson and rating belong to the day's attendance — the full 08/09 → 09/09 hand-over → 10/09 flow, editing a day reuses its lesson, the student returns to their permanent instructor the next day, each instructor sees only the lessons they taught |
 | `CompanyDebtAccountingTest` | The mandated $500 / $200 / $300 example, transaction rollback, overpayment rejection, payment reversal |
 | `AttendanceAndLessonTest` | Duplicate-check-in prevention (with the admin override), validation, vehicle ownership |
 | `StudentProgressTest` | The 24/18/6/75% example, capping, completion and reopening |

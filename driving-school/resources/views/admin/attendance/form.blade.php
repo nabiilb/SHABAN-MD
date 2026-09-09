@@ -7,7 +7,7 @@
     @csrf
     @if ($attendance->exists) @method('PUT') @endif
 
-    <div class="card max-w-2xl">
+    <div class="card max-w-2xl" x-data="{ status: @js(old('status', $attendance->status ?: 'present')) }">
         <div class="card-header"><h3 class="card-title">{{ __('Attendance') }}</h3></div>
         <div class="grid gap-4 p-5 sm:grid-cols-2">
             <x-field name="student_id" :label="__('Student')" required class="sm:col-span-2">
@@ -38,12 +38,20 @@
                         <label class="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium
                                       has-checked:border-brand-500 has-checked:bg-brand-50 has-checked:text-brand-700">
                             <input type="radio" name="status" value="{{ $status }}" class="sr-only"
-                                   @checked(old('status', $attendance->status) === $status)>
+                                   x-model="status" @checked(old('status', $attendance->status) === $status)>
                             {{ __(ucfirst($status)) }}
                         </label>
                     @endforeach
                 </div>
             </x-field>
+
+            <div class="sm:col-span-2">
+                @include('partials.attendance-lesson-fields', [
+                    'topics' => $topics,
+                    'vehicles' => $vehicles,
+                    'lesson' => $attendance->lesson,
+                ])
+            </div>
 
             <x-field name="notes" :label="__('Notes')" class="sm:col-span-2">
                 <textarea id="notes" name="notes" rows="3" class="input">{{ old('notes', $attendance->notes) }}</textarea>

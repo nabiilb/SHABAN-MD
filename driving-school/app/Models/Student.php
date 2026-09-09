@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 
 class Student extends Model
 {
@@ -85,6 +86,12 @@ class Student extends Model
         return $this->hasMany(StudentPayment::class);
     }
 
+    /** Day-scoped hand-overs of this student's attendance. */
+    public function attendanceTransfers(): HasMany
+    {
+        return $this->hasMany(AttendanceTransfer::class);
+    }
+
     /* ----------------------------------------------------------------
      | Scopes
      | ---------------------------------------------------------------- */
@@ -113,6 +120,39 @@ class Student extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('status', 'active');
+    }
+
+    /**
+     * Students whose attendance an instructor owns on a given date.
+     *
+     * That is their permanent list for the day, minus anyone handed over to
+     * someone else that date, plus anyone handed over to them. Because the
+     * override is stored per date, the list falls back to the permanent
+     * assignment on any day without a hand-over.
+     */
+    public function scopeOwnedByInstructorOn(Builder $query, ?int $instructorId, $date): Builder
+    {
+        $instructorId ??= 0;
+        $date = Carbon::parse($date)->toDateString();
+
+        return $query->where(function (Builder $q) use ($instructorId, $date) {
+            $q->where(function (Builder $mine) use ($instructorId, $date) {
+                $mine->where('students.current_instructor_id', $instructorId)
+                    ->whereDoesntHave('attendanceTransfers', fn (Builder $t) => $t->whereDate('attendance_date', $date));
+            })->orWhereHas('attendanceTransfers', fn (Builder $t) => $t
+                ->whereDate('attendance_date', $date)
+                ->where('to_instructor_id', $instructorId));
+        });
+    }
+
+    /** The instructor responsible for this student on a given date. */
+    public function instructorIdOn($date): ?int
+    {
+        $handover = $this->attendanceTransfers()
+            ->whereDate('attendance_date', Carbon::parse($date)->toDateString())
+            ->first();
+
+        return $handover?->to_instructor_id ?? $this->current_instructor_id;
     }
 
     /** Adds a `completed_days` sub-select so lists avoid N+1 progress queries. */

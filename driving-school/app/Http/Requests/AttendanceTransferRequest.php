@@ -19,7 +19,8 @@ class AttendanceTransferRequest extends FormRequest
     {
         $student = Student::find($this->input('student_id'));
 
-        return $student !== null && $this->user()->can('transfer', $student);
+        // Ownership is resolved for today, the date this action always acts on.
+        return $student !== null && $this->user()->can('recordFor', [$student, today()]);
     }
 
     protected function failedAuthorization(): void
@@ -47,7 +48,9 @@ class AttendanceTransferRequest extends FormRequest
                 return;
             }
 
-            if ($student->current_instructor_id === $target->id) {
+            // Compare against who owns the student TODAY, not their permanent
+            // instructor, so a day already handed over can be handed on again.
+            if ($student->instructorIdOn(today()) === $target->id) {
                 $validator->errors()->add('to_instructor_id', __('The student is already assigned to this instructor.'));
             }
 
@@ -55,7 +58,7 @@ class AttendanceTransferRequest extends FormRequest
                 $validator->errors()->add('to_instructor_id', __('The receiving instructor is not active.'));
             }
 
-            // An instructor can never hand a student to himself.
+            // An instructor can never hand a student to themselves.
             if ($this->user()->isInstructor() && $target->id === $this->user()->instructorId()) {
                 $validator->errors()->add('to_instructor_id', __('Select a different instructor to transfer to.'));
             }

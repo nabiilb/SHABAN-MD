@@ -169,10 +169,28 @@ class DrivingSchoolSeeder extends Seeder
                 $lastDay = Carbon::yesterday();
 
                 for ($day = 0; $day < $presentDays; $day++) {
+                    $date = $lastDay->copy()->subDays($presentDays - 1 - $day);
+
+                    // The lesson worked on that day is part of that day's
+                    // attendance record, so it is created and linked here.
+                    $lesson = Lesson::create([
+                        'student_id' => $student->id,
+                        'instructor_id' => $instructorId,
+                        'vehicle_id' => Vehicle::where('instructor_id', $instructorId)->value('id'),
+                        'lesson_topic_id' => $topicIds[($index + $day) % count($topicIds)],
+                        'lesson_date' => $date,
+                        'topic' => 'Session '.($day + 1),
+                        'performance' => ['excellent', 'very_good', 'good', 'average'][($index + $day) % 4],
+                        'duration_minutes' => 60,
+                        'status' => 'completed',
+                        'recorded_by' => $admin->id,
+                    ]);
+
                     Attendance::create([
                         'student_id' => $student->id,
                         'instructor_id' => $instructorId,
-                        'attendance_date' => $lastDay->copy()->subDays($presentDays - 1 - $day),
+                        'lesson_id' => $lesson->id,
+                        'attendance_date' => $date,
                         'check_in_time' => sprintf('%02d:%02d:00', 8 + $day % 3, ($day * 7) % 60),
                         'status' => 'present',
                         'recorded_by' => $admin->id,
@@ -187,24 +205,6 @@ class DrivingSchoolSeeder extends Seeder
                         'attendance_date' => $lastDay->copy()->subDays($presentDays + 1),
                         'status' => 'absent',
                         'notes' => 'Called in sick',
-                        'recorded_by' => $admin->id,
-                    ]);
-                }
-            }
-
-            // Lessons roughly every third training day.
-            if (! $student->lessons()->exists()) {
-                for ($lesson = 0; $lesson < max(intdiv($presentDays, 3), 1); $lesson++) {
-                    Lesson::create([
-                        'student_id' => $student->id,
-                        'instructor_id' => $instructorId,
-                        'vehicle_id' => Vehicle::where('instructor_id', $instructorId)->value('id'),
-                        'lesson_topic_id' => $topicIds[($index + $lesson) % count($topicIds)],
-                        'lesson_date' => Carbon::yesterday()->subDays($lesson * 3),
-                        'topic' => 'Session '.($lesson + 1),
-                        'performance' => ['excellent', 'good', 'average', 'needs_improvement'][($index + $lesson) % 4],
-                        'duration_minutes' => 60,
-                        'status' => 'completed',
                         'recorded_by' => $admin->id,
                     ]);
                 }

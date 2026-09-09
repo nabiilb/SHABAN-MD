@@ -145,6 +145,7 @@ class InstructorDataIsolationTest extends TestCase
                 'attendance_date' => Carbon::today()->toDateString(),
                 'check_in_time' => '09:00',
                 'status' => 'present',
+                'lesson_topic_id' => LessonTopic::where('code', 'driving_practice')->value('id'),
             ])
             ->assertRedirect();
 
@@ -164,6 +165,7 @@ class InstructorDataIsolationTest extends TestCase
                 'instructor_id' => $this->nasteexo->id, // ignored
                 'attendance_date' => Carbon::today()->toDateString(),
                 'status' => 'present',
+                'lesson_topic_id' => LessonTopic::where('code', 'driving_practice')->value('id'),
             ])
             ->assertRedirect();
 

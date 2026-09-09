@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Attendance;
 use App\Models\Instructor;
+use App\Models\LessonTopic;
 use App\Models\Role;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\AttendanceTransferService;
 use App\Services\ReportService;
 use App\Services\StudentTransferService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -104,7 +106,7 @@ class AttendanceTransferTest extends TestCase
         $this->assertSame($this->teacherB->id, $today->instructor_id);
         $this->assertSame($this->teacherA->id, $today->transferred_from_instructor_id);
         $this->assertNotNull($today->transferred_at);
-        $this->assertNotNull($today->student_transfer_id);
+        $this->assertNotNull($today->attendance_transfer_id);
     }
 
     public function test_the_previous_instructor_no_longer_sees_the_student_in_todays_list(): void
@@ -154,22 +156,25 @@ class AttendanceTransferTest extends TestCase
 
         $this->transfer($this->teacherAUser);
 
-        // Teacher A's list: no Ahmed row for today, but 08/09 is still there.
+        // Teacher A's list has no row for today — he stays in her filter
+        // dropdown, because he is still permanently her student.
         $this->actingAs($this->teacherAUser->fresh())
             ->get(route('instructor.attendance.index', ['date_from' => '2026-09-09']))
             ->assertOk()
-            ->assertDontSee('Ahmed');
+            ->assertSee(__('No records found.'));
 
+        // ...but 08/09 is still hers.
         $this->actingAs($this->teacherAUser->fresh())
             ->get(route('instructor.attendance.index', ['date_to' => '2026-09-08']))
             ->assertOk()
-            ->assertSee('Ahmed');
+            ->assertSee('08/09/2026');
 
-        // Teacher B's list and check-in screen both show him.
+        // Teacher B's list has 09/09 and nothing earlier.
         $this->actingAs($this->teacherBUser->fresh())
             ->get(route('instructor.attendance.index'))
             ->assertOk()
-            ->assertSee('Ahmed');
+            ->assertSee('09/09/2026')
+            ->assertDontSee('08/09/2026');
 
         $this->actingAs($this->teacherBUser->fresh())
             ->get(route('instructor.attendance.create'))
@@ -202,7 +207,9 @@ class AttendanceTransferTest extends TestCase
     {
         $this->transfer($this->teacherAUser)->assertRedirect();
 
-        $this->assertSame($this->teacherB->id, $this->ahmed->fresh()->current_instructor_id);
+        // Nothing to move yet, but the day now belongs to Teacher B.
+        $this->assertSame($this->teacherB->id, $this->ahmed->fresh()->instructorIdOn('2026-09-09'));
+        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->current_instructor_id);
         $this->assertSame(0, Attendance::count());
 
         // Teacher B can now check him in, and the row lands on Teacher B.
@@ -211,6 +218,7 @@ class AttendanceTransferTest extends TestCase
                 'student_id' => $this->ahmed->id,
                 'attendance_date' => '2026-09-09',
                 'status' => 'present',
+                'lesson_topic_id' => LessonTopic::where('code', 'highway_driving')->value('id'),
             ])
             ->assertRedirect();
 
@@ -221,21 +229,24 @@ class AttendanceTransferTest extends TestCase
         ]);
     }
 
-    public function test_the_student_and_the_assignment_history_move_too(): void
+    public function test_the_hand_over_is_recorded_against_the_date_only(): void
     {
         $this->transfer($this->teacherAUser);
 
-        $this->assertSame($this->teacherB->id, $this->ahmed->fresh()->current_instructor_id);
+        // The permanent assignment is deliberately untouched — this is a
+        // one-day hand-over, not a reassignment.
+        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->current_instructor_id);
 
-        $assignments = $this->ahmed->assignments()->orderBy('assigned_from')->get();
+        $assignments = $this->ahmed->assignments()->get();
         $this->assertCount(1, $assignments->where('is_current', true));
-        $this->assertSame($this->teacherB->id, $assignments->firstWhere('is_current', true)->instructor_id);
+        $this->assertSame($this->teacherA->id, $assignments->firstWhere('is_current', true)->instructor_id);
+        $this->assertDatabaseCount('student_transfers', 0);
 
-        $this->assertDatabaseHas('student_transfers', [
+        $this->assertDatabaseHas('attendance_transfers', [
             'student_id' => $this->ahmed->id,
+            'attendance_date' => '2026-09-09',
             'from_instructor_id' => $this->teacherA->id,
             'to_instructor_id' => $this->teacherB->id,
-            'transfer_date' => '2026-09-09',
         ]);
     }
 
@@ -245,7 +256,6 @@ class AttendanceTransferTest extends TestCase
         $this->transfer($this->teacherAUser);
 
         $this->assertDatabaseHas('audit_logs', ['action' => 'attendance.transferred']);
-        $this->assertDatabaseHas('audit_logs', ['action' => 'student.transferred']);
     }
 
     /* ----------------------------------------------------------------
@@ -259,8 +269,8 @@ class AttendanceTransferTest extends TestCase
         // Teacher B does not have Ahmed yet.
         $this->transfer($this->teacherBUser, $this->teacherA->id)->assertForbidden();
 
-        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->current_instructor_id);
-        $this->assertDatabaseCount('student_transfers', 0);
+        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->instructorIdOn('2026-09-09'));
+        $this->assertDatabaseCount('attendance_transfers', 0);
     }
 
     public function test_transferring_to_the_current_instructor_is_rejected(): void
@@ -268,7 +278,7 @@ class AttendanceTransferTest extends TestCase
         $this->transfer($this->teacherAUser, $this->teacherA->id)
             ->assertSessionHasErrors('to_instructor_id');
 
-        $this->assertDatabaseCount('student_transfers', 0);
+        $this->assertDatabaseCount('attendance_transfers', 0);
     }
 
     public function test_transferring_to_an_inactive_instructor_is_rejected(): void
@@ -277,7 +287,7 @@ class AttendanceTransferTest extends TestCase
 
         $this->transfer($this->teacherAUser)->assertSessionHasErrors('to_instructor_id');
 
-        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->current_instructor_id);
+        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->instructorIdOn('2026-09-09'));
     }
 
     public function test_transferring_to_a_nonexistent_instructor_is_rejected(): void
@@ -297,7 +307,7 @@ class AttendanceTransferTest extends TestCase
             ])
             ->assertForbidden();
 
-        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->current_instructor_id);
+        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->instructorIdOn('2026-09-09'));
     }
 
     public function test_an_admin_can_transfer_from_the_attendance_screen(): void
@@ -360,12 +370,12 @@ class AttendanceTransferTest extends TestCase
         });
 
         try {
-            app(StudentTransferService::class)->transfer(
+            app(AttendanceTransferService::class)->transfer(
                 $this->ahmed,
                 $this->teacherB,
-                'Instructor unavailable',
-                $this->teacherAUser,
                 Carbon::parse('2026-09-09'),
+                $this->teacherAUser,
+                'Instructor unavailable',
             );
             $this->fail('The transfer was expected to fail.');
         } catch (RuntimeException $e) {
@@ -381,9 +391,8 @@ class AttendanceTransferTest extends TestCase
         $this->assertSame($this->teacherA->id, $yesterday->fresh()->instructor_id);
         $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->current_instructor_id);
 
-        $this->assertDatabaseCount('student_transfers', 0);
+        $this->assertDatabaseCount('attendance_transfers', 0);
         $this->assertDatabaseMissing('audit_logs', ['action' => 'attendance.transferred']);
-        $this->assertDatabaseMissing('audit_logs', ['action' => 'student.transferred']);
         $this->assertSame(
             1,
             $this->ahmed->assignments()->where('is_current', true)->count(),
@@ -432,6 +441,7 @@ class AttendanceTransferTest extends TestCase
                 'student_id' => $this->ahmed->id,
                 'attendance_date' => '2026-09-09',
                 'status' => 'present',
+                'lesson_topic_id' => LessonTopic::where('code', 'parking')->value('id'),
             ])
             ->assertSessionHasErrors('attendance_date');
 
@@ -466,7 +476,7 @@ class AttendanceTransferTest extends TestCase
         // Teacher A no longer owns Ahmed, so a repeat submit is refused.
         $this->transfer($this->teacherAUser)->assertForbidden();
 
-        $this->assertDatabaseCount('student_transfers', 1);
+        $this->assertDatabaseCount('attendance_transfers', 1);
         $this->assertSame(1, Attendance::count());
         $this->assertSame($this->teacherB->id, Attendance::first()->instructor_id);
     }
@@ -475,17 +485,17 @@ class AttendanceTransferTest extends TestCase
      | The permanent reassignment must not change how history reads
      | ---------------------------------------------------------------- */
 
-    public function test_moving_the_permanent_assignment_leaves_historical_display_alone(): void
+    public function test_the_hand_over_leaves_historical_display_alone(): void
     {
         $yesterday = $this->record('2026-09-08');
         $this->record('2026-09-09');
 
         $this->transfer($this->teacherAUser);
 
-        // The student's permanent assignment did move...
-        $this->assertSame($this->teacherB->id, $this->ahmed->fresh()->current_instructor_id);
+        // The permanent assignment never moved, and...
+        $this->assertSame($this->teacherA->id, $this->ahmed->fresh()->current_instructor_id);
 
-        // ...but 08/09 still reads as Teacher A's day.
+        // ...08/09 still reads as Teacher A's day.
         $this->assertSame($this->teacherA->id, $yesterday->fresh()->instructor_id);
         $this->assertSame('Teacher A', $yesterday->fresh()->instructor->full_name);
 

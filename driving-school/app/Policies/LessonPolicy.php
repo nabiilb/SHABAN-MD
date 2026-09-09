@@ -19,8 +19,9 @@ class LessonPolicy
         }
 
         if ($user->isInstructor()) {
-            return $lesson->instructor_id === $user->instructorId()
-                || $lesson->student?->current_instructor_id === $user->instructorId();
+            // The instructor who taught it, which keeps a handed-over day with
+            // the instructor who actually took it.
+            return $lesson->instructor_id === $user->instructorId();
         }
 
         if ($user->isStudent()) {
@@ -35,6 +36,11 @@ class LessonPolicy
         return $user->isAdmin() || $user->isInstructor();
     }
 
+    /**
+     * Editing needs the lesson to still be yours for that date, so a day you
+     * have handed on becomes read-only history rather than something either
+     * instructor can rewrite.
+     */
     public function update(User $user, Lesson $lesson): bool
     {
         if ($user->isAdmin()) {
@@ -43,7 +49,7 @@ class LessonPolicy
 
         return $user->isInstructor()
             && $lesson->instructor_id === $user->instructorId()
-            && $lesson->student?->current_instructor_id === $user->instructorId();
+            && $lesson->student?->instructorIdOn($lesson->lesson_date) === $user->instructorId();
     }
 
     public function delete(User $user, Lesson $lesson): bool

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Attendance;
 use App\Models\Instructor;
+use App\Models\Lesson;
 use App\Models\Student;
 use App\Models\StudentInstructorAssignment;
 use App\Models\StudentTransfer;
@@ -76,6 +77,14 @@ class StudentTransferService
 
             $movedAttendance = $this->moveAttendanceForDate($student, $toInstructor, $date, $transfer);
 
+            // The lesson taught that day belongs to that day's attendance, so
+            // it moves with it.
+            $movedLessons = Lesson::query()
+                ->where('student_id', $student->id)
+                ->whereDate('lesson_date', $date->toDateString())
+                ->where('instructor_id', '!=', $toInstructor->id)
+                ->update(['instructor_id' => $toInstructor->id, 'updated_at' => now()]);
+
             AuditLogger::log(
                 'student.transferred',
                 $student,
@@ -86,6 +95,7 @@ class StudentTransferService
                     'reason' => $reason,
                     'transfer_date' => $date->toDateString(),
                     'attendance_records_moved' => $movedAttendance,
+                    'lessons_moved' => $movedLessons,
                 ],
             );
 
