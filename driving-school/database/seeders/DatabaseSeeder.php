@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             ReferenceDataSeeder::class,
             DrivingSchoolSeeder::class,
             FinanceSeeder::class,
+            TrainingQueueSeeder::class,
         ]);
     }
 }

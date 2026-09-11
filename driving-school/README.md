@@ -226,6 +226,60 @@ class. If sections are added later, a `section_id` on the attendance row would
 move alongside `instructor_id` in `AttendanceTransferService::moveAttendance()`
 and be validated in `AttendanceTransferRequest`.
 
+## Training queue and sessions
+
+A training-centre workflow layered on the same students and instructors:
+
+```
+waiting → training_in_progress → attendance_pending → completed
+```
+
+A teacher opens **Training Console**, picks the next student from the queue and
+a duration, and the countdown starts. `started_at` and `expected_end_at` are
+written to the database, and every screen renders the clock from those — so a
+refresh, a second tab, or the admin's board all show the same number.
+
+The teacher can **End Training** early, **Extend Time**, or **Pause** (pausing
+holds the clock and resuming pushes the expected end out by however long it was
+held, so the student keeps their full time). When the clock runs out the session
+ends by itself — but only as far as **attendance_pending**. A student is
+completed *only* once the teacher submits the evaluation, which records the
+rating (Excellent / Very Good / Good / Needs Improvement), an optional comment,
+who taught it, the real start and end times, the assigned duration and the
+evaluation timestamp. Submitting it also writes the day's attendance and lesson
+into the ordinary register, so the queue and the daily register are one system
+rather than two.
+
+### Two teachers cannot take the same student
+
+Starting a session locks the queue row and re-checks it inside the transaction,
+so the second teacher to press Start is told *"This student is already in
+training with another teacher."* Behind that, a generated column on
+`training_sessions` holds the student id only while a session is live, under a
+unique index — so even a race that slipped past the lock cannot produce two live
+sessions for one student.
+
+### Staying current without refreshing
+
+The dashboards poll a small JSON board endpoint (`…/training/board`) every few
+seconds and tick the countdown locally from the server's timestamps. That needs
+no extra infrastructure. Every state change also fires `TrainingBoardChanged`,
+which implements `ShouldBroadcast` on a `training-board` channel — so moving to
+real push (Reverb, Pusher, Ably) is a `BROADCAST_CONNECTION` change and a
+subscription, not a rewrite.
+
+### Admin
+
+**Training Board** shows the current session with its live countdown, the next
+five waiting (with a link to the full queue), everything completed today, the
+rating distribution and the average duration. **Manage Queue** adds, removes and
+reorders students and shows how long each has been waiting. **Training History**
+filters by student, teacher, date, evaluation and status.
+
+The five statuses live on the queue entry and the session — deliberately not on
+`students.status`, which already means something else (Active / Completed /
+Suspended / Cancelled for the training programme as a whole).
+
 ## Modules
 
 **Operations** — Students, Instructors, Vehicles, Attendance, Lessons,
@@ -252,7 +306,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-141 tests / 601 assertions, run against MySQL (`driving_school_test`; see
+176 tests / 717 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -262,6 +316,8 @@ php artisan test
 | `StudentAuthorizationTest` | Students see only their own records and are read-only |
 | `StudentTransferTest` | Transfer authorization, list movement, preserved assignment history |
 | `AttendanceTransferTest` | The 09/09 example — today's attendance moves to Teacher B, 08/09 stays with Teacher A, visibility swaps for that day only, no duplicate row, reloading pages never recreates the old record, a mid-transfer failure rolls everything back, authorization and validation |
+| `TrainingSessionTest` | Start, the stored countdown, early and automatic ending, extend, pause and resume, evaluation completing the student and writing the register, and the database refusing two live sessions |
+| `TrainingQueueTest` | Queue ordering, moving, removal and waiting time; teacher and admin permissions; the conflict message; the live board endpoint |
 | `DailyLessonAttendanceTest` | The lesson and rating belong to the day's attendance — the full 08/09 → 09/09 hand-over → 10/09 flow, editing a day reuses its lesson, the student returns to their permanent instructor the next day, each instructor sees only the lessons they taught |
 | `CompanyDebtAccountingTest` | The mandated $500 / $200 / $300 example, transaction rollback, overpayment rejection, payment reversal |
 | `AttendanceAndLessonTest` | Duplicate-check-in prevention (with the admin override), validation, vehicle ownership |

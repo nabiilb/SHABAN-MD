@@ -15,6 +15,9 @@
     <a href="{{ route('admin.vehicles.index') }}" class="{{ $link('admin.vehicles.*') }}">
         <x-icon name="car" /> <span>{{ __('Vehicles') }}</span>
     </a>
+    <a href="{{ route('admin.training.index') }}" class="{{ $link('admin.training.*') }}">
+        <x-icon name="clock" /> <span>{{ __('Training Board') }}</span>
+    </a>
     <a href="{{ route('admin.attendance.index') }}" class="{{ $link('admin.attendance.*') }}">
         <x-icon name="check" /> <span>{{ __('Attendance') }}</span>
     </a>

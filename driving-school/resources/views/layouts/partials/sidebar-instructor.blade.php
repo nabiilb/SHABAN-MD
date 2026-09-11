@@ -14,6 +14,9 @@
     <a href="{{ route('instructor.students.index') }}" class="{{ $link('instructor.students.*') }}">
         <x-icon name="users" /> <span>{{ __('My Students') }}</span>
     </a>
+    <a href="{{ route('instructor.training.index') }}" class="{{ $link('instructor.training.*') }}">
+        <x-icon name="clock" /> <span>{{ __('Training Console') }}</span>
+    </a>
     <a href="{{ route('instructor.attendance.index') }}" class="{{ $link('instructor.attendance.*') }}">
         <x-icon name="check" /> <span>{{ __('Attendance') }}</span>
     </a>

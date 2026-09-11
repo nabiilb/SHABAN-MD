@@ -77,6 +77,16 @@ Route::middleware(['auth', 'role:admin'])
 
         Route::resource('suppliers', Admin\SupplierController::class);
 
+        /* Training queue and sessions */
+        Route::get('training', [Admin\TrainingController::class, 'index'])->name('training.index');
+        Route::get('training/board', [Admin\TrainingController::class, 'board'])->name('training.board');
+        Route::get('training/queue', [Admin\TrainingController::class, 'queue'])->name('training.queue');
+        Route::post('training/queue', [Admin\TrainingController::class, 'storeQueueEntry'])->name('training.queue.store');
+        Route::delete('training/queue/{entry}', [Admin\TrainingController::class, 'destroyQueueEntry'])->name('training.queue.destroy');
+        Route::post('training/queue/{entry}/move', [Admin\TrainingController::class, 'moveQueueEntry'])->name('training.queue.move');
+        Route::get('training/history', [Admin\TrainingController::class, 'history'])->name('training.history');
+        Route::get('training/{session}', [Admin\TrainingController::class, 'show'])->name('training.show');
+
         /* Reports */
         Route::get('reports', [Admin\ReportController::class, 'index'])->name('reports.index');
         Route::get('reports/{report}', [Admin\ReportController::class, 'show'])->name('reports.show');
@@ -125,6 +135,16 @@ Route::middleware(['auth', 'role:instructor', 'instructor.profile'])
 
         Route::get('loans', [Instructor\LoanController::class, 'index'])->name('loans.index');
         Route::get('loans/{loan}', [Instructor\LoanController::class, 'show'])->name('loans.show');
+
+        /* Training console */
+        Route::get('training', [Instructor\TrainingController::class, 'index'])->name('training.index');
+        Route::get('training/board', [Instructor\TrainingController::class, 'board'])->name('training.board');
+        Route::post('training/start', [Instructor\TrainingController::class, 'start'])->name('training.start');
+        Route::post('training/{session}/end', [Instructor\TrainingController::class, 'end'])->name('training.end');
+        Route::post('training/{session}/extend', [Instructor\TrainingController::class, 'extend'])->name('training.extend');
+        Route::post('training/{session}/pause', [Instructor\TrainingController::class, 'pause'])->name('training.pause');
+        Route::post('training/{session}/resume', [Instructor\TrainingController::class, 'resume'])->name('training.resume');
+        Route::post('training/{session}/evaluate', [Instructor\TrainingController::class, 'evaluate'])->name('training.evaluate');
 
         Route::get('reports', [Instructor\ReportController::class, 'index'])->name('reports.index');
         Route::get('reports/{report}', [Instructor\ReportController::class, 'show'])->name('reports.show');
