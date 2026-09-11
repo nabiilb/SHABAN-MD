@@ -259,6 +259,19 @@ training with another teacher."* Behind that, a generated column on
 unique index — so even a race that slipped past the lock cannot produce two live
 sessions for one student.
 
+### A note on timestamp columns
+
+The training tables use `DATETIME` rather than `TIMESTAMP` for the times the
+application sets itself (`started_at`, `expected_end_at`, `ended_at`,
+`paused_at`, `evaluated_at`). With MySQL's `explicit_defaults_for_timestamp`
+OFF — the default under XAMPP — a `TIMESTAMP NOT NULL` column with no explicit
+default is given one implicitly: the first such column in a table gets
+`ON UPDATE CURRENT_TIMESTAMP`, and any later one gets
+`DEFAULT '0000-00-00 00:00:00'`, which strict mode rejects outright. `DATETIME`
+needs no default, which is correct here because the service always supplies
+these values. Laravel's own `created_at` / `updated_at` are nullable and
+unaffected.
+
 ### Staying current without refreshing
 
 The dashboards poll a small JSON board endpoint (`…/training/board`) every few

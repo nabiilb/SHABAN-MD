@@ -22,7 +22,11 @@ return new class extends Migration
             $table->enum('attendance_status', ['present', 'absent', 'excused', 'cancelled'])->default('present');
             $table->enum('evaluation', ['excellent', 'very_good', 'good', 'needs_improvement'])->nullable();
             $table->text('comment')->nullable();
-            $table->timestamp('evaluated_at');
+            // DATETIME, not TIMESTAMP: with explicit_defaults_for_timestamp OFF
+            // the first TIMESTAMP NOT NULL column in a table is silently given
+            // ON UPDATE CURRENT_TIMESTAMP, which would rewrite the evaluation
+            // time on any later edit of the row. The service sets this once.
+            $table->dateTime('evaluated_at');
             $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
 
