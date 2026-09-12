@@ -11,7 +11,7 @@ isolation, and a debt-versus-expense accounting model.
 | Layer | Stack |
 | --- | --- |
 | Backend | PHP 8.3+, Laravel 13, Eloquent ORM, Form Requests, Policies, Gates, Middleware, DB transactions |
-| Database | MySQL 8 / MariaDB 10.4+ (InnoDB, foreign keys, indexes, soft deletes) |
+| Database | MySQL 5.5.62+ / MariaDB 5.5+, including MySQL 8 and MariaDB 10.x (InnoDB, foreign keys, indexes, soft deletes) |
 | Frontend | Blade, Tailwind CSS v4, Alpine.js, Chart.js, Vite |
 | Reports | Server-side filters, CSV export, PDF export (dompdf), print stylesheet |
 | Languages | English and Somali (`lang/so.json`, per-user preference) |
@@ -280,10 +280,44 @@ rather than two.
 
 Starting a session locks the queue row and re-checks it inside the transaction,
 so the second teacher to press Start is told *"This student is already in
-training with another teacher."* Behind that, a generated column on
-`training_sessions` holds the student id only while a session is live, under a
-unique index — so even a race that slipped past the lock cannot produce two live
-sessions for one student.
+training with another teacher."* Behind that sit two guard columns on
+`training_sessions`, `active_student_id` and `active_instructor_id`. Each one
+carries its id while the session is live and `NULL` once it is not, and each has
+a unique index over it. NULLs do not collide in a MySQL unique index, so any
+number of finished sessions can share a student while a second *live* one is
+impossible — a race that slipped past the row lock is refused by the database
+itself, for the student and for the teacher alike.
+
+The two columns are ordinary columns, kept in step with `status` by a `saving`
+hook on the `TrainingSession` model, so no caller can change a status and forget
+them. `php artisan training:check-guards` prints the server version, confirms
+both columns and indexes exist, and reports any row whose guard values disagree
+with its status.
+
+### Supported database versions
+
+The schema installs on **MySQL 5.5.62 and newer**, and on MariaDB 5.5 and newer.
+Three things were needed for that, and they are worth knowing before adding a
+migration:
+
+* **No generated columns.** `GENERATED ALWAYS AS (…) STORED` arrived in MySQL
+  5.7.6 / MariaDB 10.2. The guard columns above used to be generated; they are
+  now plain columns the model maintains.
+* **No `Schema::hasColumn()` and friends in migrations.** Laravel's column
+  inspection selects `information_schema.columns.generation_expression`, which
+  does not exist before MySQL 5.7 — so the *guard around* a migration fails with
+  `1054 Unknown column 'generation_expression' in 'field list'` before any DDL
+  runs. `App\Support\LegacySchema` answers the same questions with
+  `SHOW COLUMNS` / `SHOW INDEX`.
+* **No `JSON` columns, and indexed strings capped at 191 characters.** The JSON
+  type is 5.7+, so `audit_logs` stores its before/after snapshots in `TEXT`
+  (the model still casts them to arrays). InnoDB before 5.7 caps an index entry
+  at 767 bytes, which a `utf8mb4 VARCHAR(255)` exceeds, so
+  `AppServiceProvider` sets `Schema::defaultStringLength(191)`.
+
+`LegacyMysqlCompatibilityTest` enforces all three: it reads every migration and
+fails on any of these constructs, and it runs `php artisan migrate` into a
+scratch database behind a hook that rejects exactly what MySQL 5.5 rejects.
 
 ### A note on timestamp columns
 
@@ -346,7 +380,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-195 tests / 793 assertions, run against MySQL (`driving_school_test`; see
+200 tests / 941 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -365,6 +399,7 @@ php artisan test
 | `StudentProgressTest` | The 24/18/6/75% example, capping, completion and reopening |
 | `AdminCrudTest` | Real create/read/update/delete against MySQL, validation, search and filters |
 | `DashboardAndReportTest` | Dashboard figures computed from the database; reports and exports |
+| `LegacyMysqlCompatibilityTest` | The schema installs on MySQL 5.5 — no migration reaches for generated columns, JSON columns or Laravel's 5.7-only column inspection, both guards are plain columns under unique indexes, and `migrate` completes behind a hook that refuses what 5.5 refuses |
 | `PageRendersTest` | Every GET route renders for its role, in English and Somali |
 
 Create the test database once:

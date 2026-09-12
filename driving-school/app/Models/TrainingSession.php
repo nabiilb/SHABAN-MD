@@ -58,6 +58,40 @@ class TrainingSession extends Model
         'ended_by',
     ];
 
+    /**
+     * active_student_id and active_instructor_id are guard columns, not data.
+     * Each carries its id while the session is live and NULL once it is not,
+     * and a unique index over each is what makes "one live session per student"
+     * and "one live session per teacher" guarantees the database enforces
+     * rather than promises.
+     *
+     * They are derived here, on every save, so no caller can set a status and
+     * forget them. (They were generated columns until MySQL 5.5 support was
+     * required; GENERATED ALWAYS needs 5.7.6.)
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $session): void {
+            $live = in_array($session->status, self::LIVE_STATUSES, true);
+
+            $session->active_student_id = $live ? $session->student_id : null;
+            $session->active_instructor_id = $live ? $session->instructor_id : null;
+        });
+
+        // A soft-deleted session is not occupying anybody either. SoftDeletes
+        // writes deleted_at with its own update, so the release is a separate,
+        // event-free write.
+        static::deleted(function (self $session): void {
+            if ($session->isForceDeleting()) {
+                return;
+            }
+
+            static::withoutEvents(fn () => static::withTrashed()
+                ->whereKey($session->getKey())
+                ->update(['active_student_id' => null, 'active_instructor_id' => null]));
+        });
+    }
+
     protected function casts(): array
     {
         return [
@@ -69,6 +103,8 @@ class TrainingSession extends Model
             'extended_minutes' => 'integer',
             'paused_seconds' => 'integer',
             'ended_early' => 'boolean',
+            'active_student_id' => 'integer',
+            'active_instructor_id' => 'integer',
         ];
     }
 

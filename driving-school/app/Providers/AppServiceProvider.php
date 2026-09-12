@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Models\Setting;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
@@ -19,6 +20,14 @@ class AppServiceProvider extends ServiceProvider
     {
         Model::preventLazyLoading(false);
         Model::unguard(false);
+
+        /*
+         * InnoDB before MySQL 5.7 caps an index entry at 767 bytes, and a
+         * utf8mb4 VARCHAR(255) is 1020 — so an indexed or unique string column
+         * of the default length cannot be created there at all. 191 * 4 fits,
+         * and is long enough for every string this application indexes.
+         */
+        Schema::defaultStringLength(191);
 
         /*
          * Coarse gates used by the Blade navigation and route groups. Fine
