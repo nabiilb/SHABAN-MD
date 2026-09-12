@@ -234,6 +234,32 @@ A training-centre workflow layered on the same students and instructors:
 waiting → training_in_progress → attendance_pending → completed
 ```
 
+### Each teacher runs their own queue
+
+A teacher's queue is **their permanent students plus anyone transferred to them
+for that date** — membership follows daily ownership, so nobody maintains a
+list by hand. `Student::ownedByInstructorOn()` resolves it, and the queue rows
+are created on demand when a board is read. The order is FIFO by `joined_at`;
+`position` only breaks ties and is what an admin's manual reorder writes to.
+A student who has finished is no longer waiting, so they drop out of the
+numbering rather than holding a place.
+
+**Only the student in training has a clock.** Waiting students have no
+`training_sessions` row at all — no `started_at`, nothing counting down. The
+clock begins at the moment `Start Training` is pressed and stops when the
+session ends.
+
+Two unique indexes make the concurrency rules the database's job rather than
+the application's: `active_student_id` (no student in two live sessions) and
+`active_instructor_id` (no teacher running two at once). Both are generated
+columns holding the id only while a session is live, so NULLs let finished
+sessions pile up freely.
+
+When the evaluation is submitted the student is completed and the first student
+still waiting in that teacher's queue **starts automatically**, with a fresh
+timer of their own — nobody picks them. Set `training_auto_start_next` to `0`
+to turn that off.
+
 A teacher opens **Training Console**, picks the next student from the queue and
 a duration, and the countdown starts. `started_at` and `expected_end_at` are
 written to the database, and every screen renders the clock from those — so a
@@ -283,9 +309,10 @@ subscription, not a rewrite.
 
 ### Admin
 
-**Training Board** shows the current session with its live countdown, the next
-five waiting (with a link to the full queue), everything completed today, the
-rating distribution and the average duration. **Manage Queue** adds, removes and
+**Training Board** shows **every teacher** side by side: who each is training
+with their own live countdown, that teacher's waiting line, and whether each
+student is **Permanent** or **Transferred** for the day. Below it sit the
+day's completions, the rating distribution and the average duration. **Manage Queue** adds, removes and
 reorders students and shows how long each has been waiting. **Training History**
 filters by student, teacher, date, evaluation and status.
 
@@ -319,7 +346,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-176 tests / 717 assertions, run against MySQL (`driving_school_test`; see
+195 tests / 793 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -330,6 +357,7 @@ php artisan test
 | `StudentTransferTest` | Transfer authorization, list movement, preserved assignment history |
 | `AttendanceTransferTest` | The 09/09 example — today's attendance moves to Teacher B, 08/09 stays with Teacher A, visibility swaps for that day only, no duplicate row, reloading pages never recreates the old record, a mid-transfer failure rolls everything back, authorization and validation |
 | `TrainingSessionTest` | Start, the stored countdown, early and automatic ending, extend, pause and resume, evaluation completing the student and writing the register, and the database refusing two live sessions |
+| `TeacherQueueTest` | The twenty queue rules — per-teacher membership, transfers in and back out the next day, one session per teacher (service and database), waiting students having no clock, 30 and 40 minute countdowns, automatic advance, FIFO numbering, transferred students training identically, two teachers at once, and cross-teacher isolation |
 | `TrainingQueueTest` | Queue ordering, moving, removal and waiting time; teacher and admin permissions; the conflict message; the live board endpoint |
 | `DailyLessonAttendanceTest` | The lesson and rating belong to the day's attendance — the full 08/09 → 09/09 hand-over → 10/09 flow, editing a day reuses its lesson, the student returns to their permanent instructor the next day, each instructor sees only the lessons they taught |
 | `CompanyDebtAccountingTest` | The mandated $500 / $200 / $300 example, transaction rollback, overpayment rejection, payment reversal |

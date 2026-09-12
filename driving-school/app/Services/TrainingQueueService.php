@@ -138,15 +138,108 @@ class TrainingQueueService
         event(new TrainingBoardChanged('queue.reordered'));
     }
 
-    /** The next student due to train, or null when the line is empty. */
+    /**
+     * Makes sure every student this teacher owns on this date has a queue row.
+     *
+     * A teacher's queue is their permanent students plus anyone transferred to
+     * them for the date, so membership follows ownership rather than a list
+     * somebody has to maintain by hand. Students transferred away for the date
+     * are left alone — they belong to the receiving teacher's queue instead.
+     *
+     * @return int how many rows were created
+     */
+    public function ensureQueuedFor(int $instructorId, $date = null, ?User $actor = null): int
+    {
+        $date = Carbon::parse($date ?? today())->toDateString();
+
+        $owned = Student::query()
+            ->ownedByInstructorOn($instructorId, $date)
+            ->where('status', 'active')
+            ->orderBy('full_name')
+            ->get();
+
+        $alreadyQueued = TrainingQueueEntry::query()
+            ->whereDate('queue_date', $date)
+            ->whereIn('student_id', $owned->pluck('id'))
+            ->pluck('student_id')
+            ->all();
+
+        $created = 0;
+
+        foreach ($owned as $student) {
+            if (in_array($student->id, $alreadyQueued, true)) {
+                continue;
+            }
+
+            TrainingQueueEntry::create([
+                'student_id' => $student->id,
+                'queue_date' => $date,
+                'position' => $this->nextPosition($date),
+                'status' => TrainingQueueEntry::WAITING,
+                'joined_at' => now(),
+                'created_by' => $actor?->id,
+            ]);
+
+            $created++;
+        }
+
+        return $created;
+    }
+
+    /**
+     * The next student due to train for a teacher, in FIFO order.
+     *
+     * Ownership is resolved for the date, so a student transferred in today is
+     * picked up exactly like a permanent one — and a student transferred away
+     * is not.
+     */
+    public function nextWaitingFor(int $instructorId, $date = null): ?TrainingQueueEntry
+    {
+        return $this->waitingFor($instructorId, $date)->first();
+    }
+
+    /**
+     * A single teacher's waiting line for a date, oldest first.
+     *
+     * @return Collection<int, TrainingQueueEntry>
+     */
+    public function waitingFor(int $instructorId, $date = null, ?int $limit = null): Collection
+    {
+        $date = Carbon::parse($date ?? today())->toDateString();
+
+        return TrainingQueueEntry::query()
+            ->whereDate('queue_date', $date)
+            ->waiting()
+            ->whereHas('student', fn ($q) => $q->ownedByInstructorOn($instructorId, $date))
+            ->ordered()
+            ->with('student.currentInstructor')
+            ->when($limit, fn ($q) => $q->limit($limit))
+            ->get();
+    }
+
+    /** Every open entry for a teacher on a date, whatever its status. */
+    public function lineForInstructor(int $instructorId, $date = null): Collection
+    {
+        $date = Carbon::parse($date ?? today())->toDateString();
+
+        return TrainingQueueEntry::query()
+            ->whereDate('queue_date', $date)
+            ->whereHas('student', fn ($q) => $q->ownedByInstructorOn($instructorId, $date))
+            ->ordered()
+            ->with('student.currentInstructor')
+            ->get();
+    }
+
+    /** The next student due to train anywhere, used by the admin overview. */
     public function nextWaiting($date = null, ?int $instructorId = null): ?TrainingQueueEntry
     {
+        if ($instructorId) {
+            return $this->nextWaitingFor($instructorId, $date);
+        }
+
         return TrainingQueueEntry::query()
             ->forDate($date)
             ->waiting()
-            ->when($instructorId, fn ($q) => $q->where(fn ($sub) => $sub
-                ->whereNull('preferred_instructor_id')
-                ->orWhere('preferred_instructor_id', $instructorId)))
             ->ordered()
             ->with('student')
             ->first();

@@ -324,26 +324,29 @@ class TrainingSessionTest extends TestCase
      | The next student
      | ---------------------------------------------------------------- */
 
-    public function test_completing_a_student_makes_the_next_one_eligible(): void
+    public function test_completing_a_student_starts_the_next_one_automatically(): void
     {
         $ahmedEntry = $this->queue($this->ahmed);
         $this->queue($this->mohamed);
 
         $session = $this->service()->start($ahmedEntry, $this->teacher, $this->teacherUser, ['assigned_duration_minutes' => 30]);
 
-        // While Ahmed trains, Mohamed is the next in line.
-        $this->assertSame('Mohamed', app(TrainingQueueService::class)->nextWaiting()?->student->full_name);
+        // While Ahmed trains, Mohamed is next — and is only waiting.
+        $this->assertSame('Mohamed', app(TrainingQueueService::class)->nextWaitingFor($this->teacher->id)?->student->full_name);
 
         $this->service()->end($session, $this->teacherUser);
         $this->service()->evaluate($session->fresh(), ['attendance_status' => 'present', 'evaluation' => 'good'], $this->teacherUser);
 
-        // Now he can actually be started.
-        $next = $this->service()->startNext($this->teacher, $this->teacherUser, ['assigned_duration_minutes' => 40]);
+        // Nobody had to pick him: he is already training.
+        $next = TrainingSession::where('student_id', $this->mohamed->id)->first();
 
-        $this->assertNotNull($next);
-        $this->assertSame($this->mohamed->id, $next->student_id);
-        $this->assertSame(40, $next->assigned_duration_minutes);
+        $this->assertNotNull($next, 'The next student should have started automatically.');
         $this->assertSame(TrainingSession::IN_PROGRESS, $next->status);
+        $this->assertNotNull($next->started_at);
+        $this->assertSame(TrainingQueueEntry::TRAINING_IN_PROGRESS, $next->queueEntry->fresh()->status);
+
+        // ...and the queue behind him is empty.
+        $this->assertNull(app(TrainingQueueService::class)->nextWaitingFor($this->teacher->id));
     }
 
     public function test_start_next_returns_nothing_when_the_queue_is_empty(): void

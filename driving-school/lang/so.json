@@ -303,5 +303,14 @@
     "All Active Sessions": "Dhammaan Fadhiyada Firfircoon",
     "This student is already in training with another teacher.": "Ardaygan horey ayuu tababar ula jiraa macalin kale.",
     "Training started for :name.": "Tababarka :name waa la bilaabay.",
-    "Training ended. Please record attendance and evaluation.": "Tababarku waa dhammaaday. Fadlan diiwaangeli xaadirinta iyo qiimeynta."
+    "Training ended. Please record attendance and evaluation.": "Tababarku waa dhammaaday. Fadlan diiwaangeli xaadirinta iyo qiimeynta.",
+    ":student completed training. Now training: :next": ":student wuu dhammeeyay tababarka. Hadda waxaa tababaraya: :next",
+    "Permanent": "Joogto",
+    "Transferred": "La wareejiyay",
+    "no timer running": "wakhti socda ma jiro",
+    "waiting": "sugaya",
+    "more waiting": "dheeraad ah oo sugaya",
+    "No active teachers.": "Macalimiin firfircoon ma jiraan.",
+    "You already have a training session in progress.": "Waxaad hore u haysataa fadhi tababar oo socda.",
+    "This student is not in your queue for this date.": "Ardaygani kuma jiro safkaaga taariikhdan."
 }

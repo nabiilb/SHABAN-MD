@@ -23,95 +23,100 @@
         <x-stat-card :label="__('Currently Waiting')" :value="$board['stats']['waiting']" icon="users" tone="amber" />
     </div>
 
-    <div class="mt-6 grid gap-4 lg:grid-cols-3">
-        {{-- CURRENT TRAINING --}}
-        <div class="card lg:col-span-2">
-            <div class="card-header">
-                <h3 class="card-title">{{ __('Current Training') }}</h3>
-                <span class="text-xs text-slate-400">{{ __('Updates automatically') }}</span>
-            </div>
-
-            <template x-if="board.current">
-                <div class="grid gap-5 p-5 sm:grid-cols-3">
-                    <div class="sm:col-span-2">
-                        <p class="text-2xl font-bold text-slate-900">
-                            👨‍🎓 <span x-text="board.current.student"></span>
-                        </p>
-                        <p class="mt-1 text-sm">
-                            <span x-show="board.current.status === 'in_progress'" class="badge-green">🟢 <span x-text="board.current.status_label"></span></span>
-                            <span x-show="board.current.status === 'paused'" class="badge-amber">⏸️ <span x-text="board.current.status_label"></span></span>
-                            <span x-show="board.current.status === 'attendance_pending'" class="badge-blue">🔵 <span x-text="board.current.status_label"></span></span>
-                        </p>
-                        <dl class="mt-4 space-y-2 text-sm">
-                            <div class="flex justify-between gap-3">
-                                <dt class="text-slate-500">👨‍🏫 {{ __('Teacher') }}</dt>
-                                <dd class="font-medium text-slate-800" x-text="board.current.instructor"></dd>
-                            </div>
-                            <div class="flex justify-between gap-3">
-                                <dt class="text-slate-500">⏰ {{ __('Started') }}</dt>
-                                <dd class="font-medium text-slate-800" x-text="board.current.started_at_human"></dd>
-                            </div>
-                            <div class="flex justify-between gap-3">
-                                <dt class="text-slate-500">⏰ {{ __('Expected End') }}</dt>
-                                <dd class="font-medium text-slate-800" x-text="board.current.expected_end_at_human"></dd>
-                            </div>
-                            <div class="flex justify-between gap-3">
-                                <dt class="text-slate-500">{{ __('Duration') }}</dt>
-                                <dd class="font-medium text-slate-800">
-                                    <span x-text="board.current.total_minutes"></span> {{ __('minutes') }}
-                                </dd>
-                            </div>
-                        </dl>
-                    </div>
-
-                    <div class="flex flex-col items-center justify-center rounded-xl border p-4"
-                         :class="isUrgent ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'">
-                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">⏱️ {{ __('Remaining') }}</p>
-                        <p class="mt-1 font-mono text-4xl font-bold tabular-nums"
-                           :class="isUrgent ? 'text-rose-700' : 'text-slate-900'" x-text="clock">00:00</p>
+    {{-- EVERY TEACHER'S QUEUE ------------------------------------------ --}}
+    <div class="mt-6 space-y-4">
+        <template x-for="teacher in board.teachers" :key="teacher.instructor_id">
+            <div class="card overflow-hidden">
+                <div class="card-header">
+                    <h3 class="card-title">👨‍🏫 {{ __('Teacher') }}: <span x-text="teacher.instructor"></span></h3>
+                    <div class="flex items-center gap-2">
+                        <span class="badge-green" x-show="teacher.current">{{ __('Training') }}</span>
+                        <span class="badge-amber">
+                            <span x-text="teacher.queue_total"></span> {{ __('waiting') }}
+                        </span>
                     </div>
                 </div>
-            </template>
 
-            <template x-if="! board.current">
-                <div class="p-10 text-center text-sm text-slate-400">{{ __('No training in progress.') }}</div>
-            </template>
-        </div>
+                <div class="grid gap-5 p-5 lg:grid-cols-2">
+                    {{-- Current training for this teacher --}}
+                    <div>
+                        <p class="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">{{ __('Current Training') }}</p>
 
-        {{-- WAITING QUEUE --}}
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">🟡 {{ __('Waiting Queue') }}</h3>
-                <span class="badge-amber" x-text="board.queue_total"></span>
-            </div>
-            <ul class="divide-y divide-slate-100">
-                <template x-for="item in board.queue" :key="item.id">
-                    <li class="flex items-center justify-between gap-3 px-5 py-3">
-                        <div class="min-w-0">
-                            <p class="truncate text-sm font-semibold text-slate-800">
-                                <span class="text-slate-400" x-text="`#${item.display_position}`"></span>
-                                <span x-text="item.student"></span>
+                        <template x-if="teacher.current">
+                            <div class="rounded-xl border p-4"
+                                 :class="teacher.current.is_overdue ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="min-w-0">
+                                        <p class="text-lg font-bold text-slate-900" x-text="teacher.current.student"></p>
+                                        <p class="mt-0.5 text-xs text-slate-500">
+                                            <span x-text="teacher.current.status_label"></span>
+                                            <template x-if="teacher.current.lesson">
+                                                <span> · {{ __('Lesson') }}: <span x-text="teacher.current.lesson"></span></span>
+                                            </template>
+                                        </p>
+                                        <p class="mt-1">
+                                            <span class="badge-blue" x-show="teacher.current.ownership === 'transferred'">{{ __('Transferred') }}</span>
+                                            <span class="badge-slate" x-show="teacher.current.ownership === 'permanent'">{{ __('Permanent') }}</span>
+                                        </p>
+                                    </div>
+                                    <div class="shrink-0 text-right">
+                                        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">⏱️ {{ __('Remaining') }}</p>
+                                        <p class="font-mono text-2xl font-bold tabular-nums text-slate-900"
+                                           x-text="clockFor(teacher.current)">00:00</p>
+                                    </div>
+                                </div>
+                                <p class="mt-3 text-xs text-slate-500">
+                                    <span x-text="teacher.current.started_at_human"></span>
+                                    → <span x-text="teacher.current.expected_end_at_human"></span>
+                                    (<span x-text="teacher.current.total_minutes"></span> {{ __('minutes') }})
+                                </p>
+                            </div>
+                        </template>
+
+                        <template x-if="! teacher.current">
+                            <div class="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-400">
+                                {{ __('No training in progress.') }}
+                            </div>
+                        </template>
+                    </div>
+
+                    {{-- That teacher's waiting line --}}
+                    <div>
+                        <p class="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">{{ __('Waiting Queue') }}</p>
+                        <ul class="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                            <template x-for="item in teacher.queue" :key="item.id">
+                                <li class="flex items-center justify-between gap-3 px-4 py-2.5">
+                                    <div class="min-w-0">
+                                        <p class="truncate text-sm font-medium text-slate-800">
+                                            <span class="text-slate-400" x-text="`#${item.display_position}`"></span>
+                                            <span x-text="item.student"></span>
+                                        </p>
+                                        <p class="text-xs text-slate-400">
+                                            <span x-text="item.waiting_minutes"></span> {{ __('min waiting') }}
+                                        </p>
+                                    </div>
+                                    <span class="shrink-0 text-[10px] font-semibold uppercase tracking-wide"
+                                          :class="item.ownership === 'transferred' ? 'text-brand-600' : 'text-slate-400'"
+                                          x-text="item.ownership_label"></span>
+                                </li>
+                            </template>
+                            <template x-if="! teacher.queue.length">
+                                <li class="px-4 py-6 text-center text-sm text-slate-400">{{ __('Nobody is waiting.') }}</li>
+                            </template>
+                        </ul>
+                        <template x-if="teacher.queue_overflow > 0">
+                            <p class="mt-2 text-xs text-slate-500">
+                                +<span x-text="teacher.queue_overflow"></span> {{ __('more waiting') }}
                             </p>
-                            <p class="text-xs text-slate-400">
-                                <span x-text="item.waiting_minutes"></span> {{ __('min waiting') }}
-                            </p>
-                        </div>
-                        <span class="badge-amber" x-text="item.status_label"></span>
-                    </li>
-                </template>
-                <template x-if="! board.queue.length">
-                    <li class="px-5 py-8 text-center text-sm text-slate-400">{{ __('Nobody is waiting.') }}</li>
-                </template>
-            </ul>
-            <div class="border-t border-slate-200 px-5 py-3">
-                <a href="{{ route('admin.training.queue') }}" class="btn-secondary btn-sm w-full">
-                    {{ __('View Full Queue') }}
-                    <template x-if="board.queue_overflow > 0">
-                        <span>(+<span x-text="board.queue_overflow"></span>)</span>
-                    </template>
-                </a>
+                        </template>
+                    </div>
+                </div>
             </div>
-        </div>
+        </template>
+
+        <template x-if="! board.teachers || ! board.teachers.length">
+            <div class="card p-10 text-center text-sm text-slate-400">{{ __('No active teachers.') }}</div>
+        </template>
     </div>
 
     {{-- All live sessions across teachers --}}

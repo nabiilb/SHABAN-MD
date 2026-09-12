@@ -145,12 +145,19 @@ class TrainingController extends Controller
 
         event(new TrainingBoardChanged('training.evaluated', ['session_id' => $session->id]));
 
-        $next = $this->queue->nextWaiting(today(), $request->user()->instructorId());
+        // Whoever the evaluation pulled in is this teacher's live session now,
+        // so report them rather than the student queued behind them.
+        $started = TrainingSession::query()
+            ->live()
+            ->where('instructor_id', $request->user()->instructorId())
+            ->with('student')
+            ->orderByDesc('started_at')
+            ->first();
 
-        return back()->with('status', $next
-            ? __(':student completed training. Next student: :next', [
+        return back()->with('status', $started
+            ? __(':student completed training. Now training: :next', [
                 'student' => $evaluation->student?->full_name,
-                'next' => $next->student?->full_name,
+                'next' => $started->student?->full_name,
             ])
             : __(':student completed training. The queue is now empty.', [
                 'student' => $evaluation->student?->full_name,

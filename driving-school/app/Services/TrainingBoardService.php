@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Instructor;
 use App\Models\TrainingEvaluation;
 use App\Models\TrainingQueueEntry;
 use App\Models\TrainingSession;
@@ -21,7 +22,8 @@ class TrainingBoardService
     ) {}
 
     /**
-     * @param  User|null  $viewer  scopes "current training" to one teacher
+     * One teacher's board: the student they are training now, and their own
+     * FIFO waiting line. A teacher never sees another teacher's queue.
      */
     public function board(?User $viewer = null, $date = null, int $queueLimit = 5): array
     {
@@ -33,9 +35,19 @@ class TrainingBoardService
 
         $instructorId = $viewer?->isInstructor() ? $viewer->instructorId() : null;
 
+        if ($instructorId) {
+            // The teacher's queue is their students for the day, so anyone
+            // transferred in appears without anybody adding them by hand.
+            $this->queue->ensureQueuedFor($instructorId, $date, $viewer);
+
+            return $this->instructorBoard($instructorId, $date, $queueLimit) + [
+                'generated_at' => now()->toIso8601String(),
+            ];
+        }
+
+        // Admin: the whole floor.
         $current = TrainingSession::query()
             ->live()
-            ->when($instructorId, fn ($q) => $q->where('instructor_id', $instructorId))
             ->whereDate('started_at', $date)
             ->with(['student', 'instructor', 'lessonTopic'])
             ->orderByDesc('started_at')
@@ -50,22 +62,83 @@ class TrainingBoardService
             'current' => $current?->toBoardArray(),
             'current_session_id' => $current?->id,
             'needs_evaluation' => $current?->status === TrainingSession::ATTENDANCE_PENDING,
-            'queue' => $waiting->map(fn (TrainingQueueEntry $entry, int $index) => [
-                'id' => $entry->id,
-                'position' => $entry->position,
-                'display_position' => $index + 1,
-                'student' => $entry->student?->full_name,
-                'student_number' => $entry->student?->student_number,
-                'status' => $entry->status,
-                'status_label' => $entry->status_label,
-                'status_icon' => $entry->status_icon,
-                'waiting_minutes' => $entry->waiting_minutes,
-                'preferred_instructor' => $entry->preferredInstructor?->full_name,
-            ])->values()->all(),
+            'queue' => $waiting->values()->map(fn (TrainingQueueEntry $entry, int $index) => $this->entryArray($entry, $index))->all(),
             'queue_total' => $waitingTotal,
             'queue_overflow' => max(0, $waitingTotal - $queueLimit),
-            'next' => $this->queue->nextWaiting($date, $instructorId)?->student?->full_name,
+            'next' => $this->queue->nextWaiting($date)?->student?->full_name,
+            'stats' => $this->stats($date),
+            'teachers' => $this->teacherBoards($date, $queueLimit),
+        ];
+    }
+
+    /** The board for a single teacher. */
+    public function instructorBoard(int $instructorId, $date = null, int $queueLimit = 5): array
+    {
+        $date = Carbon::parse($date ?? today());
+
+        $current = TrainingSession::query()
+            ->live()
+            ->where('instructor_id', $instructorId)
+            ->whereDate('started_at', $date)
+            ->with(['student', 'instructor', 'lessonTopic'])
+            ->orderByDesc('started_at')
+            ->first();
+
+        $waiting = $this->queue->waitingFor($instructorId, $date);
+
+        return [
+            'date' => $date->toDateString(),
+            'instructor_id' => $instructorId,
+            'instructor' => Instructor::find($instructorId)?->full_name,
+            'current' => $current ? $current->toBoardArray() + [
+                'ownership' => $current->student?->current_instructor_id === $instructorId ? 'permanent' : 'transferred',
+            ] : null,
+            'current_session_id' => $current?->id,
+            'needs_evaluation' => $current?->status === TrainingSession::ATTENDANCE_PENDING,
+            'queue' => $waiting->take($queueLimit)->values()
+                ->map(fn (TrainingQueueEntry $entry, int $index) => $this->entryArray($entry, $index, $instructorId))->all(),
+            'queue_total' => $waiting->count(),
+            'queue_overflow' => max(0, $waiting->count() - $queueLimit),
+            'next' => $waiting->first()?->student?->full_name,
             'stats' => $this->stats($date, $instructorId),
+        ];
+    }
+
+    /** Every active teacher's board, for the admin overview. */
+    public function teacherBoards($date = null, int $queueLimit = 5): array
+    {
+        $date = Carbon::parse($date ?? today());
+
+        return Instructor::active()
+            ->orderBy('full_name')
+            ->get()
+            ->map(function (Instructor $instructor) use ($date, $queueLimit) {
+                $this->queue->ensureQueuedFor($instructor->id, $date);
+
+                return $this->instructorBoard($instructor->id, $date, $queueLimit);
+            })
+            ->all();
+    }
+
+    /**
+     * One waiting-list row. `display_position` is the FIFO number within this
+     * teacher's line, so a completed student never occupies a position.
+     */
+    protected function entryArray(TrainingQueueEntry $entry, int $index, ?int $instructorId = null): array
+    {
+        return [
+            'id' => $entry->id,
+            'position' => $entry->position,
+            'display_position' => $index + 1,
+            'student' => $entry->student?->full_name,
+            'student_number' => $entry->student?->student_number,
+            'status' => $entry->status,
+            'status_label' => $entry->status_label,
+            'status_icon' => $entry->status_icon,
+            'waiting_minutes' => $entry->waiting_minutes,
+            'ownership' => $entry->ownershipOn($instructorId),
+            'ownership_label' => $entry->ownershipOn($instructorId) === 'permanent' ? __('Permanent') : __('Transferred'),
+            'permanent_instructor' => $entry->student?->currentInstructor?->full_name,
         ];
     }
 
@@ -91,7 +164,9 @@ class TrainingBoardService
             'awaiting_evaluation' => TrainingSession::query()->where('status', TrainingSession::ATTENDANCE_PENDING)
                 ->whereDate('started_at', $date)
                 ->when($instructorId, fn ($q) => $q->where('instructor_id', $instructorId))->count(),
-            'waiting' => TrainingQueueEntry::forDate($date)->waiting()->count(),
+            'waiting' => $instructorId
+                ? $this->queue->waitingFor($instructorId, $date)->count()
+                : TrainingQueueEntry::forDate($date)->waiting()->count(),
             'average_minutes' => $averageMinutes ? (int) round($averageMinutes) : null,
         ];
     }

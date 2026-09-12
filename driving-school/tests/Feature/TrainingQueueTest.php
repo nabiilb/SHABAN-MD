@@ -133,16 +133,24 @@ class TrainingQueueTest extends TestCase
         Carbon::setTestNow();
     }
 
-    public function test_the_next_waiting_student_respects_a_preferred_teacher(): void
+    public function test_each_teachers_queue_holds_only_their_own_students(): void
     {
         $other = $this->makeInstructor('Macallin Y');
 
-        $this->queue()->add($this->students['Mohamed'], $this->admin, ['preferred_instructor_id' => $other->id]);
+        // Mohamed belongs to the other teacher; Ali stays with ours.
+        $this->students['Mohamed']->forceFill(['current_instructor_id' => $other->id])->save();
+
+        $this->queue()->add($this->students['Mohamed'], $this->admin);
         $this->queue()->add($this->students['Ali'], $this->admin);
 
-        // Mohamed is first in line but asked for the other teacher.
-        $this->assertSame('Ali', $this->queue()->nextWaiting(null, $this->teacher->id)?->student->full_name);
-        $this->assertSame('Mohamed', $this->queue()->nextWaiting(null, $other->id)?->student->full_name);
+        $this->assertSame('Ali', $this->queue()->nextWaitingFor($this->teacher->id)?->student->full_name);
+        $this->assertSame('Mohamed', $this->queue()->nextWaitingFor($other->id)?->student->full_name);
+
+        // And neither queue contains the other's student.
+        $this->assertSame(
+            ['Ali'],
+            $this->queue()->waitingFor($this->teacher->id)->map(fn ($e) => $e->student->full_name)->all(),
+        );
     }
 
     /* ----------------------------------------------------------------

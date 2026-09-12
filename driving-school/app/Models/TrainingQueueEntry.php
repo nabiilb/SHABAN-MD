@@ -95,9 +95,25 @@ class TrainingQueueEntry extends Model
         return $query->whereIn('status', self::OPEN_STATUSES);
     }
 
+    /**
+     * FIFO: whoever joined the line first trains first. `position` only breaks
+     * ties, and is what an admin's manual reorder writes to.
+     */
     public function scopeOrdered(Builder $query): Builder
     {
-        return $query->orderBy('position')->orderBy('id');
+        return $query->orderBy('position')->orderBy('joined_at')->orderBy('id');
+    }
+
+    /** Whether this student is the teacher's own, or here on a transfer. */
+    public function ownershipOn(?int $instructorId = null): string
+    {
+        $permanent = $this->student?->current_instructor_id;
+
+        if ($instructorId === null) {
+            $instructorId = $this->student?->instructorIdOn($this->queue_date);
+        }
+
+        return $permanent === $instructorId ? 'permanent' : 'transferred';
     }
 
     /* ----------------------------------------------------------------

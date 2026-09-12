@@ -26,12 +26,14 @@
             <div class="grid gap-6 p-5 lg:grid-cols-3">
                 <div class="lg:col-span-2">
                     <p class="text-3xl font-bold text-slate-900" x-text="board.current.student"></p>
-                    <p class="mt-1 text-sm text-slate-500">
+                    <p class="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
                         <span x-text="board.current.student_number"></span>
-                        · {{ __('Teacher') }}: <span x-text="board.current.instructor"></span>
+                        <span>· {{ __('Teacher') }}: <span x-text="board.current.instructor"></span></span>
                         <template x-if="board.current.lesson">
-                            <span> · {{ __('Lesson') }}: <span x-text="board.current.lesson"></span></span>
+                            <span>· {{ __('Lesson') }}: <span x-text="board.current.lesson"></span></span>
                         </template>
+                        <span class="badge-blue" x-show="board.current.ownership === 'transferred'">{{ __('Transferred') }}</span>
+                        <span class="badge-slate" x-show="board.current.ownership === 'permanent'">{{ __('Permanent') }}</span>
                     </p>
 
                     <dl class="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
@@ -213,9 +215,15 @@
                             </p>
                             <p class="text-xs text-slate-400">
                                 <span x-text="item.waiting_minutes"></span> {{ __('min waiting') }}
+                                · {{ __('no timer running') }}
                             </p>
                         </div>
-                        <span class="badge-amber" x-text="item.status_label"></span>
+                        <div class="flex shrink-0 flex-col items-end gap-1">
+                            <span class="badge-amber" x-text="item.status_label"></span>
+                            <span class="text-[10px] font-semibold uppercase tracking-wide"
+                                  :class="item.ownership === 'transferred' ? 'text-brand-600' : 'text-slate-400'"
+                                  x-text="item.ownership_label"></span>
+                        </div>
                     </li>
                 </template>
                 <template x-if="! board.queue.length">

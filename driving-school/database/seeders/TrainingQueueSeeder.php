@@ -22,12 +22,17 @@ class TrainingQueueSeeder extends Seeder
             ['value' => '30', 'group' => 'training', 'label' => 'Default Training Minutes'],
         );
 
+        // The next waiting student starts automatically when one finishes, so
+        // nobody has to pick them.
+        Setting::updateOrCreate(
+            ['key' => 'training_auto_start_next'],
+            ['value' => '1', 'group' => 'training', 'label' => 'Auto-start Next Student'],
+        );
+
         $admin = User::where('email', 'admin@example.com')->first();
 
-        $students = Student::where('status', 'active')
-            ->orderBy('full_name')
-            ->limit(6)
-            ->get();
+        // Every active student joins their own teacher's queue for today.
+        $students = Student::where('status', 'active')->orderBy('full_name')->get();
 
         foreach ($students->values() as $index => $student) {
             TrainingQueueEntry::updateOrCreate(
@@ -37,7 +42,8 @@ class TrainingQueueSeeder extends Seeder
                     'status' => TrainingQueueEntry::WAITING,
                     'preferred_instructor_id' => null,
                     'assigned_duration_minutes' => $index % 2 === 0 ? 30 : 40,
-                    // Staggered arrivals so the waiting times look real.
+                    // Staggered arrivals so the FIFO order and waiting times
+                    // look like a real morning.
                     'joined_at' => Carbon::now()->subMinutes(($students->count() - $index) * 3),
                     'created_by' => $admin?->id,
                 ],

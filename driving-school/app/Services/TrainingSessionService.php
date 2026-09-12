@@ -61,10 +61,21 @@ class TrainingSessionService
             }
 
             // A student cannot be live in two sessions, whatever the queue says.
-            $live = TrainingSession::where('student_id', $entry->student_id)->live()->exists();
-
-            if ($live) {
+            if (TrainingSession::where('student_id', $entry->student_id)->live()->exists()) {
                 throw new RuntimeException(__('This student is already in training with another teacher.'));
+            }
+
+            // Nor can a teacher run two at once — one student at a time.
+            if (TrainingSession::where('instructor_id', $instructor->id)->live()->exists()) {
+                throw new RuntimeException(__('You already have a training session in progress.'));
+            }
+
+            // The student must actually belong to this teacher on this date,
+            // whether permanently or through a transfer for the day.
+            $owner = $entry->student?->instructorIdOn($entry->queue_date);
+
+            if ($owner !== $instructor->id) {
+                throw new RuntimeException(__('This student is not in your queue for this date.'));
             }
 
             $minutes = (int) ($options['assigned_duration_minutes']
@@ -87,8 +98,15 @@ class TrainingSessionService
                     'created_by' => $actor->id,
                 ]);
             } catch (QueryException $e) {
-                // The unique index caught a race the lock somehow missed.
-                throw new RuntimeException(__('This student is already in training with another teacher.'), 0, $e);
+                // A unique index caught a race the lock somehow missed: either
+                // this student or this teacher already has a live session.
+                throw new RuntimeException(
+                    str_contains($e->getMessage(), 'active_instructor')
+                        ? __('You already have a training session in progress.')
+                        : __('This student is already in training with another teacher.'),
+                    0,
+                    $e,
+                );
             }
 
             $entry->update([
@@ -106,10 +124,10 @@ class TrainingSessionService
         });
     }
 
-    /** Starts the next waiting student, if there is one. */
+    /** Starts the next student in this teacher's own FIFO queue. */
     public function startNext(Instructor $instructor, User $actor, array $options = [], $date = null): ?TrainingSession
     {
-        $next = $this->queue->nextWaiting($date, $instructor->id);
+        $next = $this->queue->nextWaitingFor($instructor->id, $date);
 
         return $next ? $this->start($next, $instructor, $actor, $options) : null;
     }
@@ -263,8 +281,41 @@ class TrainingSessionService
                 'rating' => $evaluation->rating_label,
             ]), null, $evaluation->getAttributes());
 
+            // The teacher should not have to pick the next student: the first
+            // student still waiting in their queue starts straight away, with
+            // a fresh timer of their own.
+            $this->advanceQueue($session, $actor);
+
             return $evaluation->load(['student', 'instructor', 'session']);
         });
+    }
+
+    /**
+     * Starts the next waiting student for the teacher who just finished one.
+     *
+     * Only the student who reaches "training now" gets a clock — everybody
+     * behind them is still only waiting, with no started_at and nothing
+     * counting down.
+     */
+    public function advanceQueue(TrainingSession $finished, User $actor): ?TrainingSession
+    {
+        if (! Setting::flag('training_auto_start_next', true)) {
+            return null;
+        }
+
+        $date = $finished->queueEntry?->queue_date ?? $finished->started_at?->copy()->startOfDay() ?? today();
+        $next = $this->queue->nextWaitingFor($finished->instructor_id, $date);
+
+        if (! $next) {
+            return null;
+        }
+
+        return $this->start($next, $finished->instructor, $actor, [
+            // The next student keeps whatever duration was set for them,
+            // falling back to the one just used.
+            'assigned_duration_minutes' => $next->assigned_duration_minutes ?: $finished->assigned_duration_minutes,
+            'lesson_topic_id' => null,
+        ]);
     }
 
     /**

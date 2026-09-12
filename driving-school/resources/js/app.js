@@ -69,6 +69,8 @@ window.trainingBoard = function (config) {
         endpoint: config.endpoint,
         pollMs: config.pollMs || 4000,
         remaining: 0,
+        // Ticks every second so every teacher panel recomputes its own clock.
+        now: Date.now(),
         toasts: [],
         warned: {},
         lastSignature: '',
@@ -84,6 +86,7 @@ window.trainingBoard = function (config) {
 
         /** Seconds left, recomputed from the server timestamp every second. */
         tick() {
+            this.now = Date.now();
             const current = this.board.current;
             if (!current || !current.expected_end_at) { this.remaining = 0; return; }
             if (current.status === 'paused') { this.remaining = current.remaining_seconds; return; }
@@ -150,6 +153,21 @@ window.trainingBoard = function (config) {
             const id = Date.now() + Math.random();
             this.toasts.push({ id, tone, message });
             setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== id); }, 6000);
+        },
+
+        /**
+         * mm:ss for any session, from its server-side expected_end_at. Used by
+         * the admin board, where several teachers each have their own clock.
+         * A student who is only waiting has no session and therefore no clock.
+         */
+        clockFor(session) {
+            if (!session || !session.expected_end_at) return '00:00';
+
+            const left = session.status === 'in_progress'
+                ? Math.max(0, Math.round((new Date(session.expected_end_at) - this.now) / 1000))
+                : session.remaining_seconds;
+
+            return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
         },
 
         get clock() {
