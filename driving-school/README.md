@@ -99,6 +99,34 @@ financial reports or any debt that does not touch his own work; audit logs;
 user management; settings. Raising, editing, paying, cancelling and deleting
 stay with the admin for both modules — an instructor reads, and that is all.
 
+**Adding fuel.** An instructor records a fill-up for one of their own vehicles
+from **+ Add Fuel**. Recording fuel is not a note — it writes into the company
+ledger, an expense for cash or a debt for credit — so a submission waits as
+`pending` and posts **nothing** until an admin approves it from the admin Fuel
+page. Approving posts the ledger entry in the same transaction as the approval,
+so the two can never come apart; rejecting posts nothing at all, and approving
+twice is refused rather than charging the company twice. The admin's own entries
+are unchanged: `status` defaults to `approved`, so an admin's record posts on
+save exactly as it always did.
+
+The accounting itself moved out of `Admin\FuelController` into `FuelService`,
+which both roles now call — the only difference between them is the
+`requiresApproval` flag. `FuelService` delegates credit purchases to the
+existing `DebtService`, so there is one definition of "a debt is not an expense
+until it is paid" rather than two.
+
+The vehicle is validated against `Vehicle::visibleTo()`, not against the fleet,
+so a foreign `vehicle_id` posted by hand fails validation before it reaches the
+service; `instructor_id` comes from the signed-in user and is never read from
+the request; and `status` and `amount` are force-filled by the service, never
+mass-assigned, so a request cannot post itself approved or name its own total.
+Each form carries a `submission_token` under a unique index, so a double click,
+a refresh or a retried POST cannot record the same fuel twice.
+
+There is no instructor path to raise an arbitrary company debt: the only
+instructor-originated debt is fuel taken on credit, and it appears through the
+approval above.
+
 Both pages are filtered by `FuelRecord::visibleTo()` and
 `CompanyDebt::visibleTo()`, the same scopes the admin lists use (they simply
 return everything for an admin), and the record-level policy asks those same
@@ -429,7 +457,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-238 tests / 1,109 assertions, run against MySQL (`driving_school_test`; see
+255 tests / 1,224 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -449,6 +477,7 @@ php artisan test
 | `AdminCrudTest` | Real create/read/update/delete against MySQL, validation, search and filters |
 | `DashboardAndReportTest` | Dashboard figures computed from the database; reports and exports |
 | `TeacherQueueVisibilityTest` | The admin board and the teacher console describe one queue — two waiting students are counted by the admin and offered to the teacher, order and live positions match, a completed student keeps no position, claiming one promotes the next, two teachers cannot claim the same student, and no waiting student is invisible to every console |
+| `InstructorFuelEntryTest` | An instructor records fuel — pending, own vehicle only, nothing posted until approval; approving writes the expense (cash) or the debt (credit); a failed ledger write rolls the approval back; foreign vehicle ids, bad numbers and future dates refused; a resubmitted form records nothing twice; the resulting debt visible to its instructor and the admin alone; and the admin's save-and-pay flow unchanged |
 | `InstructorFinanceAccessTest` | Fuel and Company Debts for instructors — own records only, another instructor's refused by id, every write still admin-only, the menu carries both entries and highlights the open one, empty states, and the admin's own pages unchanged |
 | `TeacherAddToQueueTest` | A teacher adds a student to the line — waiting not training, correct position, visible to the admin, refused when already waiting, training or pending, a finished student may rejoin, the unique key stops a double add, positions stay right once somebody completes, and a teacher gains no admin queue controls |
 | `LegacyMysqlCompatibilityTest` | The schema installs on MySQL 5.5 — no migration reaches for generated columns, JSON columns or Laravel's 5.7-only column inspection, both guards are plain columns under unique indexes, and `migrate` completes behind a hook that refuses what 5.5 refuses |

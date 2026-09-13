@@ -134,18 +134,23 @@ class InstructorFinanceAccessTest extends TestCase
         $this->actingAs($this->xasanUser)->get(route('instructor.fuel.show', $someoneElses))->assertForbidden();
     }
 
-    /* D — Fuel: no admin action is reachable. */
-    public function test_an_instructor_cannot_create_edit_or_delete_fuel(): void
+    /**
+     * D — an instructor records fuel (pending, reviewed by an admin) but edits,
+     * deletes and approves nothing, and reaches no admin page.
+     */
+    public function test_an_instructor_cannot_edit_delete_or_approve_fuel(): void
     {
         $record = $this->fuel('FUEL-0001', $this->xasansCar, $this->xasan);
 
-        $this->assertFalse($this->xasanUser->can('create', FuelRecord::class));
+        $this->assertTrue($this->xasanUser->can('create', FuelRecord::class));
         $this->assertFalse($this->xasanUser->can('update', $record));
         $this->assertFalse($this->xasanUser->can('delete', $record));
+        $this->assertFalse($this->xasanUser->can('approve', $record));
 
         $this->actingAs($this->xasanUser)->get(route('admin.fuel.create'))->assertForbidden();
         $this->actingAs($this->xasanUser)->get(route('admin.fuel.index'))->assertForbidden();
         $this->actingAs($this->xasanUser)->delete(route('admin.fuel.destroy', $record))->assertForbidden();
+        $this->actingAs($this->xasanUser)->post(route('admin.fuel.approve', $record))->assertForbidden();
 
         $this->assertSame(1, FuelRecord::count());
     }

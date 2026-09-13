@@ -4,23 +4,22 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\FuelRecordRequest;
-use App\Models\CompanyExpense;
-use App\Models\ExpenseCategory;
+use App\Http\Requests\RejectFuelRequest;
 use App\Models\FuelRecord;
 use App\Models\Instructor;
 use App\Models\Supplier;
 use App\Models\Vehicle;
 use App\Services\AuditLogger;
-use App\Services\DebtService;
-use App\Support\DocumentNumber;
+use App\Services\FuelService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
+use RuntimeException;
 
 class FuelController extends Controller
 {
-    public function __construct(private readonly DebtService $debts) {}
+    public function __construct(private readonly FuelService $fuel) {}
 
     public function index(Request $request): View
     {
@@ -31,6 +30,7 @@ class FuelController extends Controller
             ->when($request->filled('vehicle_id'), fn ($q) => $q->where('vehicle_id', $request->integer('vehicle_id')))
             ->when($request->filled('instructor_id'), fn ($q) => $q->where('instructor_id', $request->integer('instructor_id')))
             ->when($request->filled('supplier_id'), fn ($q) => $q->where('supplier_id', $request->integer('supplier_id')))
+            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('date_from'), fn ($q) => $q->whereDate('fuel_date', '>=', $request->date('date_from')))
             ->when($request->filled('date_to'), fn ($q) => $q->whereDate('fuel_date', '<=', $request->date('date_to')));
 
@@ -59,62 +59,45 @@ class FuelController extends Controller
     }
 
     /**
-     * Fuel paid in cash books an expense straight away. Fuel taken on credit
-     * books a company DEBT instead — no cash has left the company yet.
+     * Unchanged for the admin: an entry they make is approved on the spot and
+     * posts to the ledger in the same transaction. The accounting itself now
+     * lives in FuelService, which the instructor console uses too.
      */
     public function store(FuelRecordRequest $request): RedirectResponse
     {
         $this->authorize('create', FuelRecord::class);
 
-        DB::transaction(function () use ($request) {
-            $data = $request->validated();
-            $amount = round((float) $data['liters'] * (float) $data['price_per_liter'], 2);
-            $isCredit = (bool) ($data['is_credit'] ?? false);
-
-            $fuel = FuelRecord::create([
-                ...$data,
-                'fuel_number' => DocumentNumber::next(FuelRecord::class, 'fuel_number', 'FUEL'),
-                'amount' => $amount,
-                'is_credit' => $isCredit,
-                'created_by' => $request->user()->id,
-            ]);
-
-            $categoryId = ExpenseCategory::where('code', 'fuel')->value('id')
-                ?? ExpenseCategory::firstOrCreate(['code' => 'fuel'], ['name' => 'Fuel', 'name_so' => 'Shidaal'])->id;
-
-            if ($isCredit) {
-                $debt = $this->debts->createDebt([
-                    'supplier_id' => $data['supplier_id'],
-                    'expense_category_id' => $categoryId,
-                    'vehicle_id' => $fuel->vehicle_id,
-                    'description' => __('Fuel on credit — :number', ['number' => $fuel->fuel_number]),
-                    'original_amount' => $amount,
-                    'debt_date' => $data['fuel_date'],
-                    'due_date' => null,
-                    'notes' => $data['notes'] ?? null,
-                ], $request->user());
-
-                $fuel->forceFill(['company_debt_id' => $debt->id])->save();
-            } else {
-                $expense = CompanyExpense::create([
-                    'expense_number' => DocumentNumber::next(CompanyExpense::class, 'expense_number', 'EXP'),
-                    'expense_category_id' => $categoryId,
-                    'vehicle_id' => $fuel->vehicle_id,
-                    'supplier_id' => $fuel->supplier_id,
-                    'description' => __('Fuel — :number', ['number' => $fuel->fuel_number]),
-                    'amount' => $amount,
-                    'expense_date' => $data['fuel_date'],
-                    'payment_method' => $data['payment_method'],
-                    'created_by' => $request->user()->id,
-                ]);
-
-                $fuel->forceFill(['company_expense_id' => $expense->id])->save();
-            }
-
-            AuditLogger::created($fuel, "Fuel record {$fuel->fuel_number} of {$amount} added");
-        });
+        $this->fuel->record($request->validated(), $request->user(), requiresApproval: false);
 
         return redirect()->route('admin.fuel.index')->with('status', __('Fuel record saved.'));
+    }
+
+    /** Releases an instructor's submission into the company ledger. */
+    public function approve(Request $request, FuelRecord $fuel): RedirectResponse
+    {
+        $this->authorize('approve', $fuel);
+
+        try {
+            $this->fuel->approve($fuel, $request->user());
+        } catch (RuntimeException $e) {
+            return back()->withErrors(['fuel' => $e->getMessage()]);
+        }
+
+        return back()->with('status', __('Fuel record approved.'));
+    }
+
+    /** Refuses a submission. Nothing was posted, so nothing is unwound. */
+    public function reject(RejectFuelRequest $request, FuelRecord $fuel): RedirectResponse
+    {
+        $this->authorize('approve', $fuel);
+
+        try {
+            $this->fuel->reject($fuel, $request->user(), $request->input('rejection_reason'));
+        } catch (RuntimeException $e) {
+            return back()->withErrors(['fuel' => $e->getMessage()]);
+        }
+
+        return back()->with('status', __('Fuel record rejected.'));
     }
 
     public function show(FuelRecord $fuel): View

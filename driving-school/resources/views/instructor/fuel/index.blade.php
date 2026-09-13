@@ -6,7 +6,15 @@
 
 @section('content')
 <x-page-header :title="__('Fuel Records')"
-               :subtitle="__('Fill-ups recorded against you, and fuel bought for the vehicles assigned to you.')" />
+               :subtitle="__('Fill-ups recorded against you, and fuel bought for the vehicles assigned to you.')">
+    @can('create', \App\Models\FuelRecord::class)
+        <x-slot:actions>
+            <a href="{{ route('instructor.fuel.create') }}" class="btn-primary">
+                <x-icon name="plus" class="h-4 w-4" /> {{ __('Add Fuel') }}
+            </a>
+        </x-slot:actions>
+    @endcan
+</x-page-header>
 
 <div class="mb-4 grid gap-4 sm:grid-cols-2">
     <x-stat-card :label="__('Total Fuel Cost')" :value="$c.number_format($totals['amount'], 2)" icon="fuel" tone="rose" />
@@ -36,7 +44,7 @@
             <thead>
                 <tr><th>{{ __('Number') }}</th><th>{{ __('Date') }}</th><th>{{ __('Vehicle') }}</th>
                     <th>{{ __('Liters') }}</th><th>{{ __('Price/L') }}</th><th>{{ __('Paid') }}</th>
-                    <th class="text-right">{{ __('Amount') }}</th></tr>
+                    <th>{{ __('Status') }}</th><th class="text-right">{{ __('Amount') }}</th></tr>
             </thead>
             <tbody>
                 @forelse ($records as $record)
@@ -53,10 +61,16 @@
                                 <span class="badge-green">{{ __('Cash') }}</span>
                             @endif
                         </td>
+                        <td>
+                            <x-status-badge :status="$record->status" />
+                            @if ($record->status === \App\Models\FuelRecord::REJECTED && $record->rejection_reason)
+                                <span class="block text-xs text-slate-400">{{ $record->rejection_reason }}</span>
+                            @endif
+                        </td>
                         <td class="whitespace-nowrap text-right font-semibold">{{ $c }}{{ number_format((float) $record->amount, 2) }}</td>
                     </tr>
                 @empty
-                    <x-empty-state colspan="7" :message="__('No fuel records found.')" />
+                    <x-empty-state colspan="8" :message="__('No fuel records found.')" />
                 @endforelse
             </tbody>
         </table>

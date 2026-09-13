@@ -28,6 +28,15 @@
             <dd class="text-lg font-bold text-slate-900">{{ $c }}{{ number_format((float) $fuel->amount, 2) }}</dd></div>
         <div><dt class="text-sm text-slate-500">{{ __('Odometer') }}</dt>
             <dd class="font-semibold text-slate-800">{{ $fuel->odometer ? number_format($fuel->odometer) : '—' }}</dd></div>
+        <div><dt class="text-sm text-slate-500">{{ __('Status') }}</dt>
+            <dd>
+                <x-status-badge :status="$fuel->status" />
+                @if ($fuel->status === \App\Models\FuelRecord::PENDING)
+                    <span class="block text-xs text-slate-400">{{ __('Waiting for an admin to approve it.') }}</span>
+                @elseif ($fuel->rejection_reason)
+                    <span class="block text-xs text-slate-400">{{ $fuel->rejection_reason }}</span>
+                @endif
+            </dd></div>
         <div><dt class="text-sm text-slate-500">{{ __('Paid') }}</dt>
             <dd>
                 @if ($fuel->is_credit)

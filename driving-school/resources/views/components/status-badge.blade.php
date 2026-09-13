@@ -2,10 +2,10 @@
 
 @php
     $tone = match ($status) {
-        'active', 'present', 'completed', 'paid', 'available', 'excellent', 'good' => 'badge-green',
+        'active', 'present', 'completed', 'paid', 'available', 'excellent', 'good', 'approved' => 'badge-green',
         'partially_paid', 'in_training', 'average', 'scheduled' => 'badge-blue',
-        'suspended', 'excused', 'maintenance', 'outstanding', 'needs_improvement' => 'badge-amber',
-        'cancelled', 'absent', 'overdue', 'poor' => 'badge-rose',
+        'suspended', 'excused', 'maintenance', 'outstanding', 'needs_improvement', 'pending' => 'badge-amber',
+        'cancelled', 'absent', 'overdue', 'poor', 'rejected' => 'badge-rose',
         default => 'badge-slate',
     };
 @endphp

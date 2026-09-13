@@ -12,6 +12,16 @@ class FuelRecord extends Model
 {
     use HasFactory, SoftDeletes;
 
+    /** Submitted by an instructor; no ledger entry exists yet. */
+    public const PENDING = 'pending';
+
+    /** Posted to the ledger — an expense for cash, a debt for credit. */
+    public const APPROVED = 'approved';
+
+    public const REJECTED = 'rejected';
+
+    public const STATUSES = [self::PENDING, self::APPROVED, self::REJECTED];
+
     protected $fillable = [
         'fuel_number',
         'vehicle_id',
@@ -28,6 +38,7 @@ class FuelRecord extends Model
         'payment_method',
         'notes',
         'created_by',
+        'submission_token',
     ];
 
     protected function casts(): array
@@ -39,6 +50,7 @@ class FuelRecord extends Model
             'amount' => 'decimal:2',
             'is_credit' => 'boolean',
             'odometer' => 'integer',
+            'approved_at' => 'datetime',
         ];
     }
 
@@ -66,9 +78,30 @@ class FuelRecord extends Model
         return $query->whereRaw('1 = 0');
     }
 
+    public function scopePending(Builder $query): Builder
+    {
+        return $query->where('status', self::PENDING);
+    }
+
+    public function isPending(): bool
+    {
+        return $this->status === self::PENDING;
+    }
+
+    /** Whether this record has reached the company ledger. */
+    public function isPosted(): bool
+    {
+        return $this->company_expense_id !== null || $this->company_debt_id !== null;
+    }
+
     public function vehicle(): BelongsTo
     {
         return $this->belongsTo(Vehicle::class);
+    }
+
+    public function approver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by');
     }
 
     public function instructor(): BelongsTo

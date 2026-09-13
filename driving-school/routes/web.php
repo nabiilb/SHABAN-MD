@@ -60,6 +60,9 @@ Route::middleware(['auth', 'role:admin'])
 
         /* Finance */
         Route::resource('fuel', Admin\FuelController::class)->parameters(['fuel' => 'fuel']);
+        // Releasing an instructor's submission into the company ledger.
+        Route::post('fuel/{fuel}/approve', [Admin\FuelController::class, 'approve'])->name('fuel.approve');
+        Route::post('fuel/{fuel}/reject', [Admin\FuelController::class, 'reject'])->name('fuel.reject');
         Route::resource('expenses', Admin\ExpenseController::class);
         Route::resource('expense-categories', Admin\ExpenseCategoryController::class)
             ->parameters(['expense-categories' => 'category'])
@@ -135,6 +138,8 @@ Route::middleware(['auth', 'role:instructor', 'instructor.profile'])
 
         /* My Finance — read only, and only what belongs to this instructor. */
         Route::get('fuel', [Instructor\FuelController::class, 'index'])->name('fuel.index');
+        Route::get('fuel/create', [Instructor\FuelController::class, 'create'])->name('fuel.create');
+        Route::post('fuel', [Instructor\FuelController::class, 'store'])->name('fuel.store');
         Route::get('fuel/{fuel}', [Instructor\FuelController::class, 'show'])->name('fuel.show');
 
         Route::get('company-debts', [Instructor\CompanyDebtController::class, 'index'])->name('company-debts.index');
