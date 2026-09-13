@@ -62,12 +62,24 @@ class TrainingController extends Controller
 
         $date = $request->input('date', today()->toDateString());
 
+        $entries = TrainingQueueEntry::forDate($date)
+            ->with(['student', 'preferredInstructor'])
+            ->ordered()
+            ->get();
+
+        // Queue numbers are counted over the students still waiting, not read
+        // off the stored `position` — that is only an ordering key, and once a
+        // student finishes or starts training it no longer describes a place in
+        // the line (two rows can quite legitimately hold the same value).
+        $livePositions = $entries
+            ->where('status', TrainingQueueEntry::WAITING)
+            ->values()
+            ->mapWithKeys(fn (TrainingQueueEntry $entry, int $index) => [$entry->id => $index + 1]);
+
         return view('admin.training.queue', [
             'date' => $date,
-            'entries' => TrainingQueueEntry::forDate($date)
-                ->with(['student', 'preferredInstructor'])
-                ->ordered()
-                ->get(),
+            'entries' => $entries,
+            'livePositions' => $livePositions,
             'students' => Student::where('status', 'active')->orderBy('full_name')->get(['id', 'full_name', 'student_number']),
             'instructors' => Instructor::active()->orderBy('full_name')->get(['id', 'full_name']),
             'durations' => TrainingSession::DURATION_OPTIONS,

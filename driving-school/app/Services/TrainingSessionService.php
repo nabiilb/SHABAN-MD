@@ -70,11 +70,12 @@ class TrainingSessionService
                 throw new RuntimeException(__('You already have a training session in progress.'));
             }
 
-            // The student must actually belong to this teacher on this date,
-            // whether permanently or through a transfer for the day.
-            $owner = $entry->student?->instructorIdOn($entry->queue_date);
-
-            if ($owner !== $instructor->id) {
+            // The student must be in this teacher's line for this date —
+            // theirs permanently, transferred to them for the day, asked for
+            // by name, or in the open pool nobody owns. Exactly the rule the
+            // waiting list is built from, so what a teacher can see is what a
+            // teacher can take.
+            if (! $entry->isClaimableBy($instructor->id)) {
                 throw new RuntimeException(__('This student is not in your queue for this date.'));
             }
 

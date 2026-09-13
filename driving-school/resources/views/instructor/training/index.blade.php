@@ -8,6 +8,7 @@
 <div x-data="trainingBoard({
         endpoint: '{{ route('instructor.training.board') }}',
         initial: {{ Js::from($board) }},
+        defaultDuration: 30,
      })">
 
     {{-- CURRENT TRAINING ------------------------------------------------ --}}
@@ -34,6 +35,7 @@
                         </template>
                         <span class="badge-blue" x-show="board.current.ownership === 'transferred'">{{ __('Transferred') }}</span>
                         <span class="badge-slate" x-show="board.current.ownership === 'permanent'">{{ __('Permanent') }}</span>
+                        <span class="badge-amber" x-show="board.current.ownership === 'unassigned'">{{ __('Unassigned') }}</span>
                     </p>
 
                     <dl class="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
@@ -158,6 +160,12 @@
         <div class="card p-6">
             <h3 class="card-title">{{ __('No training in progress') }}</h3>
 
+            <template x-if="board.next">
+                <p class="mt-1 text-sm text-slate-500">
+                    {{ __('Next student') }}: <span class="font-semibold text-slate-800" x-text="board.next"></span>
+                </p>
+            </template>
+
             <template x-if="board.queue.length">
                 <form method="POST" action="{{ route('instructor.training.start') }}" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     @csrf
@@ -193,7 +201,7 @@
             </template>
 
             <template x-if="! board.queue.length">
-                <p class="mt-2 text-sm text-slate-500">{{ __('The waiting queue is empty.') }}</p>
+                <p class="mt-2 text-sm text-slate-500">{{ __('No students waiting.') }}</p>
             </template>
         </div>
     </template>
@@ -205,6 +213,28 @@
                 <h3 class="card-title">🟡 {{ __('Waiting Queue') }}</h3>
                 <span class="badge-amber" x-text="board.queue_total"></span>
             </div>
+
+            {{-- What a one-click Select starts the student on. --}}
+            <div class="grid gap-3 border-b border-slate-100 bg-slate-50 px-5 py-3 sm:grid-cols-2">
+                <div>
+                    <label class="label">{{ __('Duration') }}</label>
+                    <select class="input" x-model="selectDuration">
+                        @foreach ($durations as $minutes)
+                            <option value="{{ $minutes }}">{{ $minutes }} {{ __('minutes') }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div>
+                    <label class="label">{{ __('Lesson') }}</label>
+                    <select class="input" x-model="selectTopic">
+                        <option value="">{{ __('Select a lesson') }}</option>
+                        @foreach ($topics as $topic)
+                            <option value="{{ $topic->id }}">{{ $topic->display_name }}</option>
+                        @endforeach
+                    </select>
+                </div>
+            </div>
+
             <ul class="divide-y divide-slate-100">
                 <template x-for="item in board.queue" :key="item.id">
                     <li class="flex items-center justify-between gap-3 px-5 py-3">
@@ -214,20 +244,32 @@
                                 <span x-text="item.student"></span>
                             </p>
                             <p class="text-xs text-slate-400">
-                                <span x-text="item.waiting_minutes"></span> {{ __('min waiting') }}
+                                <span x-text="item.status_label"></span>
+                                · <span x-text="item.waiting_minutes"></span> {{ __('min waiting') }}
                                 · {{ __('no timer running') }}
                             </p>
+                            <p class="text-[10px] font-semibold uppercase tracking-wide"
+                               :class="item.ownership === 'permanent' ? 'text-slate-400' : 'text-brand-600'"
+                               x-text="item.ownership_label"></p>
                         </div>
-                        <div class="flex shrink-0 flex-col items-end gap-1">
-                            <span class="badge-amber" x-text="item.status_label"></span>
-                            <span class="text-[10px] font-semibold uppercase tracking-wide"
-                                  :class="item.ownership === 'transferred' ? 'text-brand-600' : 'text-slate-400'"
-                                  x-text="item.ownership_label"></span>
-                        </div>
+
+                        {{-- One click takes this student, whoever is at the top
+                             of the line. The claim itself is still checked and
+                             locked server-side. --}}
+                        <form method="POST" action="{{ route('instructor.training.start') }}" class="shrink-0">
+                            @csrf
+                            <input type="hidden" name="training_queue_entry_id" :value="item.id">
+                            <input type="hidden" name="assigned_duration_minutes" :value="selectDuration">
+                            <input type="hidden" name="lesson_topic_id" :value="selectTopic">
+                            <button class="btn-primary btn-sm" :disabled="!! board.current"
+                                    :class="board.current ? 'cursor-not-allowed opacity-40' : ''">
+                                {{ __('Select') }}
+                            </button>
+                        </form>
                     </li>
                 </template>
                 <template x-if="! board.queue.length">
-                    <li class="px-5 py-8 text-center text-sm text-slate-400">{{ __('Nobody is waiting.') }}</li>
+                    <li class="px-5 py-8 text-center text-sm text-slate-400">{{ __('No students waiting.') }}</li>
                 </template>
             </ul>
             <template x-if="board.queue_overflow > 0">

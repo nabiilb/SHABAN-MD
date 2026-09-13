@@ -73,10 +73,10 @@
                     @forelse ($entries as $entry)
                         <tr>
                             <td class="font-mono font-semibold">
-                                @if (in_array($entry->status, \App\Models\TrainingQueueEntry::OPEN_STATUSES, true))
-                                    #{{ $entry->position }}
+                                @if ($livePositions->has($entry->id))
+                                    #{{ $livePositions[$entry->id] }}
                                 @else
-                                    {{-- A finished or cancelled student no longer holds a place in line. --}}
+                                    {{-- Only a student still waiting holds a place in line. --}}
                                     <span class="text-slate-300">—</span>
                                 @endif
                             </td>

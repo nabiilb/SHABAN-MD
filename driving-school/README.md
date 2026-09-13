@@ -334,6 +334,23 @@ unaffected.
 
 ### Staying current without refreshing
 
+### One queue, two views
+
+A teacher's line and the admin's headline count are the same set, asked the same
+way: `TrainingQueueEntry::claimableBy()`. An entry is in a teacher's line when
+that teacher was asked for by name, or owns the student for the date — and an
+entry **nobody** owns for the date is in *every* teacher's line, so it can
+actually be taken. Without that last clause a student queued from the admin's own
+Add to Queue form (which lists every active student, including those with no
+permanent instructor) was counted by the admin board and shown on no console at
+all. `TrainingSessionService::start()` asks the same rule before claiming, so
+what a teacher can see is exactly what a teacher can take.
+
+Queue numbers are counted over the students still waiting, never read off the
+stored `position` — that column is only an ordering key for an admin's manual
+reorder, and two rows can legitimately hold the same value. A student who is
+training, finished or cancelled holds no place in the line.
+
 The dashboards poll a small JSON board endpoint (`…/training/board`) every few
 seconds and tick the countdown locally from the server's timestamps. That needs
 no extra infrastructure. Every state change also fires `TrainingBoardChanged`,
@@ -380,7 +397,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-200 tests / 941 assertions, run against MySQL (`driving_school_test`; see
+211 tests / 978 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -399,6 +416,7 @@ php artisan test
 | `StudentProgressTest` | The 24/18/6/75% example, capping, completion and reopening |
 | `AdminCrudTest` | Real create/read/update/delete against MySQL, validation, search and filters |
 | `DashboardAndReportTest` | Dashboard figures computed from the database; reports and exports |
+| `TeacherQueueVisibilityTest` | The admin board and the teacher console describe one queue — two waiting students are counted by the admin and offered to the teacher, order and live positions match, a completed student keeps no position, claiming one promotes the next, two teachers cannot claim the same student, and no waiting student is invisible to every console |
 | `LegacyMysqlCompatibilityTest` | The schema installs on MySQL 5.5 — no migration reaches for generated columns, JSON columns or Laravel's 5.7-only column inspection, both guards are plain columns under unique indexes, and `migrate` completes behind a hook that refuses what 5.5 refuses |
 | `PageRendersTest` | Every GET route renders for its role, in English and Somali |
 

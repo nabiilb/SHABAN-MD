@@ -201,6 +201,11 @@ class TrainingQueueService
     /**
      * A single teacher's waiting line for a date, oldest first.
      *
+     * Membership is TrainingQueueEntry::claimableBy() — the same rule the claim
+     * itself asks — so a student the teacher can see is a student the teacher
+     * can take, and a waiting student the admin counts always shows up on at
+     * least one console.
+     *
      * @return Collection<int, TrainingQueueEntry>
      */
     public function waitingFor(int $instructorId, $date = null, ?int $limit = null): Collection
@@ -210,7 +215,7 @@ class TrainingQueueService
         return TrainingQueueEntry::query()
             ->whereDate('queue_date', $date)
             ->waiting()
-            ->whereHas('student', fn ($q) => $q->ownedByInstructorOn($instructorId, $date))
+            ->claimableBy($instructorId, $date)
             ->ordered()
             ->with('student.currentInstructor')
             ->when($limit, fn ($q) => $q->limit($limit))
@@ -224,7 +229,7 @@ class TrainingQueueService
 
         return TrainingQueueEntry::query()
             ->whereDate('queue_date', $date)
-            ->whereHas('student', fn ($q) => $q->ownedByInstructorOn($instructorId, $date))
+            ->claimableBy($instructorId, $date)
             ->ordered()
             ->with('student.currentInstructor')
             ->get();

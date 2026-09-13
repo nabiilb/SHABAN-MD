@@ -45,7 +45,12 @@ class TrainingBoardService
             ];
         }
 
-        // Admin: the whole floor.
+        // Admin: the whole floor. Every teacher's line is materialised first,
+        // so the headline count and the per-teacher panels below it are read
+        // from the same day — otherwise the first load of a new day counts only
+        // whoever an admin queued by hand.
+        $this->ensureDayQueued($date, $viewer);
+
         $current = TrainingSession::query()
             ->live()
             ->whereDate('started_at', $date)
@@ -80,7 +85,7 @@ class TrainingBoardService
             ->live()
             ->where('instructor_id', $instructorId)
             ->whereDate('started_at', $date)
-            ->with(['student', 'instructor', 'lessonTopic'])
+            ->with(['student', 'instructor', 'lessonTopic', 'queueEntry.student'])
             ->orderByDesc('started_at')
             ->first();
 
@@ -91,7 +96,8 @@ class TrainingBoardService
             'instructor_id' => $instructorId,
             'instructor' => Instructor::find($instructorId)?->full_name,
             'current' => $current ? $current->toBoardArray() + [
-                'ownership' => $current->student?->current_instructor_id === $instructorId ? 'permanent' : 'transferred',
+                'ownership' => $current->queueEntry?->ownershipOn($instructorId)
+                    ?? ($current->student?->current_instructor_id === $instructorId ? 'permanent' : 'transferred'),
             ] : null,
             'current_session_id' => $current?->id,
             'needs_evaluation' => $current?->status === TrainingSession::ATTENDANCE_PENDING,
@@ -109,23 +115,37 @@ class TrainingBoardService
     {
         $date = Carbon::parse($date ?? today());
 
+        $this->ensureDayQueued($date);
+
         return Instructor::active()
             ->orderBy('full_name')
             ->get()
-            ->map(function (Instructor $instructor) use ($date, $queueLimit) {
-                $this->queue->ensureQueuedFor($instructor->id, $date);
-
-                return $this->instructorBoard($instructor->id, $date, $queueLimit);
-            })
+            ->map(fn (Instructor $instructor) => $this->instructorBoard($instructor->id, $date, $queueLimit))
             ->all();
     }
 
     /**
-     * One waiting-list row. `display_position` is the FIFO number within this
-     * teacher's line, so a completed student never occupies a position.
+     * Gives every active teacher their line for the day before anything is
+     * counted. Idempotent — ensureQueuedFor only creates what is missing.
+     */
+    protected function ensureDayQueued($date, ?User $actor = null): void
+    {
+        Instructor::active()->pluck('id')->each(
+            fn (int $instructorId) => $this->queue->ensureQueuedFor($instructorId, $date, $actor),
+        );
+    }
+
+    /**
+     * One waiting-list row. `display_position` is this student's live number in
+     * the line, counted over the waiting entries alone — a completed, training
+     * or cancelled student never holds a place, and `position` (the stored
+     * ordering key an admin's reorder writes to) is never shown as if it were
+     * one.
      */
     protected function entryArray(TrainingQueueEntry $entry, int $index, ?int $instructorId = null): array
     {
+        $ownership = $entry->ownershipOn($instructorId);
+
         return [
             'id' => $entry->id,
             'position' => $entry->position,
@@ -136,8 +156,12 @@ class TrainingBoardService
             'status_label' => $entry->status_label,
             'status_icon' => $entry->status_icon,
             'waiting_minutes' => $entry->waiting_minutes,
-            'ownership' => $entry->ownershipOn($instructorId),
-            'ownership_label' => $entry->ownershipOn($instructorId) === 'permanent' ? __('Permanent') : __('Transferred'),
+            'ownership' => $ownership,
+            'ownership_label' => match ($ownership) {
+                'permanent' => __('Permanent'),
+                'unassigned' => __('Unassigned'),
+                default => __('Transferred'),
+            },
             'permanent_instructor' => $entry->student?->currentInstructor?->full_name,
         ];
     }

@@ -57,6 +57,7 @@
                                         <p class="mt-1">
                                             <span class="badge-blue" x-show="teacher.current.ownership === 'transferred'">{{ __('Transferred') }}</span>
                                             <span class="badge-slate" x-show="teacher.current.ownership === 'permanent'">{{ __('Permanent') }}</span>
+                                            <span class="badge-amber" x-show="teacher.current.ownership === 'unassigned'">{{ __('Unassigned') }}</span>
                                         </p>
                                     </div>
                                     <div class="shrink-0 text-right">
@@ -96,7 +97,7 @@
                                         </p>
                                     </div>
                                     <span class="shrink-0 text-[10px] font-semibold uppercase tracking-wide"
-                                          :class="item.ownership === 'transferred' ? 'text-brand-600' : 'text-slate-400'"
+                                          :class="item.ownership === 'permanent' ? 'text-slate-400' : 'text-brand-600'"
                                           x-text="item.ownership_label"></span>
                                 </li>
                             </template>

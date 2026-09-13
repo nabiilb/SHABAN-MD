@@ -145,6 +145,31 @@ class Student extends Model
         });
     }
 
+    /**
+     * Students nobody is responsible for on a date.
+     *
+     * That means no permanent instructor, or one who is no longer active, and
+     * no hand-over to an active teacher for the date either. They are the open
+     * pool: every teacher sees them and any teacher may take them, which is
+     * what keeps a queued student from being counted by the admin board while
+     * appearing on nobody's console.
+     */
+    public function scopeUnassignedOn(Builder $query, $date): Builder
+    {
+        $date = Carbon::parse($date)->toDateString();
+
+        return $query->where(function (Builder $q) use ($date) {
+            // Handed over for the day: it comes down to who received them.
+            $q->whereHas('attendanceTransfers', fn (Builder $t) => $t
+                ->whereDate('attendance_date', $date)
+                ->whereDoesntHave('toInstructor', fn (Builder $i) => $i->where('status', 'active')))
+                // Otherwise, to their permanent instructor.
+                ->orWhere(fn (Builder $own) => $own
+                    ->whereDoesntHave('attendanceTransfers', fn (Builder $t) => $t->whereDate('attendance_date', $date))
+                    ->whereDoesntHave('currentInstructor', fn (Builder $i) => $i->where('status', 'active')));
+        });
+    }
+
     /** The instructor responsible for this student on a given date. */
     public function instructorIdOn($date): ?int
     {

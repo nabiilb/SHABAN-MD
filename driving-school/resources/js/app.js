@@ -69,6 +69,9 @@ window.trainingBoard = function (config) {
         endpoint: config.endpoint,
         pollMs: config.pollMs || 4000,
         remaining: 0,
+        // What a one-click [Select] in the waiting list starts the student on.
+        selectDuration: config.defaultDuration || 30,
+        selectTopic: '',
         // Ticks every second so every teacher panel recomputes its own clock.
         now: Date.now(),
         toasts: [],

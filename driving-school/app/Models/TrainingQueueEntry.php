@@ -104,16 +104,70 @@ class TrainingQueueEntry extends Model
         return $query->orderBy('position')->orderBy('joined_at')->orderBy('id');
     }
 
-    /** Whether this student is the teacher's own, or here on a transfer. */
+    /**
+     * The entries one teacher may take on a date — the single rule both
+     * dashboards ask, so their queues cannot drift apart.
+     *
+     * An entry belongs to a teacher's line when that teacher was asked for by
+     * name, or owns the student for the date. An entry nobody owns for the date
+     * belongs to every teacher's line: somebody has to be able to take them, or
+     * the admin board counts a waiting student that no console will ever show.
+     */
+    public function scopeClaimableBy(Builder $query, ?int $instructorId, $date = null): Builder
+    {
+        $instructorId ??= 0;
+        $date = Carbon::parse($date ?? today())->toDateString();
+
+        $wanted = fn (Builder $q) => $q->whereHas(
+            'preferredInstructor',
+            fn (Builder $i) => $i->where('status', 'active'),
+        );
+
+        $unwanted = fn (Builder $q) => $q->whereDoesntHave(
+            'preferredInstructor',
+            fn (Builder $i) => $i->where('status', 'active'),
+        );
+
+        return $query->where(function (Builder $q) use ($instructorId, $date, $wanted, $unwanted) {
+            // Asked for by name — a preference for a teacher who has left is
+            // no preference at all.
+            $q->where(fn (Builder $preferred) => $wanted($preferred)->where('preferred_instructor_id', $instructorId))
+                // Nobody asked for, and this teacher owns them for the date.
+                ->orWhere(fn (Builder $own) => $unwanted($own)
+                    ->whereHas('student', fn (Builder $s) => $s->ownedByInstructorOn($instructorId, $date)))
+                // Nobody owns them for the date either: open to whoever is free.
+                ->orWhere(fn (Builder $open) => $unwanted($open)
+                    ->whereHas('student', fn (Builder $s) => $s->unassignedOn($date)));
+        });
+    }
+
+    /**
+     * The same rule, asked of one entry — used when a teacher actually claims a
+     * student, so the check and the list can never disagree.
+     */
+    public function isClaimableBy(?int $instructorId): bool
+    {
+        return static::query()
+            ->whereKey($this->getKey())
+            ->claimableBy($instructorId, $this->queue_date)
+            ->exists();
+    }
+
+    /**
+     * Whether this student is the teacher's own, here on a transfer, or in the
+     * open pool that belongs to nobody.
+     */
     public function ownershipOn(?int $instructorId = null): string
     {
-        $permanent = $this->student?->current_instructor_id;
+        $owner = $this->student?->instructorIdOn($this->queue_date);
 
-        if ($instructorId === null) {
-            $instructorId = $this->student?->instructorIdOn($this->queue_date);
+        if ($owner === null || ! Instructor::whereKey($owner)->where('status', 'active')->exists()) {
+            return 'unassigned';
         }
 
-        return $permanent === $instructorId ? 'permanent' : 'transferred';
+        $instructorId ??= $owner;
+
+        return $this->student?->current_instructor_id === $instructorId ? 'permanent' : 'transferred';
     }
 
     /* ----------------------------------------------------------------
@@ -127,7 +181,7 @@ class TrainingQueueEntry extends Model
             return 0;
         }
 
-        return max(0, $this->joined_at?->diffInMinutes(now()) ?? 0);
+        return max(0, (int) ($this->joined_at?->diffInMinutes(now()) ?? 0));
     }
 
     public function getStatusLabelAttribute(): string
