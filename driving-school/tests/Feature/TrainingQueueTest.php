@@ -77,7 +77,7 @@ class TrainingQueueTest extends TestCase
         $this->queue()->add($this->students['Mohamed'], $this->admin);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage("Mohamed is already in today's queue.");
+        $this->expectExceptionMessage('This student is already in the waiting queue.');
 
         $this->queue()->add($this->students['Mohamed'], $this->admin);
     }

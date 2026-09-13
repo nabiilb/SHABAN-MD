@@ -139,6 +139,7 @@ Route::middleware(['auth', 'role:instructor', 'instructor.profile'])
         /* Training console */
         Route::get('training', [Instructor\TrainingController::class, 'index'])->name('training.index');
         Route::get('training/board', [Instructor\TrainingController::class, 'board'])->name('training.board');
+        Route::post('training/queue', [Instructor\TrainingController::class, 'addToQueue'])->name('training.queue.store');
         Route::post('training/start', [Instructor\TrainingController::class, 'start'])->name('training.start');
         Route::post('training/{session}/end', [Instructor\TrainingController::class, 'end'])->name('training.end');
         Route::post('training/{session}/extend', [Instructor\TrainingController::class, 'extend'])->name('training.extend');

@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Events\TrainingBoardChanged;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\TrainingQueueEntryRequest;
 use App\Models\Instructor;
@@ -95,8 +94,6 @@ class TrainingController extends Controller
         } catch (RuntimeException $e) {
             return back()->withErrors(['student_id' => $e->getMessage()]);
         }
-
-        event(new TrainingBoardChanged('queue.added'));
 
         return back()->with('status', __(':name added to the queue.', ['name' => $student->full_name]));
     }

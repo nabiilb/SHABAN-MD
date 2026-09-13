@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Instructor;
 
 use App\Events\TrainingBoardChanged;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AddToTrainingQueueRequest;
 use App\Http\Requests\EvaluateTrainingRequest;
 use App\Http\Requests\StartTrainingRequest;
 use App\Models\LessonTopic;
+use App\Models\Setting;
+use App\Models\Student;
 use App\Models\TrainingQueueEntry;
 use App\Models\TrainingSession;
 use App\Models\Vehicle;
@@ -43,7 +46,33 @@ class TrainingController extends Controller
             'topics' => LessonTopic::where('is_active', true)->orderBy('sort_order')->get(),
             'vehicles' => Vehicle::visibleTo($user)->orderBy('vehicle_number')->get(),
             'durations' => TrainingSession::DURATION_OPTIONS,
+            'defaultDuration' => (int) Setting::get('default_training_minutes', 30),
+            // The students this teacher may put in the line — the same reach
+            // they have over the line itself.
+            'addable' => $this->queue->addableFor($user->instructorId() ?? 0),
         ]);
+    }
+
+    /**
+     * Puts a student in today's waiting line. Never starts training: the
+     * student waits their turn like anybody else.
+     */
+    public function addToQueue(AddToTrainingQueueRequest $request): RedirectResponse
+    {
+        $student = Student::findOrFail($request->integer('student_id'));
+        $instructorId = $request->user()->instructorId() ?? 0;
+
+        if (! $this->queue->canAdd($instructorId, $student)) {
+            return back()->withErrors(['student_id' => __('This student belongs to another teacher.')]);
+        }
+
+        try {
+            $this->queue->add($student, $request->user(), $request->queueData());
+        } catch (RuntimeException $e) {
+            return back()->withErrors(['student_id' => $e->getMessage()]);
+        }
+
+        return back()->with('status', __(':name added to the waiting queue.', ['name' => $student->full_name]));
     }
 
     /** Polled by the dashboards so nobody has to press refresh. */

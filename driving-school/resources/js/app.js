@@ -72,6 +72,12 @@ window.trainingBoard = function (config) {
         // What a one-click [Select] in the waiting list starts the student on.
         selectDuration: config.defaultDuration || 30,
         selectTopic: '',
+        // The Add Student dialog: the teacher's addable students, searched here
+        // rather than over the wire, since the server already sent them.
+        students: config.students || [],
+        adding: false,
+        search: '',
+        picked: '',
         // Ticks every second so every teacher panel recomputes its own clock.
         now: Date.now(),
         toasts: [],
@@ -85,6 +91,26 @@ window.trainingBoard = function (config) {
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) this.refresh();
             });
+        },
+
+        openAdd() {
+            this.adding = true;
+            this.search = '';
+            this.picked = '';
+        },
+
+        /** Name, student number and phone all match, as the field promises. */
+        get matchingStudents() {
+            const term = this.search.trim().toLowerCase();
+            if (!term) return this.students;
+
+            return this.students.filter((student) =>
+                [student.full_name, student.student_number, student.phone]
+                    .some((field) => (field || '').toLowerCase().includes(term)));
+        },
+
+        get pickedName() {
+            return (this.students.find((student) => student.id === this.picked) || {}).full_name || '';
         },
 
         /** Seconds left, recomputed from the server timestamp every second. */

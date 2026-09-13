@@ -8,7 +8,8 @@
 <div x-data="trainingBoard({
         endpoint: '{{ route('instructor.training.board') }}',
         initial: {{ Js::from($board) }},
-        defaultDuration: 30,
+        defaultDuration: {{ $defaultDuration }},
+        students: {{ Js::from($addable->map->only(['id', 'full_name', 'student_number', 'phone'])->values()) }},
      })">
 
     {{-- CURRENT TRAINING ------------------------------------------------ --}}
@@ -211,7 +212,13 @@
         <div class="card lg:col-span-1">
             <div class="card-header">
                 <h3 class="card-title">🟡 {{ __('Waiting Queue') }}</h3>
-                <span class="badge-amber" x-text="board.queue_total ?? 0"></span>
+                <div class="flex items-center gap-2">
+                    <span class="badge-amber" x-text="board.queue_total ?? 0"></span>
+                    <button type="button" class="btn-ghost btn-sm text-brand-700 hover:bg-brand-50"
+                            @click="openAdd()">
+                        + {{ __('Add Student') }}
+                    </button>
+                </div>
             </div>
 
             {{-- What a one-click Select starts the student on. --}}
@@ -236,26 +243,20 @@
             </div>
 
             {{-- If the page's JavaScript never starts — stale assets, a blocked
-                 bundle — the teacher still sees the line the server rendered
-                 rather than an empty card. Alpine hides this on init. --}}
+                 bundle — the teacher still sees who the database says is
+                 waiting, rather than an empty card. Names only: the actions
+                 need Alpine anyway, and a second set of buttons in the DOM
+                 helps nobody. Alpine hides this on init. --}}
             <ul class="divide-y divide-slate-100" x-show="false">
                 @forelse ($board['queue'] as $item)
-                    <li class="flex items-center justify-between gap-3 px-5 py-3">
-                        <div class="min-w-0">
-                            <p class="truncate text-sm font-semibold text-slate-800">
-                                <span class="text-slate-400">#{{ $item['display_position'] }}</span>
-                                {{ $item['student'] }}
-                            </p>
-                            <p class="text-xs text-slate-400">
-                                {{ $item['status_label'] }} · {{ $item['waiting_minutes'] }} {{ __('min waiting') }}
-                            </p>
-                        </div>
-                        <form method="POST" action="{{ route('instructor.training.start') }}" class="shrink-0">
-                            @csrf
-                            <input type="hidden" name="training_queue_entry_id" value="{{ $item['id'] }}">
-                            <input type="hidden" name="assigned_duration_minutes" value="30">
-                            <button class="btn-primary btn-sm">{{ __('Select') }}</button>
-                        </form>
+                    <li class="px-5 py-3">
+                        <p class="truncate text-sm font-semibold text-slate-800">
+                            <span class="text-slate-400">#{{ $item['display_position'] }}</span>
+                            {{ $item['student'] }}
+                        </p>
+                        <p class="text-xs text-slate-400">
+                            {{ $item['status_label'] }} · {{ $item['waiting_minutes'] }} {{ __('min waiting') }}
+                        </p>
                     </li>
                 @empty
                     <li class="px-5 py-8 text-center text-sm text-slate-400">{{ __('No students waiting.') }}</li>
@@ -347,6 +348,87 @@
             </div>
         </div>
     </div>
+
+    {{-- ADD STUDENT TO QUEUE -------------------------------------------
+         Adding only ever puts a student in `waiting`; the timer starts when
+         somebody presses Select. The list is the students this teacher may
+         take, searched in the browser over data the server already sent. --}}
+    <template x-teleport="body">
+        <div x-show="adding" x-cloak class="fixed inset-0 z-50 flex items-start justify-center p-4 sm:items-center">
+            <div class="absolute inset-0 bg-slate-900/50" @click="adding = false"></div>
+
+            <div x-show="adding" x-transition
+                 class="relative w-full max-w-md rounded-xl bg-white shadow-xl"
+                 @keydown.escape.window="adding = false">
+
+                <form method="POST" action="{{ route('instructor.training.queue.store') }}">
+                    @csrf
+
+                    <div class="border-b border-slate-200 px-5 py-4">
+                        <h3 class="text-base font-bold text-slate-900">{{ __('Add Student to Queue') }}</h3>
+                        <p class="mt-0.5 text-sm text-slate-500">{{ now()->format('d/m/Y') }}</p>
+                    </div>
+
+                    <div class="space-y-4 px-5 py-4">
+                        <div>
+                            <label for="student-search" class="label">{{ __('Search Student') }}</label>
+                            <input id="student-search" type="search" x-model="search" autocomplete="off"
+                                   class="input" placeholder="{{ __('Search by name, student ID, phone…') }}">
+                        </div>
+
+                        <ul class="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+                            <template x-for="student in matchingStudents" :key="student.id">
+                                <li>
+                                    <button type="button" @click="picked = student.id"
+                                            class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-slate-50"
+                                            :class="picked === student.id ? 'bg-brand-50' : ''">
+                                        <span class="min-w-0">
+                                            <span class="block truncate text-sm font-semibold text-slate-800"
+                                                  x-text="student.full_name"></span>
+                                            <span class="block text-xs text-slate-400"
+                                                  x-text="`${student.student_number} · ${student.phone ?? ''}`"></span>
+                                        </span>
+                                        <span class="shrink-0 text-brand-600" x-show="picked === student.id">✓</span>
+                                    </button>
+                                </li>
+                            </template>
+                            <template x-if="! matchingStudents.length">
+                                <li class="px-3 py-6 text-center text-sm text-slate-400">{{ __('No students found.') }}</li>
+                            </template>
+                        </ul>
+
+                        <input type="hidden" name="student_id" :value="picked">
+
+                        <p class="text-sm text-slate-600">
+                            {{ __('Selected') }}:
+                            <span class="font-semibold text-slate-900"
+                                  x-text="pickedName || '{{ __('None') }}'"></span>
+                        </p>
+
+                        <div>
+                            <label for="queue-duration" class="label">{{ __('Training Duration') }}</label>
+                            <select id="queue-duration" name="assigned_duration_minutes" class="input">
+                                @foreach ($durations as $minutes)
+                                    <option value="{{ $minutes }}" @selected($minutes === $defaultDuration)>
+                                        {{ $minutes }} {{ __('minutes') }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            <p class="mt-1 text-xs text-slate-400">{{ __('The timer starts when the student is selected for training, not now.') }}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+                        <button type="button" class="btn-ghost" @click="adding = false">{{ __('Cancel') }}</button>
+                        <button class="btn-primary" :disabled="! picked"
+                                :class="picked ? '' : 'cursor-not-allowed opacity-40'">
+                            {{ __('Add to Queue') }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </template>
 
     @include('partials.training-toasts')
 </div>

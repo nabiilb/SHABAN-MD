@@ -20,9 +20,19 @@ class TrainingQueueEntryPolicy
         return $user->hasRole('admin', 'instructor');
     }
 
+    /** Adding an entry with the admin's full controls — preferences, notes. */
     public function create(User $user): bool
     {
         return $user->isAdmin();
+    }
+
+    /**
+     * Putting a student in today's line. A teacher needs this to run their own
+     * console; it does not let them reorder, move or remove anybody.
+     */
+    public function addToQueue(User $user): bool
+    {
+        return $user->isAdmin() || ($user->isInstructor() && $user->instructorId() !== null);
     }
 
     /** Reordering, moving and editing the line is an admin job. */

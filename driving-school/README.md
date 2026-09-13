@@ -353,6 +353,17 @@ preferred teacher still narrows an entry. `php artisan training:check-queue`
 prints, for a date, the admin's count, every teacher's line as the board service
 builds it, and any waiting student no console can reach.
 
+Teachers add to the line themselves: **+ Add Student** on the Waiting Queue card
+opens a dialog that searches the students they may take by name, student number
+or phone, and queues the chosen one for a duration (defaulting to the centre's
+`default_training_minutes`). Adding only ever writes `waiting` — the countdown
+still starts when somebody presses Select, and the duration is carried into the
+session then. A student already in the day's line is refused by state: already
+waiting, currently training, or attendance pending; a student who finished
+earlier may rejoin, since the centre runs repeat training and the completed
+session stays in the history. Teachers gain the `addToQueue` ability only —
+reordering, moving and removing the line stay with the admin.
+
 Queue numbers are counted over the students still waiting, never read off the
 stored `position` — that column is only an ordering key for an admin's manual
 reorder, and two rows can legitimately hold the same value. A student who is
@@ -404,7 +415,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-213 tests / 985 assertions, run against MySQL (`driving_school_test`; see
+228 tests / 1,038 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -424,6 +435,7 @@ php artisan test
 | `AdminCrudTest` | Real create/read/update/delete against MySQL, validation, search and filters |
 | `DashboardAndReportTest` | Dashboard figures computed from the database; reports and exports |
 | `TeacherQueueVisibilityTest` | The admin board and the teacher console describe one queue — two waiting students are counted by the admin and offered to the teacher, order and live positions match, a completed student keeps no position, claiming one promotes the next, two teachers cannot claim the same student, and no waiting student is invisible to every console |
+| `TeacherAddToQueueTest` | A teacher adds a student to the line — waiting not training, correct position, visible to the admin, refused when already waiting, training or pending, a finished student may rejoin, the unique key stops a double add, positions stay right once somebody completes, and a teacher gains no admin queue controls |
 | `LegacyMysqlCompatibilityTest` | The schema installs on MySQL 5.5 — no migration reaches for generated columns, JSON columns or Laravel's 5.7-only column inspection, both guards are plain columns under unique indexes, and `migrate` completes behind a hook that refuses what 5.5 refuses |
 | `PageRendersTest` | Every GET route renders for its role, in English and Somali |
 

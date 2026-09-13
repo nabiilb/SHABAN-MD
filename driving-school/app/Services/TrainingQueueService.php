@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Events\TrainingBoardChanged;
+use App\Models\Setting;
 use App\Models\Student;
 use App\Models\TrainingQueueEntry;
 use App\Models\User;
@@ -19,18 +20,33 @@ use RuntimeException;
  */
 class TrainingQueueService
 {
+    /**
+     * Puts a student in a day's line.
+     *
+     * The row is locked before anything is decided and the table has a unique
+     * key on (student_id, queue_date), so two people adding the same student at
+     * the same moment cannot produce two entries: the second either sees the
+     * first inside the transaction or is refused by the index.
+     *
+     * Being in the line is not being in training — this only ever writes
+     * `waiting`, never a session.
+     */
     public function add(Student $student, User $actor, array $data = [], $date = null): TrainingQueueEntry
     {
         $date = Carbon::parse($date ?? today())->toDateString();
 
-        return DB::transaction(function () use ($student, $actor, $data, $date) {
+        if ($student->status !== 'active') {
+            throw new RuntimeException(__(':name is not an active student.', ['name' => $student->full_name]));
+        }
+
+        $entry = DB::transaction(function () use ($student, $actor, $data, $date) {
             $existing = TrainingQueueEntry::where('student_id', $student->id)
                 ->whereDate('queue_date', $date)
                 ->lockForUpdate()
                 ->first();
 
-            if ($existing && in_array($existing->status, TrainingQueueEntry::OPEN_STATUSES, true)) {
-                throw new RuntimeException(__(':name is already in today\'s queue.', ['name' => $student->full_name]));
+            if ($existing) {
+                $this->assertCanRejoin($existing);
             }
 
             $position = $this->nextPosition($date);
@@ -65,6 +81,62 @@ class TrainingQueueService
 
             return $entry;
         });
+
+        // Both dashboards read the same board payload, so one signal updates
+        // the teacher who added and every screen watching the floor.
+        event(new TrainingBoardChanged('queue.added', ['entry_id' => $entry->id]));
+
+        return $entry;
+    }
+
+    /**
+     * Why a student already in today's line cannot simply be added again.
+     *
+     * A student who finished earlier may rejoin — the centre runs repeat
+     * training on the same day, and their completed session stays in the
+     * history either way — so only the three open states refuse.
+     */
+    protected function assertCanRejoin(TrainingQueueEntry $existing): void
+    {
+        $message = match ($existing->status) {
+            TrainingQueueEntry::WAITING => __('This student is already in the waiting queue.'),
+            TrainingQueueEntry::TRAINING_IN_PROGRESS => __('This student is currently in training.'),
+            TrainingQueueEntry::ATTENDANCE_PENDING => __("This student's attendance/evaluation is pending."),
+            default => null,
+        };
+
+        if ($message !== null) {
+            throw new RuntimeException($message);
+        }
+    }
+
+    /**
+     * The active students a teacher may put in the line for a date — the same
+     * reach they have over the line itself, so they cannot queue somebody they
+     * would then be unable to see or take.
+     *
+     * @return Collection<int, Student>
+     */
+    public function addableFor(int $instructorId, $date = null): Collection
+    {
+        $date = Carbon::parse($date ?? today())->toDateString();
+
+        return Student::query()
+            ->where('status', 'active')
+            ->when(
+                ! Setting::flag('training_shared_queue'),
+                fn ($query) => $query->where(fn ($q) => $q
+                    ->ownedByInstructorOn($instructorId, $date)
+                    ->orWhere(fn ($open) => $open->unassignedOn($date))),
+            )
+            ->orderBy('full_name')
+            ->get(['id', 'full_name', 'student_number', 'phone', 'current_instructor_id']);
+    }
+
+    /** Whether this teacher is allowed to queue this student for the date. */
+    public function canAdd(int $instructorId, Student $student, $date = null): bool
+    {
+        return $this->addableFor($instructorId, $date)->contains('id', $student->id);
     }
 
     /** Takes a student out of the line and closes the gap behind them. */
