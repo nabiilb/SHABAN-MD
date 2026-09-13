@@ -300,15 +300,25 @@ class InstructorDataIsolationTest extends TestCase
         $this->actingAs($this->xasanUser)->get(route($route))->assertForbidden();
     }
 
-    public function test_the_instructor_navigation_never_links_to_company_finance(): void
+    /**
+     * The instructor's My Finance menu reaches their own fuel and the debts
+     * that touch their vehicles — never the admin's company ledger, and never
+     * a company-wide figure.
+     */
+    public function test_the_instructor_navigation_never_links_to_the_company_ledger(): void
     {
         $response = $this->actingAs($this->xasanUser)->get(route('instructor.dashboard'));
 
         $response->assertOk();
         $response->assertDontSee('Total Income');
         $response->assertDontSee('Net Profit');
-        $response->assertDontSee('Company Debts');
         $response->assertDontSee('Audit Logs');
         $response->assertDontSee(route('admin.dashboard'));
+        $response->assertDontSee(route('admin.debts.index'));
+        $response->assertDontSee(route('admin.fuel.index'));
+
+        // Their own scoped pages are linked, and they are instructor routes.
+        $response->assertSee(route('instructor.fuel.index'));
+        $response->assertSee(route('instructor.company-debts.index'));
     }
 }

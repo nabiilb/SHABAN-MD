@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -39,6 +40,30 @@ class FuelRecord extends Model
             'is_credit' => 'boolean',
             'odometer' => 'integer',
         ];
+    }
+
+    /**
+     * Fuel an instructor may read: the fill-ups recorded against them, and
+     * everything bought for a vehicle assigned to them. Both relationships are
+     * already on the table — `instructor_id` names who took the fuel, and
+     * `vehicle_id` reaches the instructor through the vehicle's own assignment
+     * — so a fill-up on somebody else's car stays out of reach.
+     */
+    public function scopeVisibleTo(Builder $query, User $user): Builder
+    {
+        if ($user->isAdmin()) {
+            return $query;
+        }
+
+        if ($user->isInstructor()) {
+            $instructorId = $user->instructorId() ?? 0;
+
+            return $query->where(fn (Builder $q) => $q
+                ->where('fuel_records.instructor_id', $instructorId)
+                ->orWhereHas('vehicle', fn (Builder $v) => $v->where('vehicles.instructor_id', $instructorId)));
+        }
+
+        return $query->whereRaw('1 = 0');
     }
 
     public function vehicle(): BelongsTo

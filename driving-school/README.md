@@ -88,10 +88,24 @@ A separate **"My Dashboard"**, never the admin one. An instructor reaches only:
 * his own attendance, lessons and transfers
 * the vehicles assigned to him
 * his own loan / credit balance
+* **My Finance → Fuel**: fill-ups recorded against him, and fuel bought for a
+  vehicle assigned to him — read only
+* **My Finance → Company Debts**: debts raised against one of his vehicles, and
+  fuel he took on credit — read only
 
 He can reach **none** of: other instructors' students, attendance, lessons,
-vehicles or loans; company income, expenses, profit, debts, supplier balances
-or financial reports; fuel records; audit logs; user management; settings.
+vehicles, loans or fuel; company income, expenses, profit, supplier balances,
+financial reports or any debt that does not touch his own work; audit logs;
+user management; settings. Raising, editing, paying, cancelling and deleting
+stay with the admin for both modules — an instructor reads, and that is all.
+
+Both pages are filtered by `FuelRecord::visibleTo()` and
+`CompanyDebt::visibleTo()`, the same scopes the admin lists use (they simply
+return everything for an admin), and the record-level policy asks those same
+scopes — so swapping an id in the address bar returns 403 rather than somebody
+else's fill-up. A company debt names no instructor and never should; it reaches
+one only through `company_debts.vehicle_id` or through
+`fuel_records.company_debt_id`. No migration was needed for either module.
 
 ### Student — read only
 Profile, current instructor, training progress, attendance history and lesson
@@ -415,7 +429,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-228 tests / 1,038 assertions, run against MySQL (`driving_school_test`; see
+238 tests / 1,109 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -435,6 +449,7 @@ php artisan test
 | `AdminCrudTest` | Real create/read/update/delete against MySQL, validation, search and filters |
 | `DashboardAndReportTest` | Dashboard figures computed from the database; reports and exports |
 | `TeacherQueueVisibilityTest` | The admin board and the teacher console describe one queue — two waiting students are counted by the admin and offered to the teacher, order and live positions match, a completed student keeps no position, claiming one promotes the next, two teachers cannot claim the same student, and no waiting student is invisible to every console |
+| `InstructorFinanceAccessTest` | Fuel and Company Debts for instructors — own records only, another instructor's refused by id, every write still admin-only, the menu carries both entries and highlights the open one, empty states, and the admin's own pages unchanged |
 | `TeacherAddToQueueTest` | A teacher adds a student to the line — waiting not training, correct position, visible to the admin, refused when already waiting, training or pending, a finished student may rejoin, the unique key stops a double add, positions stay right once somebody completes, and a teacher gains no admin queue controls |
 | `LegacyMysqlCompatibilityTest` | The schema installs on MySQL 5.5 — no migration reaches for generated columns, JSON columns or Laravel's 5.7-only column inspection, both guards are plain columns under unique indexes, and `migrate` completes behind a hook that refuses what 5.5 refuses |
 | `PageRendersTest` | Every GET route renders for its role, in English and Somali |

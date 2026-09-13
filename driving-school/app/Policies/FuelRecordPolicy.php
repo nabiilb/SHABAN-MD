@@ -6,19 +6,30 @@ use App\Models\FuelRecord;
 use App\Models\User;
 
 /**
- * Company finance and system data are admin-only. Instructors and students
- * never pass any of these checks.
+ * Fuel is company money, so every write stays with the admin. An instructor may
+ * read the fill-ups that are theirs — their own, and those for a vehicle
+ * assigned to them — and nothing else; the record-level check below is the same
+ * question FuelRecord::visibleTo() asks of the list, so an id typed into the
+ * address bar reaches no further than the page does.
  */
 class FuelRecordPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->isAdmin();
+        return $user->isAdmin() || ($user->isInstructor() && $user->instructorId() !== null);
     }
 
     public function view(User $user, FuelRecord $model): bool
     {
-        return $user->isAdmin();
+        if ($user->isAdmin()) {
+            return true;
+        }
+
+        if (! $user->isInstructor() || $user->instructorId() === null) {
+            return false;
+        }
+
+        return FuelRecord::query()->whereKey($model->getKey())->visibleTo($user)->exists();
     }
 
     public function create(User $user): bool

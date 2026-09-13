@@ -36,7 +36,21 @@
 
 <p class="nav-heading">{{ __('My Finance') }}</p>
 <div class="space-y-0.5">
-    <a href="{{ route('instructor.loans.index') }}" class="{{ $link('instructor.loans.*') }}">
-        <x-icon name="money" /> <span>{{ __('My Loan & Credit') }}</span>
-    </a>
+    {{-- Each entry is gated on the same policy its page is, so a link never
+         appears for something the instructor would then be refused. --}}
+    @can('viewAny', \App\Models\FuelRecord::class)
+        <a href="{{ route('instructor.fuel.index') }}" class="{{ $link('instructor.fuel.*') }}">
+            <x-icon name="fuel" /> <span>{{ __('Fuel') }}</span>
+        </a>
+    @endcan
+    @can('viewAny', \App\Models\CompanyDebt::class)
+        <a href="{{ route('instructor.company-debts.index') }}" class="{{ $link('instructor.company-debts.*') }}">
+            <x-icon name="debt" /> <span>{{ __('Company Debts') }}</span>
+        </a>
+    @endcan
+    @can('viewAny', \App\Models\InstructorLoan::class)
+        <a href="{{ route('instructor.loans.index') }}" class="{{ $link('instructor.loans.*') }}">
+            <x-icon name="money" /> <span>{{ __('My Loan & Credit') }}</span>
+        </a>
+    @endcan
 </div>

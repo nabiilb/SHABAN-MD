@@ -39,8 +39,19 @@ class PageRendersTest extends TestCase
     }
 
     /** Resolves a concrete id for each route parameter name. */
-    private function parameterValues(string $prefix = 'admin.'): array
+    private function parameterValues(string $prefix = 'admin.', ?User $user = null): array
     {
+        // The instructor finance pages are scoped, so bind a record that
+        // instructor can actually see — anything else is a correct 403, not a
+        // page that failed to render.
+        $fuel = $user && $prefix === 'instructor.'
+            ? FuelRecord::query()->visibleTo($user)->value('id')
+            : FuelRecord::first()?->id;
+
+        $debt = $user && $prefix === 'instructor.'
+            ? CompanyDebt::query()->visibleTo($user)->value('id')
+            : CompanyDebt::first()->id;
+
         return [
             'student' => Student::first()->id,
             'instructor' => Instructor::first()->id,
@@ -48,23 +59,24 @@ class PageRendersTest extends TestCase
             'attendance' => Attendance::first()->id,
             'lesson' => Lesson::first()->id,
             'supplier' => Supplier::first()->id,
-            'debt' => CompanyDebt::first()->id,
+            'debt' => $debt,
+            'companyDebt' => $debt,
             'expense' => CompanyExpense::whereNull('debt_payment_id')->first()->id,
             'category' => ExpenseCategory::first()->id,
             'loan' => InstructorLoan::first()->id,
             'payment' => StudentPayment::first()->id,
             'user' => User::first()->id,
             'auditLog' => AuditLog::first()->id,
-            'fuel' => FuelRecord::first()?->id,
+            'fuel' => $fuel,
             // Instructors may only run the four "my" reports.
             'report' => $prefix === 'instructor.' ? 'my-students' : 'students',
             'locale' => 'so',
         ];
     }
 
-    private function routesFor(string $prefix): array
+    private function routesFor(string $prefix, ?User $user = null): array
     {
-        $params = $this->parameterValues($prefix);
+        $params = $this->parameterValues($prefix, $user);
         $urls = [];
 
         foreach (Route::getRoutes() as $route) {
@@ -102,7 +114,7 @@ class PageRendersTest extends TestCase
 
     private function assertAllRender(User $user, string $prefix): void
     {
-        $urls = $this->routesFor($prefix);
+        $urls = $this->routesFor($prefix, $user);
 
         $this->assertNotEmpty($urls, "No routes found for prefix {$prefix}");
 

@@ -133,6 +133,13 @@ Route::middleware(['auth', 'role:instructor', 'instructor.profile'])
         Route::get('transfers/create', [Instructor\TransferController::class, 'create'])->name('transfers.create');
         Route::post('transfers', [Instructor\TransferController::class, 'store'])->name('transfers.store');
 
+        /* My Finance — read only, and only what belongs to this instructor. */
+        Route::get('fuel', [Instructor\FuelController::class, 'index'])->name('fuel.index');
+        Route::get('fuel/{fuel}', [Instructor\FuelController::class, 'show'])->name('fuel.show');
+
+        Route::get('company-debts', [Instructor\CompanyDebtController::class, 'index'])->name('company-debts.index');
+        Route::get('company-debts/{companyDebt}', [Instructor\CompanyDebtController::class, 'show'])->name('company-debts.show');
+
         Route::get('loans', [Instructor\LoanController::class, 'index'])->name('loans.index');
         Route::get('loans/{loan}', [Instructor\LoanController::class, 'show'])->name('loans.show');
 
