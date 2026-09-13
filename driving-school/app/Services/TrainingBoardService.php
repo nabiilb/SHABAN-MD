@@ -96,7 +96,7 @@ class TrainingBoardService
             'instructor_id' => $instructorId,
             'instructor' => Instructor::find($instructorId)?->full_name,
             'current' => $current ? $current->toBoardArray() + [
-                'ownership' => $current->queueEntry?->ownershipOn($instructorId)
+                'ownership' => $current->queueEntry?->ownershipOn()
                     ?? ($current->student?->current_instructor_id === $instructorId ? 'permanent' : 'transferred'),
             ] : null,
             'current_session_id' => $current?->id,
@@ -144,7 +144,8 @@ class TrainingBoardService
      */
     protected function entryArray(TrainingQueueEntry $entry, int $index, ?int $instructorId = null): array
     {
-        $ownership = $entry->ownershipOn($instructorId);
+        $ownership = $entry->ownershipOn();
+        $owner = $entry->ownerIdOn();
 
         return [
             'id' => $entry->id,
@@ -157,6 +158,10 @@ class TrainingBoardService
             'status_icon' => $entry->status_icon,
             'waiting_minutes' => $entry->waiting_minutes,
             'ownership' => $ownership,
+            // False when a shared queue is showing this teacher somebody
+            // else's student, so the row can say whose they are.
+            'mine' => $instructorId === null || $owner === $instructorId,
+            'owner' => $entry->student?->currentInstructor?->full_name,
             'ownership_label' => match ($ownership) {
                 'permanent' => __('Permanent'),
                 'unassigned' => __('Unassigned'),

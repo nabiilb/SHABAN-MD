@@ -36,9 +36,11 @@ class SettingsController extends Controller
             'near_completion_threshold' => ['required', 'integer', 'min:1', 'max:100'],
             'default_locale' => ['required', Rule::in(array_keys(config('app.supported_locales')))],
             'allow_duplicate_attendance' => ['nullable', 'boolean'],
+            'training_shared_queue' => ['nullable', 'boolean'],
         ]);
 
         $data['allow_duplicate_attendance'] = $request->boolean('allow_duplicate_attendance') ? '1' : '0';
+        $data['training_shared_queue'] = $request->boolean('training_shared_queue') ? '1' : '0';
 
         foreach ($data as $key => $value) {
             Setting::put($key, $value ?? '');

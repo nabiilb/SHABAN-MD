@@ -29,6 +29,13 @@ class TrainingQueueSeeder extends Seeder
             ['value' => '1', 'group' => 'training', 'label' => 'Auto-start Next Student'],
         );
 
+        // Off by default: each teacher's line is their own students for the
+        // day. An admin can switch the whole centre to one shared line.
+        Setting::updateOrCreate(
+            ['key' => 'training_shared_queue'],
+            ['value' => '0', 'group' => 'training', 'label' => 'One Shared Training Queue'],
+        );
+
         $admin = User::where('email', 'admin@example.com')->first();
 
         // Every active student joins their own teacher's queue for today.

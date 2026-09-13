@@ -54,6 +54,15 @@
                     </select>
                 </x-field>
                 <label class="flex items-start gap-2 text-sm text-slate-700 sm:col-span-2">
+                    <input type="checkbox" name="training_shared_queue" value="1"
+                           @checked(\App\Models\Setting::flag('training_shared_queue'))
+                           class="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                    <span>
+                        {{ __('One shared training queue') }}
+                        <span class="block text-xs text-slate-400">{{ __('By default each teacher sees their own students for the day, plus anyone transferred to them and anyone with no teacher. Turn this on to let every teacher see and take the whole waiting line.') }}</span>
+                    </span>
+                </label>
+                <label class="flex items-start gap-2 text-sm text-slate-700 sm:col-span-2">
                     <input type="checkbox" name="allow_duplicate_attendance" value="1"
                            @checked(\App\Models\Setting::flag('allow_duplicate_attendance'))
                            class="mt-0.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500">

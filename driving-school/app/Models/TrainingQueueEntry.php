@@ -112,6 +112,10 @@ class TrainingQueueEntry extends Model
      * name, or owns the student for the date. An entry nobody owns for the date
      * belongs to every teacher's line: somebody has to be able to take them, or
      * the admin board counts a waiting student that no console will ever show.
+     *
+     * Turning on the `training_shared_queue` setting drops the ownership rule
+     * altogether: one line, every teacher sees all of it, and only a named
+     * preferred teacher narrows an entry.
      */
     public function scopeClaimableBy(Builder $query, ?int $instructorId, $date = null): Builder
     {
@@ -131,10 +135,21 @@ class TrainingQueueEntry extends Model
         return $query->where(function (Builder $q) use ($instructorId, $date, $wanted, $unwanted) {
             // Asked for by name — a preference for a teacher who has left is
             // no preference at all.
-            $q->where(fn (Builder $preferred) => $wanted($preferred)->where('preferred_instructor_id', $instructorId))
-                // Nobody asked for, and this teacher owns them for the date.
-                ->orWhere(fn (Builder $own) => $unwanted($own)
-                    ->whereHas('student', fn (Builder $s) => $s->ownedByInstructorOn($instructorId, $date)))
+            $q->where(fn (Builder $preferred) => $wanted($preferred)->where('preferred_instructor_id', $instructorId));
+
+            // One shared line: every teacher sees every student nobody asked
+            // for by name, and takes whoever is next. Off by default, because
+            // the per-teacher line is what makes a day's transfer mean
+            // anything.
+            if (Setting::flag('training_shared_queue')) {
+                $q->orWhere(fn (Builder $anyone) => $unwanted($anyone));
+
+                return;
+            }
+
+            // Nobody asked for, and this teacher owns them for the date.
+            $q->orWhere(fn (Builder $own) => $unwanted($own)
+                ->whereHas('student', fn (Builder $s) => $s->ownedByInstructorOn($instructorId, $date)))
                 // Nobody owns them for the date either: open to whoever is free.
                 ->orWhere(fn (Builder $open) => $unwanted($open)
                     ->whereHas('student', fn (Builder $s) => $s->unassignedOn($date)));
@@ -154,10 +169,16 @@ class TrainingQueueEntry extends Model
     }
 
     /**
-     * Whether this student is the teacher's own, here on a transfer, or in the
-     * open pool that belongs to nobody.
+     * How this student came to be in the day's line: with their own teacher,
+     * handed to someone else for the day, or belonging to nobody.
+     *
+     * Deliberately says nothing about who is looking. A student who permanently
+     * belongs to another teacher is still "permanent" — they are simply not
+     * this teacher's — and calling them "transferred" because someone else is
+     * reading the board would be a lie, which is what the shared queue used to
+     * print.
      */
-    public function ownershipOn(?int $instructorId = null): string
+    public function ownershipOn(): string
     {
         $owner = $this->student?->instructorIdOn($this->queue_date);
 
@@ -165,9 +186,13 @@ class TrainingQueueEntry extends Model
             return 'unassigned';
         }
 
-        $instructorId ??= $owner;
+        return $this->student?->current_instructor_id === $owner ? 'permanent' : 'transferred';
+    }
 
-        return $this->student?->current_instructor_id === $instructorId ? 'permanent' : 'transferred';
+    /** The teacher responsible for this student on the entry's date. */
+    public function ownerIdOn(): ?int
+    {
+        return $this->student?->instructorIdOn($this->queue_date);
     }
 
     /* ----------------------------------------------------------------

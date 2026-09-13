@@ -85,7 +85,7 @@
                     <div>
                         <p class="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">{{ __('Waiting Queue') }}</p>
                         <ul class="divide-y divide-slate-100 rounded-xl border border-slate-200">
-                            <template x-for="item in teacher.queue" :key="item.id">
+                            <template x-for="item in (teacher.queue || [])" :key="item.id">
                                 <li class="flex items-center justify-between gap-3 px-4 py-2.5">
                                     <div class="min-w-0">
                                         <p class="truncate text-sm font-medium text-slate-800">
@@ -101,7 +101,7 @@
                                           x-text="item.ownership_label"></span>
                                 </li>
                             </template>
-                            <template x-if="! teacher.queue.length">
+                            <template x-if="! (teacher.queue || []).length">
                                 <li class="px-4 py-6 text-center text-sm text-slate-400">{{ __('Nobody is waiting.') }}</li>
                             </template>
                         </ul>

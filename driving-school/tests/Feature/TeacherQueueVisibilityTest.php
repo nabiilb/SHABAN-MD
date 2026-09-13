@@ -290,6 +290,47 @@ class TeacherQueueVisibilityTest extends TestCase
         $this->assertSame([], $this->teacherQueueNames($this->xasanUser));
     }
 
+    /**
+     * The escape hatch for a centre that runs one line rather than a line per
+     * teacher: every teacher sees the whole queue, including students who
+     * permanently belong to someone else.
+     */
+    public function test_the_shared_queue_setting_gives_every_teacher_the_whole_line(): void
+    {
+        $this->queue()->add($this->makeStudent('Ilyas', $this->xasan), $this->admin);
+        $this->queue()->add($this->makeStudent('Maryan', $this->nasteexo), $this->admin);
+        $this->queueUnassigned('Ahmed');
+
+        // Per-teacher by default.
+        $this->assertSame(['Ilyas', 'Ahmed'], $this->teacherQueueNames($this->xasanUser));
+
+        Setting::put('training_shared_queue', '1');
+
+        foreach ([$this->xasanUser, $this->nasteexoUser] as $teacher) {
+            $this->assertSame(['Ilyas', 'Maryan', 'Ahmed'], $this->teacherQueueNames($teacher));
+        }
+
+        // And a teacher can actually take someone else's student.
+        $maryan = TrainingQueueEntry::whereHas('student', fn ($q) => $q->where('full_name', 'Maryan'))->firstOrFail();
+        $session = $this->sessions()->start($maryan, $this->xasan, $this->xasanUser, ['assigned_duration_minutes' => 30]);
+
+        $this->assertSame('Maryan', $session->student->full_name);
+        $this->assertSame($this->xasan->id, $session->instructor_id);
+    }
+
+    /** A named preferred teacher still narrows an entry in shared mode. */
+    public function test_a_preferred_teacher_is_respected_even_in_shared_mode(): void
+    {
+        Setting::put('training_shared_queue', '1');
+
+        $this->queue()->add($this->makeStudent('Ahmed', null), $this->admin, [
+            'preferred_instructor_id' => $this->nasteexo->id,
+        ]);
+
+        $this->assertSame(['Ahmed'], $this->teacherQueueNames($this->nasteexoUser));
+        $this->assertSame([], $this->teacherQueueNames($this->xasanUser));
+    }
+
     /** Runs one student all the way through, returning whatever started next. */
     private function completeTraining(Instructor $teacher, User $actor): ?TrainingSession
     {

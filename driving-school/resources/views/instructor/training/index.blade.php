@@ -12,7 +12,7 @@
      })">
 
     {{-- CURRENT TRAINING ------------------------------------------------ --}}
-    <template x-if="board.current">
+    <template x-if="board && board.current">
         <div class="card overflow-hidden">
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
                 <h3 class="card-title">
@@ -156,7 +156,7 @@
     </template>
 
     {{-- NOTHING RUNNING — start the next student ------------------------- --}}
-    <template x-if="! board.current">
+    <template x-if="board && ! board.current">
         <div class="card p-6">
             <h3 class="card-title">{{ __('No training in progress') }}</h3>
 
@@ -166,13 +166,13 @@
                 </p>
             </template>
 
-            <template x-if="board.queue.length">
+            <template x-if="(board.queue || []).length">
                 <form method="POST" action="{{ route('instructor.training.start') }}" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     @csrf
                     <div class="sm:col-span-2">
                         <label class="label">{{ __('Student') }}</label>
                         <select name="training_queue_entry_id" class="input" required>
-                            <template x-for="item in board.queue" :key="item.id">
+                            <template x-for="item in (board.queue || [])" :key="item.id">
                                 <option :value="item.id" x-text="`#${item.display_position} — ${item.student}`"></option>
                             </template>
                         </select>
@@ -200,7 +200,7 @@
                 </form>
             </template>
 
-            <template x-if="! board.queue.length">
+            <template x-if="! (board.queue || []).length">
                 <p class="mt-2 text-sm text-slate-500">{{ __('No students waiting.') }}</p>
             </template>
         </div>
@@ -211,7 +211,7 @@
         <div class="card lg:col-span-1">
             <div class="card-header">
                 <h3 class="card-title">🟡 {{ __('Waiting Queue') }}</h3>
-                <span class="badge-amber" x-text="board.queue_total"></span>
+                <span class="badge-amber" x-text="board.queue_total ?? 0"></span>
             </div>
 
             {{-- What a one-click Select starts the student on. --}}
@@ -235,8 +235,35 @@
                 </div>
             </div>
 
+            {{-- If the page's JavaScript never starts — stale assets, a blocked
+                 bundle — the teacher still sees the line the server rendered
+                 rather than an empty card. Alpine hides this on init. --}}
+            <ul class="divide-y divide-slate-100" x-show="false">
+                @forelse ($board['queue'] as $item)
+                    <li class="flex items-center justify-between gap-3 px-5 py-3">
+                        <div class="min-w-0">
+                            <p class="truncate text-sm font-semibold text-slate-800">
+                                <span class="text-slate-400">#{{ $item['display_position'] }}</span>
+                                {{ $item['student'] }}
+                            </p>
+                            <p class="text-xs text-slate-400">
+                                {{ $item['status_label'] }} · {{ $item['waiting_minutes'] }} {{ __('min waiting') }}
+                            </p>
+                        </div>
+                        <form method="POST" action="{{ route('instructor.training.start') }}" class="shrink-0">
+                            @csrf
+                            <input type="hidden" name="training_queue_entry_id" value="{{ $item['id'] }}">
+                            <input type="hidden" name="assigned_duration_minutes" value="30">
+                            <button class="btn-primary btn-sm">{{ __('Select') }}</button>
+                        </form>
+                    </li>
+                @empty
+                    <li class="px-5 py-8 text-center text-sm text-slate-400">{{ __('No students waiting.') }}</li>
+                @endforelse
+            </ul>
+
             <ul class="divide-y divide-slate-100">
-                <template x-for="item in board.queue" :key="item.id">
+                <template x-for="item in (board.queue || [])" :key="item.id">
                     <li class="flex items-center justify-between gap-3 px-5 py-3">
                         <div class="min-w-0">
                             <p class="truncate text-sm font-semibold text-slate-800">
@@ -249,8 +276,14 @@
                                 · {{ __('no timer running') }}
                             </p>
                             <p class="text-[10px] font-semibold uppercase tracking-wide"
-                               :class="item.ownership === 'permanent' ? 'text-slate-400' : 'text-brand-600'"
-                               x-text="item.ownership_label"></p>
+                               :class="item.mine ? 'text-slate-400' : 'text-brand-600'">
+                                <span x-text="item.ownership_label"></span>
+                                {{-- With one shared queue a teacher sees other
+                                     teachers' students, so say whose. --}}
+                                <template x-if="! item.mine && item.owner">
+                                    <span>· <span x-text="item.owner"></span></span>
+                                </template>
+                            </p>
                         </div>
 
                         {{-- One click takes this student, whoever is at the top
@@ -268,11 +301,11 @@
                         </form>
                     </li>
                 </template>
-                <template x-if="! board.queue.length">
+                <template x-if="! (board.queue || []).length">
                     <li class="px-5 py-8 text-center text-sm text-slate-400">{{ __('No students waiting.') }}</li>
                 </template>
             </ul>
-            <template x-if="board.queue_overflow > 0">
+            <template x-if="(board.queue_overflow || 0) > 0">
                 <div class="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">
                     <span x-text="board.queue_overflow"></span> {{ __('more waiting') }}
                 </div>

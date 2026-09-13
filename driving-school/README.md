@@ -346,6 +346,13 @@ permanent instructor) was counted by the admin board and shown on no console at
 all. `TrainingSessionService::start()` asks the same rule before claiming, so
 what a teacher can see is exactly what a teacher can take.
 
+A centre that runs one line rather than a line per teacher turns on **One shared
+training queue** in Settings: every teacher then sees the whole waiting list and
+may take anyone from it, with each row naming whose student they are. A named
+preferred teacher still narrows an entry. `php artisan training:check-queue`
+prints, for a date, the admin's count, every teacher's line as the board service
+builds it, and any waiting student no console can reach.
+
 Queue numbers are counted over the students still waiting, never read off the
 stored `position` — that column is only an ordering key for an admin's manual
 reorder, and two rows can legitimately hold the same value. A student who is
@@ -397,7 +404,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-211 tests / 978 assertions, run against MySQL (`driving_school_test`; see
+213 tests / 985 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
