@@ -27,6 +27,7 @@ class DashboardService
             'total_expenses' => (float) CompanyExpense::sum('amount'),
             'net_profit' => round((float) StudentPayment::sum('amount') - (float) CompanyExpense::sum('amount'), 2),
             'outstanding_debt' => (float) CompanyDebt::outstanding()->sum('remaining_amount'),
+            'outstanding_fees' => $this->outstandingFees(),
             'active_students' => Student::where('status', 'active')->count(),
             'checkins_today' => Attendance::whereDate('attendance_date', $today)->where('status', 'present')->count(),
             'registrations_this_month' => Student::whereBetween('start_date', [
@@ -39,6 +40,35 @@ class DashboardService
             'total_vehicles' => Vehicle::count(),
             'lessons_today' => Lesson::whereDate('lesson_date', $today)->count(),
         ];
+    }
+
+    /**
+     * Fees agreed with students that have not been paid yet — what the school
+     * is owed, the mirror of `outstanding_debt`.
+     *
+     * A fee is NOT income. Income is the cash a student actually hands over,
+     * recorded as a student payment, in exactly the same way that a company
+     * debt is not an expense until it is paid. Setting a student's Total Fee
+     * therefore moves this figure, never Total Income.
+     *
+     * Summed in one query rather than per student, so a full roll never grows
+     * into a query per row.
+     */
+    public function outstandingFees(): float
+    {
+        $paid = StudentPayment::query()
+            ->selectRaw('student_id, sum(amount) as paid')
+            ->whereNull('deleted_at')
+            ->groupBy('student_id');
+
+        $total = Student::query()
+            ->leftJoinSub($paid, 'p', fn ($join) => $join->on('p.student_id', '=', 'students.id'))
+            ->where('students.status', '!=', 'cancelled')
+            // A student who has overpaid does not offset one who has not.
+            ->selectRaw('coalesce(sum(greatest(students.total_fee - coalesce(p.paid, 0), 0)), 0) as owed')
+            ->value('owed');
+
+        return round((float) $total, 2);
     }
 
     /** Daily attendance counts for the last N days. */

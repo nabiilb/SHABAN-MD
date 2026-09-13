@@ -8,11 +8,17 @@
 
 @section('content')
 {{-- Financial headline cards --}}
-<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    <x-stat-card :label="__('Total Income')" :value="$c.number_format($metrics['total_income'], 2)" icon="money" tone="green" />
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <x-stat-card :label="__('Total Income')" :value="$c.number_format($metrics['total_income'], 2)" icon="money" tone="green"
+                 :href="route('admin.student-payments.index')" />
     <x-stat-card :label="__('Total Expenses')" :value="$c.number_format($metrics['total_expenses'], 2)" icon="money" tone="rose" />
     <x-stat-card :label="__('Net Profit')" :value="$c.number_format($metrics['net_profit'], 2)"
                  icon="trend" :tone="$metrics['net_profit'] >= 0 ? 'green' : 'rose'" />
+    {{-- What students owe the school: fees agreed but not yet paid. The mirror
+         of Outstanding Debt, and where a new student's Total Fee shows up —
+         income is the cash they actually hand over. --}}
+    <x-stat-card :label="__('Unpaid Student Fees')" :value="$c.number_format($metrics['outstanding_fees'], 2)"
+                 icon="users" tone="violet" :href="route('admin.student-payments.index')" />
     <x-stat-card :label="__('Outstanding Debt')" :value="$c.number_format($metrics['outstanding_debt'], 2)"
                  icon="debt" tone="amber" :href="route('admin.debts.index')" />
 </div>

@@ -361,6 +361,23 @@ migration:
 fails on any of these constructs, and it runs `php artisan migrate` into a
 scratch database behind a hook that rejects exactly what MySQL 5.5 rejects.
 
+### A fee is not income
+
+A student's **Total Fee** is what they owe, not what the school has earned.
+Income is the cash a student actually hands over, recorded as a student
+payment — the same rule the ledger already applies on the other side, where a
+company debt is not an expense until it is paid. Setting a fee therefore moves
+**Unpaid Student Fees** on the dashboard, never **Total Income**, and paying it
+moves the money across:
+
+    Total Fee $120, nothing paid  →  income $0,   unpaid fees $120
+    $50 paid                      →  income $50,  unpaid fees $70
+    $70 more                      →  income $120, unpaid fees $0
+
+`DashboardService::outstandingFees()` sums it in one query — fee minus payments,
+floored at zero per student so an overpayment cannot cancel out somebody else's
+arrears, and cancelled students excluded.
+
 ### A note on timestamp columns
 
 The training tables use `DATETIME` rather than `TIMESTAMP` for the times the
@@ -457,7 +474,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-255 tests / 1,224 assertions, run against MySQL (`driving_school_test`; see
+261 tests / 1,240 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -477,6 +494,7 @@ php artisan test
 | `AdminCrudTest` | Real create/read/update/delete against MySQL, validation, search and filters |
 | `DashboardAndReportTest` | Dashboard figures computed from the database; reports and exports |
 | `TeacherQueueVisibilityTest` | The admin board and the teacher console describe one queue — two waiting students are counted by the admin and offered to the teacher, order and live positions match, a completed student keeps no position, claiming one promotes the next, two teachers cannot claim the same student, and no waiting student is invisible to every console |
+| `StudentFeeIncomeTest` | A student's fee is owed, not earned — a new fee moves Unpaid Student Fees and not income, paying it moves the money across, an overpayment cannot offset another student's arrears, and a cancelled student drops out |
 | `InstructorFuelEntryTest` | An instructor records fuel — pending, own vehicle only, nothing posted until approval; approving writes the expense (cash) or the debt (credit); a failed ledger write rolls the approval back; foreign vehicle ids, bad numbers and future dates refused; a resubmitted form records nothing twice; the resulting debt visible to its instructor and the admin alone; and the admin's save-and-pay flow unchanged |
 | `InstructorFinanceAccessTest` | Fuel and Company Debts for instructors — own records only, another instructor's refused by id, every write still admin-only, the menu carries both entries and highlights the open one, empty states, and the admin's own pages unchanged |
 | `TeacherAddToQueueTest` | A teacher adds a student to the line — waiting not training, correct position, visible to the admin, refused when already waiting, training or pending, a finished student may rejoin, the unique key stops a double add, positions stay right once somebody completes, and a teacher gains no admin queue controls |
