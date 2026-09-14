@@ -88,9 +88,17 @@ class TrainingConsoleStateTest extends TestCase
         }
     }
 
+    /**
+     * The student's open queue entry, whatever day it was opened on — nothing
+     * enrols them again when the clock passes midnight, so a test that crosses
+     * into the next day is still looking for yesterday's row.
+     */
     private function entryFor(Student $student): TrainingQueueEntry
     {
-        return TrainingQueueEntry::where('student_id', $student->id)->forDate(today())->firstOrFail();
+        return TrainingQueueEntry::where('student_id', $student->id)
+            ->inLine()
+            ->orderBy('queue_date')
+            ->firstOrFail();
     }
 
     /* 1 --------------------------------------------------------------- */

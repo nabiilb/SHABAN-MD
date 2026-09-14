@@ -240,11 +240,18 @@
                      'full_name' => $student->full_name,
                      'student_number' => $student->student_number,
                      'phone' => $student->phone,
-                     // A student already in today's line cannot be added again;
-                     // one who finished may rejoin, so only the open states block.
-                     'blocked_by' => in_array($student->queue_status, \App\Models\TrainingQueueEntry::OPEN_STATUSES, true)
-                         ? __(ucwords(str_replace('_', ' ', $student->queue_status)))
+                     // Why this student cannot be picked, straight from the
+                     // same TrainingEligibilityService the POST will consult —
+                     // so the dialog never offers somebody the server refuses.
+                     // Students belonging to another teacher are not in this
+                     // list at all; these are only this teacher's own.
+                     'blocked_by' => $student->queue_eligibility?->eligible === false
+                         ? ($student->queue_eligibility->code === \App\Support\QueueEligibility::COOLING_DOWN
+                             ? __('Available at :time', ['time' => $student->queue_eligibility->availableAt()])
+                             : $student->queue_eligibility->reason)
                          : null,
+                     // The same wait as a duration, for the tooltip.
+                     'available_in' => $student->queue_eligibility?->remainingLabel(),
                  ])->values()) }},
                  openAdd() { this.adding = true; this.search = ''; this.picked = ''; },
                  get matchingStudents() {
@@ -402,7 +409,10 @@
                                                   x-text="`${student.student_number} · ${student.phone ?? ''}`"></span>
                                         </span>
                                         <span class="shrink-0 text-xs font-semibold text-amber-600"
-                                              x-show="student.blocked_by" x-text="student.blocked_by"></span>
+                                              x-show="student.blocked_by" x-text="student.blocked_by"
+                                              :title="student.available_in
+                                                  ? '{{ __('Available in') }} ' + student.available_in
+                                                  : student.blocked_by"></span>
                                         <span class="shrink-0 text-brand-600"
                                               x-show="! student.blocked_by && picked === student.id">✓</span>
                                     </button>

@@ -3,10 +3,10 @@
 namespace App\Services;
 
 use App\Events\TrainingBoardChanged;
-use App\Models\Setting;
 use App\Models\Student;
 use App\Models\TrainingQueueEntry;
 use App\Models\User;
+use App\Support\QueueEligibility;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -20,59 +20,63 @@ use RuntimeException;
  */
 class TrainingQueueService
 {
+    public function __construct(
+        private readonly TrainingEligibilityService $eligibility,
+    ) {}
+
     /**
      * Puts a student in a day's line.
      *
-     * The row is locked before anything is decided and the table has a unique
-     * key on (student_id, queue_date), so two people adding the same student at
-     * the same moment cannot produce two entries: the second either sees the
-     * first inside the transaction or is refused by the index.
+     * Only ever called from a deliberate action — a teacher's Add Student, or
+     * an admin queueing on somebody's behalf. Nothing in this class enrols a
+     * student on its own; reading the board creates no rows.
+     *
+     * Eligibility is asked of TrainingEligibilityService, the same object the
+     * Add Student dialog and the controller ask, and it is asked again *inside*
+     * the transaction with the student row locked — so two clicks a millisecond
+     * apart cannot both pass a check made before either of them wrote anything.
+     * The unique index over (active_student_id, queue_date) is the backstop
+     * behind that lock.
      *
      * Being in the line is not being in training — this only ever writes
      * `waiting`, never a session.
      */
-    public function add(Student $student, User $actor, array $data = [], $date = null): TrainingQueueEntry
-    {
+    public function add(
+        Student $student,
+        User $actor,
+        array $data = [],
+        $date = null,
+        ?int $instructorId = null,
+    ): TrainingQueueEntry {
         $date = Carbon::parse($date ?? today())->toDateString();
 
-        if ($student->status !== 'active') {
-            throw new RuntimeException(__(':name is not an active student.', ['name' => $student->full_name]));
-        }
+        $entry = DB::transaction(function () use ($student, $actor, $data, $date, $instructorId) {
+            // Serialises concurrent adds for this one student without taking a
+            // lock on a queue row that may not exist yet.
+            Student::whereKey($student->id)->lockForUpdate()->firstOrFail();
 
-        $entry = DB::transaction(function () use ($student, $actor, $data, $date) {
-            $existing = TrainingQueueEntry::where('student_id', $student->id)
-                ->whereDate('queue_date', $date)
-                ->lockForUpdate()
-                ->first();
+            $verdict = $this->eligibility->check($instructorId, $student, $date);
 
-            if ($existing) {
-                $this->assertCanRejoin($existing);
+            if (! $verdict->eligible) {
+                throw new RuntimeException($verdict->reason);
             }
 
             $position = $this->nextPosition($date);
 
-            // A student who finished earlier can rejoin the same day; their
-            // old entry is reused so the unique key still holds.
-            $entry = $existing
-                ? tap($existing)->update([
-                    'status' => TrainingQueueEntry::WAITING,
-                    'position' => $position,
-                    'joined_at' => now(),
-                    'preferred_instructor_id' => $data['preferred_instructor_id'] ?? null,
-                    'assigned_duration_minutes' => $data['assigned_duration_minutes'] ?? null,
-                    'notes' => $data['notes'] ?? null,
-                ])
-                : TrainingQueueEntry::create([
-                    'student_id' => $student->id,
-                    'queue_date' => $date,
-                    'position' => $position,
-                    'status' => TrainingQueueEntry::WAITING,
-                    'preferred_instructor_id' => $data['preferred_instructor_id'] ?? null,
-                    'assigned_duration_minutes' => $data['assigned_duration_minutes'] ?? null,
-                    'joined_at' => now(),
-                    'notes' => $data['notes'] ?? null,
-                    'created_by' => $actor->id,
-                ]);
+            // A new cycle is a new row. The finished one keeps its own joined_at,
+            // its own status and its own sessions — this morning's training is
+            // still there after this evening's is added.
+            $entry = TrainingQueueEntry::create([
+                'student_id' => $student->id,
+                'queue_date' => $date,
+                'position' => $position,
+                'status' => TrainingQueueEntry::WAITING,
+                'preferred_instructor_id' => $data['preferred_instructor_id'] ?? null,
+                'assigned_duration_minutes' => $data['assigned_duration_minutes'] ?? null,
+                'joined_at' => now(),
+                'notes' => $data['notes'] ?? null,
+                'created_by' => $actor->id,
+            ]);
 
             AuditLogger::log('training.queued', $entry, __(':name joined the training queue at position :position', [
                 'name' => $student->full_name,
@@ -90,30 +94,18 @@ class TrainingQueueService
     }
 
     /**
-     * Why a student already in today's line cannot simply be added again.
+     * The students a teacher may put in the line for a date: the ones they are
+     * responsible for that day, and nobody else's.
      *
-     * A student who finished earlier may rejoin — the centre runs repeat
-     * training on the same day, and their completed session stays in the
-     * history either way — so only the three open states refuse.
-     */
-    protected function assertCanRejoin(TrainingQueueEntry $existing): void
-    {
-        $message = match ($existing->status) {
-            TrainingQueueEntry::WAITING => __('This student is already in the waiting queue.'),
-            TrainingQueueEntry::TRAINING_IN_PROGRESS => __('This student is currently in training.'),
-            TrainingQueueEntry::ATTENDANCE_PENDING => __("This student's attendance/evaluation is pending."),
-            default => null,
-        };
-
-        if ($message !== null) {
-            throw new RuntimeException($message);
-        }
-    }
-
-    /**
-     * The active students a teacher may put in the line for a date — the same
-     * reach they have over the line itself, so they cannot queue somebody they
-     * would then be unable to see or take.
+     * Ownership comes from Student::ownedByInstructorOn() — the application's
+     * own current-assignment rule, which is students.current_instructor_id as
+     * a transfer leaves it, overridden for the date by any attendance
+     * hand-over. So a transfer moves a student between these lists with no
+     * special case of its own.
+     *
+     * Each student is returned carrying their QueueEligibility, so the dialog
+     * can disable a student in cooldown and say when they come back rather than
+     * offering somebody the server is about to refuse.
      *
      * @return Collection<int, Student>
      */
@@ -121,32 +113,30 @@ class TrainingQueueService
     {
         $date = Carbon::parse($date ?? today())->toDateString();
 
-        return Student::query()
-            ->select('students.*')
-            // Where each of them already stands in today's line, so the dialog
-            // can say so instead of letting somebody pick a student the server
-            // is about to refuse. One correlated sub-select, not a query a row.
-            ->addSelect(['queue_status' => TrainingQueueEntry::query()
-                ->select('status')
-                ->whereColumn('training_queue_entries.student_id', 'students.id')
-                ->whereDate('queue_date', $date)
-                ->limit(1),
-            ])
+        $students = Student::query()
             ->where('students.status', 'active')
-            ->when(
-                ! Setting::flag('training_shared_queue'),
-                fn ($query) => $query->where(fn ($q) => $q
-                    ->ownedByInstructorOn($instructorId, $date)
-                    ->orWhere(fn ($open) => $open->unassignedOn($date))),
-            )
+            ->ownedByInstructorOn($instructorId, $date)
             ->orderBy('full_name')
             ->get();
+
+        $verdicts = $this->eligibility->checkMany($instructorId, $students, $date);
+
+        return $students->each(fn (Student $student) => $student->setAttribute(
+            'queue_eligibility',
+            $verdicts->get($student->id),
+        ));
+    }
+
+    /** Whether this teacher may queue this student for the date, and why not. */
+    public function eligibilityFor(int $instructorId, Student $student, $date = null): QueueEligibility
+    {
+        return $this->eligibility->check($instructorId, $student, $date);
     }
 
     /** Whether this teacher is allowed to queue this student for the date. */
     public function canAdd(int $instructorId, Student $student, $date = null): bool
     {
-        return $this->addableFor($instructorId, $date)->contains('id', $student->id);
+        return $this->eligibilityFor($instructorId, $student, $date)->eligible;
     }
 
     /** Takes a student out of the line and closes the gap behind them. */
@@ -218,54 +208,6 @@ class TrainingQueueService
         });
 
         event(new TrainingBoardChanged('queue.reordered'));
-    }
-
-    /**
-     * Makes sure every student this teacher owns on this date has a queue row.
-     *
-     * A teacher's queue is their permanent students plus anyone transferred to
-     * them for the date, so membership follows ownership rather than a list
-     * somebody has to maintain by hand. Students transferred away for the date
-     * are left alone — they belong to the receiving teacher's queue instead.
-     *
-     * @return int how many rows were created
-     */
-    public function ensureQueuedFor(int $instructorId, $date = null, ?User $actor = null): int
-    {
-        $date = Carbon::parse($date ?? today())->toDateString();
-
-        $owned = Student::query()
-            ->ownedByInstructorOn($instructorId, $date)
-            ->where('status', 'active')
-            ->orderBy('full_name')
-            ->get();
-
-        $alreadyQueued = TrainingQueueEntry::query()
-            ->whereDate('queue_date', $date)
-            ->whereIn('student_id', $owned->pluck('id'))
-            ->pluck('student_id')
-            ->all();
-
-        $created = 0;
-
-        foreach ($owned as $student) {
-            if (in_array($student->id, $alreadyQueued, true)) {
-                continue;
-            }
-
-            TrainingQueueEntry::create([
-                'student_id' => $student->id,
-                'queue_date' => $date,
-                'position' => $this->nextPosition($date),
-                'status' => TrainingQueueEntry::WAITING,
-                'joined_at' => now(),
-                'created_by' => $actor?->id,
-            ]);
-
-            $created++;
-        }
-
-        return $created;
     }
 
     /**

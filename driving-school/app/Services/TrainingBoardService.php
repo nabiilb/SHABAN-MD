@@ -36,21 +36,14 @@ class TrainingBoardService
         $instructorId = $viewer?->isInstructor() ? $viewer->instructorId() : null;
 
         if ($instructorId) {
-            // The teacher's queue is their students for the day, so anyone
-            // transferred in appears without anybody adding them by hand.
-            $this->queue->ensureQueuedFor($instructorId, $date, $viewer);
-
             return $this->instructorBoard($instructorId, $date, $queueLimit) + [
                 'generated_at' => now()->toIso8601String(),
             ];
         }
 
-        // Admin: the whole floor. Every teacher's line is materialised first,
-        // so the headline count and the per-teacher panels below it are read
-        // from the same day — otherwise the first load of a new day counts only
-        // whoever an admin queued by hand.
-        $this->ensureDayQueued($date, $viewer);
-
+        // Admin: the whole floor, exactly as the teachers built it. Reading a
+        // board enrols nobody — a student is in the line because somebody put
+        // them there.
         $current = TrainingSession::query()
             ->live()
             ->whereDate('started_at', $date)
@@ -116,24 +109,11 @@ class TrainingBoardService
     {
         $date = Carbon::parse($date ?? today());
 
-        $this->ensureDayQueued($date);
-
         return Instructor::active()
             ->orderBy('full_name')
             ->get()
             ->map(fn (Instructor $instructor) => $this->instructorBoard($instructor->id, $date, $queueLimit))
             ->all();
-    }
-
-    /**
-     * Gives every active teacher their line for the day before anything is
-     * counted. Idempotent — ensureQueuedFor only creates what is missing.
-     */
-    protected function ensureDayQueued($date, ?User $actor = null): void
-    {
-        Instructor::active()->pluck('id')->each(
-            fn (int $instructorId) => $this->queue->ensureQueuedFor($instructorId, $date, $actor),
-        );
     }
 
     /**

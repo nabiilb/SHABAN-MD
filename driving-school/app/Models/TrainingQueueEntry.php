@@ -46,6 +46,26 @@ class TrainingQueueEntry extends Model
         'created_by',
     ];
 
+    /**
+     * active_student_id is a guard column, not data: it carries the student id
+     * while the entry is still open and NULL once the cycle is finished, and
+     * the unique index over (active_student_id, queue_date) is what makes "one
+     * open queue entry per student per day" a guarantee the database keeps
+     * rather than one the application promises.
+     *
+     * Derived here, on every save, so no caller can set a status and forget it.
+     * (A plain column rather than GENERATED ALWAYS, which needs MySQL 5.7.6 —
+     * this application supports 5.5.)
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $entry): void {
+            $entry->active_student_id = in_array($entry->status, self::OPEN_STATUSES, true)
+                ? $entry->student_id
+                : null;
+        });
+    }
+
     protected function casts(): array
     {
         return [
@@ -53,6 +73,7 @@ class TrainingQueueEntry extends Model
             'joined_at' => 'datetime',
             'position' => 'integer',
             'assigned_duration_minutes' => 'integer',
+            'active_student_id' => 'integer',
         ];
     }
 

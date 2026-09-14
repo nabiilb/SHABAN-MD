@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\TrainingBoardService;
 use App\Services\TrainingQueueService;
 use App\Services\TrainingSessionService;
+use App\Support\QueueEligibility;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -51,15 +52,15 @@ class TeacherAddToQueueTest extends TestCase
         $this->teacher = $this->makeInstructor('Xasan', $this->teacherUser);
         $this->other = $this->makeInstructor('Nasteexo');
 
-        // A teacher's own students are enrolled in their line automatically the
-        // moment the board is read, so the Add action is for everyone else:
-        // students with no teacher, and students who have already finished.
-        foreach (['Ahmed', 'Mohamed', 'Hassan'] as $name) {
-            $this->students[$name] = $this->makeStudent($name, null);
+        // Nothing enrols anybody: the line is empty until this teacher puts
+        // somebody in it, and the only students they may put in it are the
+        // ones they are responsible for.
+        foreach (['Ahmed', 'Mohamed', 'Hassan', 'Ilyas'] as $name) {
+            $this->students[$name] = $this->makeStudent($name, $this->teacher);
         }
 
-        $this->students['Ilyas'] = $this->makeStudent('Ilyas', $this->teacher);
         $this->students['Faadumo'] = $this->makeStudent('Faadumo', $this->other);
+        $this->students['Cali'] = $this->makeStudent('Cali', null);
     }
 
     protected function tearDown(): void
@@ -114,14 +115,13 @@ class TeacherAddToQueueTest extends TestCase
 
         $board = $this->boards()->board($this->teacherUser);
 
-        // C + D — Ahmed is in the line; Ilyas is there too, enrolled from
-        // ownership when the board was read.
-        $names = collect($board['queue'])->pluck('student')->all();
-        $this->assertContains('Ahmed', $names);
-        $this->assertSame(range(1, count($names)), collect($board['queue'])->pluck('display_position')->all());
+        // C + D — Ahmed is in the line, and he is the only one in it: the
+        // teacher's other students are not enrolled behind his back.
+        $this->assertSame(['Ahmed'], collect($board['queue'])->pluck('student')->all());
+        $this->assertSame([1], collect($board['queue'])->pluck('display_position')->all());
 
         // F
-        $this->assertSame(count($names), $board['stats']['waiting']);
+        $this->assertSame(1, $board['stats']['waiting']);
     }
 
     /* C again — the example from the brief: Ahmed, Mohamed, then Hassan. */
@@ -135,10 +135,7 @@ class TeacherAddToQueueTest extends TestCase
         $queue = collect($this->boards()->board($this->teacherUser)['queue']);
 
         // Ahmed, Mohamed and Hassan keep the order they were added in.
-        $this->assertSame(
-            ['Ahmed', 'Mohamed', 'Hassan'],
-            $queue->pluck('student')->reject(fn ($name) => $name === 'Ilyas')->values()->all(),
-        );
+        $this->assertSame(['Ahmed', 'Mohamed', 'Hassan'], $queue->pluck('student')->all());
         $this->assertSame(range(1, $queue->count()), $queue->pluck('display_position')->all());
     }
 
@@ -197,21 +194,43 @@ class TeacherAddToQueueTest extends TestCase
             ->assertSessionHasErrors(['student_id' => "This student's attendance/evaluation is pending."]);
     }
 
-    /* K — the centre runs repeat training, so a finished student may rejoin. */
+    /**
+     * K — the centre runs repeat training, so a finished student may rejoin the
+     * same day once the twelve hours are up. The morning cycle is not reused:
+     * the evening one is a new row, and both are still there afterwards.
+     */
     public function test_a_completed_student_may_rejoin_the_same_day(): void
     {
         $this->addAs($this->teacherUser, $this->students['Ahmed']);
+        $first = TrainingQueueEntry::where('student_id', $this->students['Ahmed']->id)->firstOrFail();
+
         $session = $this->sessions()->startNext($this->teacher, $this->teacherUser, ['assigned_duration_minutes' => 30]);
         $this->sessions()->end($session, $this->teacherUser);
         $this->sessions()->evaluate($session->fresh(), [
             'attendance_status' => 'present', 'evaluation' => 'good',
         ], $this->teacherUser);
 
+        // 09:00 + 12h, still the same calendar day.
+        Carbon::setTestNow(Carbon::parse('2026-09-13 21:00:00'));
+
         $this->addAs($this->teacherUser, $this->students['Ahmed'])->assertSessionHasNoErrors();
 
-        $entry = TrainingQueueEntry::where('student_id', $this->students['Ahmed']->id)->firstOrFail();
+        $cycles = TrainingQueueEntry::where('student_id', $this->students['Ahmed']->id)
+            ->orderBy('id')
+            ->get();
 
-        $this->assertSame(TrainingQueueEntry::WAITING, $entry->status);
+        // Two cycles on one date, the first still saying what it was.
+        $this->assertCount(2, $cycles);
+        $this->assertSame(TrainingQueueEntry::COMPLETED, $cycles[0]->status);
+        $this->assertTrue($cycles[0]->is($first));
+        $this->assertSame('09:00', $cycles[0]->joined_at->format('H:i'));
+        $this->assertSame(TrainingQueueEntry::WAITING, $cycles[1]->status);
+        $this->assertSame('21:00', $cycles[1]->joined_at->format('H:i'));
+        $this->assertSame(
+            $cycles[0]->queue_date->toDateString(),
+            $cycles[1]->queue_date->toDateString(),
+        );
+
         // The finished session is still the day's history.
         $this->assertSame(1, TrainingSession::where('status', TrainingSession::COMPLETED)->count());
     }
@@ -221,8 +240,9 @@ class TeacherAddToQueueTest extends TestCase
     {
         $student = $this->students['Ahmed'];
 
-        // The unique key on (student_id, queue_date) is the backstop behind the
-        // lock, so bypass the service entirely and prove the database refuses.
+        // The unique key on (active_student_id, queue_date) is the backstop
+        // behind the lock, so bypass the service entirely and prove the
+        // database refuses a second OPEN entry for the same student that day.
         TrainingQueueEntry::create([
             'student_id' => $student->id,
             'queue_date' => today()->toDateString(),
@@ -280,7 +300,7 @@ class TeacherAddToQueueTest extends TestCase
         // A teacher cannot queue somebody else's student into a line they
         // would not then be able to see.
         $this->addAs($this->teacherUser, $this->students['Faadumo'])
-            ->assertSessionHasErrors(['student_id' => 'This student belongs to another teacher.']);
+            ->assertSessionHasErrors(['student_id' => 'This student is assigned to another instructor.']);
 
         $this->assertSame(0, TrainingQueueEntry::where('student_id', $this->students['Faadumo']->id)->count());
     }
@@ -343,16 +363,20 @@ class TeacherAddToQueueTest extends TestCase
     }
 
     /**
-     * A teacher's own students are already in their line, enrolled from
-     * ownership — adding them again says so rather than doubling them up.
+     * The teacher's own students are NOT in their line until they put them
+     * there. Reading the board used to enrol every one of them; now the line is
+     * whatever the teacher built, and an empty console is an honest one.
      */
-    public function test_an_owned_student_is_already_in_the_line(): void
+    public function test_an_owned_student_is_not_in_the_line_until_they_are_added(): void
     {
         $this->boards()->board($this->teacherUser);
 
-        $this->addAs($this->teacherUser, $this->students['Ilyas'])
-            ->assertSessionHasErrors(['student_id' => 'This student is already in the waiting queue.']);
+        $this->assertSame(0, TrainingQueueEntry::count());
+        $this->assertSame([], $this->teacherQueueNames());
 
+        $this->addAs($this->teacherUser, $this->students['Ilyas'])->assertSessionHasNoErrors();
+
+        $this->assertSame(['Ilyas'], $this->teacherQueueNames());
         $this->assertSame(1, TrainingQueueEntry::where('student_id', $this->students['Ilyas']->id)->count());
     }
 
@@ -383,8 +407,12 @@ class TeacherAddToQueueTest extends TestCase
             ->viewData('addable')
             ->keyBy('full_name');
 
-        $this->assertSame(TrainingQueueEntry::WAITING, $addable['Ahmed']->queue_status);
-        $this->assertNull($addable['Mohamed']->queue_status);
+        $this->assertSame(
+            QueueEligibility::ALREADY_WAITING,
+            $addable['Ahmed']->queue_eligibility->code,
+        );
+        $this->assertFalse($addable['Ahmed']->queue_eligibility->eligible);
+        $this->assertTrue($addable['Mohamed']->queue_eligibility->eligible);
 
         $this->actingAs($this->teacherUser)
             ->get(route('instructor.training.index'))
@@ -401,5 +429,7 @@ class TeacherAddToQueueTest extends TestCase
 
         $this->assertEqualsCanonicalizing(['Ahmed', 'Mohamed', 'Hassan', 'Ilyas'], $addable);
         $this->assertNotContains('Faadumo', $addable);
+        // Nobody's student is nobody's to queue either.
+        $this->assertNotContains('Cali', $addable);
     }
 }

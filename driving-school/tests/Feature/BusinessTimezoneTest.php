@@ -127,10 +127,12 @@ class BusinessTimezoneTest extends TestCase
         $yesterday = $this->runOneSession();
         $this->assertSame('2026-09-14', $yesterday->started_at->toDateString());
 
-        // 00:30 local on the 15th.
+        // 00:30 local on the 15th. A second student, because Ali finished
+        // fifty minutes ago and the twelve-hour rule does not let him back in
+        // — which is the point of that rule, not an obstacle to this one.
         Carbon::setTestNow(Carbon::parse(self::LATE_NIGHT));
 
-        $today = $this->runOneSession();
+        $today = $this->runOneSession($this->makeStudent('Maryan CIISE', $this->teacher));
         $this->assertSame('2026-09-15', $today->started_at->toDateString());
 
         $completed = app(TrainingBoardService::class)->completedToday($this->teacher->id);
@@ -232,18 +234,18 @@ class BusinessTimezoneTest extends TestCase
         );
     }
 
-    private function startOneSession(): TrainingSession
+    private function startOneSession(?Student $student = null): TrainingSession
     {
-        app(TrainingQueueService::class)->add($this->student, $this->admin);
+        app(TrainingQueueService::class)->add($student ?? $this->student, $this->admin);
 
         return app(TrainingSessionService::class)->startNext($this->teacher, $this->teacherUser, [
             'assigned_duration_minutes' => 30,
         ]);
     }
 
-    private function runOneSession(): TrainingSession
+    private function runOneSession(?Student $student = null): TrainingSession
     {
-        $session = $this->startOneSession();
+        $session = $this->startOneSession($student);
 
         app(TrainingSessionService::class)->end($session, $this->teacherUser);
         app(TrainingSessionService::class)->evaluate($session->fresh(), [

@@ -322,15 +322,56 @@ A training-centre workflow layered on the same students and instructors:
 waiting → training_in_progress → attendance_pending → completed
 ```
 
-### Each teacher runs their own queue
+### The queue is manual
 
-A teacher's queue is **their permanent students plus anyone transferred to them
-for that date** — membership follows daily ownership, so nobody maintains a
-list by hand. `Student::ownedByInstructorOn()` resolves it, and the queue rows
-are created on demand when a board is read. The order is FIFO by `joined_at`;
-`position` only breaks ties and is what an admin's manual reorder writes to.
-A student who has finished is no longer waiting, so they drop out of the
-numbering rather than holding a place.
+**Nothing enrols a student.** A queue row exists because a teacher pressed
+**+ Add Student**, or an admin queued somebody from the admin queue page — and
+for no other reason. Opening the console, refreshing it, polling the board
+endpoint, loading a dashboard or letting the day roll over all create exactly
+zero rows. (An earlier version enrolled every student a teacher owned the moment
+a board was read; `TrainingQueueService::ensureQueuedFor()` is gone, and a test
+asserts it stays gone.)
+
+The order is FIFO by `joined_at`; `position` only breaks ties and is what an
+admin's manual reorder writes to. A student who has finished is no longer
+waiting, so they drop out of the numbering rather than holding a place.
+
+### Who a teacher may queue
+
+Their own students, and nobody else's. Ownership is
+`Student::ownedByInstructorOn()` — `students.current_instructor_id` as a
+transfer leaves it, overridden for a single date by an attendance hand-over — so
+a transfer moves a student between two teachers' Add Student lists with no
+special case of its own. The old teacher stops seeing them; the new one starts.
+
+The instructor is always resolved from the authenticated user. Nothing in the
+request is believed: posting another teacher's `student_id` straight at the
+route, with or without an `instructor_id` alongside it, is refused by the same
+rule that kept that student out of the dialog.
+
+### The twelve-hour rule
+
+After a student finishes, they cannot be queued again for **twelve rolling
+hours** — not "once a day". Finish at 08:00 and 19:59 is refused while 20:00 is
+allowed; finish at 23:00 and the wait runs to 11:00 the next morning. Midnight
+resets nothing.
+
+The authoritative moment is **`training_evaluations.evaluated_at`, for an
+evaluation that marked the student present**. That is the single point at which
+the application declares a student completed: it is written in the same
+transaction as that day's attendance row, it exists exactly once per completed
+session and never for a cancelled one, and it is a real datetime —
+`attendance.attendance_date` is a DATE with no time in it at all, so a rolling
+rule cannot be built on it. A student marked absent never trained, so nothing
+counts down for them. The gap is `training_requeue_cooldown_hours` in Settings,
+defaulting to 12.
+
+`TrainingEligibilityService` is the one place that decides any of this. The Add
+Student list, the POST behind it and `TrainingQueueService::add()` all ask it,
+and it returns a `QueueEligibility` carrying the verdict, a reason, the time the
+student comes back and how long is left — so the dialog disables a student with
+*Available at 20:00* rather than offering somebody the server is about to
+refuse.
 
 **Only the student in training has a clock.** Waiting students have no
 `training_sessions` row at all — no `started_at`, nothing counting down. The
@@ -339,9 +380,19 @@ session ends.
 
 Two unique indexes make the concurrency rules the database's job rather than
 the application's: `active_student_id` (no student in two live sessions) and
-`active_instructor_id` (no teacher running two at once). Both are generated
-columns holding the id only while a session is live, so NULLs let finished
-sessions pile up freely.
+`active_instructor_id` (no teacher running two at once). Both are plain columns
+holding the id only while a session is live, so NULLs let finished sessions pile
+up freely.
+
+`training_queue_entries` carries the same kind of guard. Because a student may
+legitimately be queued twice on one date, uniqueness is not `(student_id,
+queue_date)` — that allowed one row per day, and the old code lived with it by
+resetting the finished row back to `waiting`, which erased the morning cycle the
+moment the evening one began. It is now `(active_student_id, queue_date)`, where
+`active_student_id` holds the student id only while the entry is waiting,
+training or awaiting evaluation. Two simultaneous open entries are still
+impossible; a second **cycle** is a second row, and the first keeps its own
+status, its own `joined_at` and its own sessions.
 
 When the evaluation is submitted the student is completed and the first student
 still waiting in that teacher's queue **starts automatically**, with a fresh
@@ -424,6 +475,26 @@ moves the money across:
 floored at zero per student so an overpayment cannot cancel out somebody else's
 arrears, and cancelled students excluded.
 
+### The school's timezone
+
+`config/app.php` reads `APP_TIMEZONE`, defaulting to `UTC`. Production sets
+
+```
+APP_TIMEZONE=Africa/Mogadishu
+```
+
+so that `today()`, `now()` and every `whereDate()` mean the school's day rather
+than one three hours behind it — between 00:00 and 03:00 local, UTC is still on
+yesterday, which put a queue opened at 00:30 on the wrong date and inflated the
+"waiting N minutes" figures. **No stored timestamp is converted when this
+changes.** Rows written before the switch keep the wall-clock characters they
+already hold, so nothing can be double-shifted and rolling back is the same one
+line in reverse. `DATE` columns carry no offset and cannot move at all.
+
+Clearing and re-caching config is what makes the change take effect
+(`config:clear` then `config:cache` — and the `.env` line must be in place
+before the cache is written, since a cached config no longer consults `env()`).
+
 ### A note on timestamp columns
 
 The training tables use `DATETIME` rather than `TIMESTAMP` for the times the
@@ -458,17 +529,19 @@ preferred teacher still narrows an entry. `php artisan training:check-queue`
 prints, for a date, the admin's count, every teacher's line as the board service
 builds it, and any waiting student no console can reach.
 
-Teachers add to the line themselves: **+ Add Student** on the Waiting Queue card
-opens a dialog that searches the students they may take by name, student number
-or phone — marking anyone already waiting, training or pending so they cannot be
-picked — and queues the chosen one for a duration (defaulting to the centre's
-`default_training_minutes`). Adding only ever writes `waiting` — the countdown
-still starts when somebody presses Select, and the duration is carried into the
-session then. A student already in the day's line is refused by state: already
-waiting, currently training, or attendance pending; a student who finished
-earlier may rejoin, since the centre runs repeat training and the completed
-session stays in the history. Teachers gain the `addToQueue` ability only —
-reordering, moving and removing the line stay with the admin.
+Teachers add to the line themselves, and only that way: **+ Add Student** on the
+Waiting Queue card opens a dialog listing the students they are responsible for
+that day, searchable by name, student number or phone. Students belonging to
+another teacher are not in the list at all. Students who are in it but cannot be
+picked say why — *already in the waiting queue*, *currently in training*,
+*attendance/evaluation is pending*, or *Available at 20:00* for one still inside
+the twelve-hour cooldown. Adding only ever writes `waiting` — the countdown
+still starts when somebody presses Select, and the duration (defaulting to the
+centre's `default_training_minutes`) is carried into the session then. Every one
+of those checks is made again server-side at submission, inside the transaction
+with the student row locked, so a double click cannot slip a second entry past
+an answer given before either write happened. Teachers gain the `addToQueue`
+ability only — reordering, moving and removing the line stay with the admin.
 
 Queue numbers are counted over the students still waiting, never read off the
 stored `position` — that column is only an ordering key for an admin's manual

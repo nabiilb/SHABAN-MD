@@ -56,18 +56,28 @@ class TrainingController extends Controller
     /**
      * Puts a student in today's waiting line. Never starts training: the
      * student waits their turn like anybody else.
+     *
+     * The only thing that ever creates a queue entry for a teacher. Every check
+     * is made again here, server-side, against the instructor resolved from the
+     * session — the request's own student_id is the only thing taken from the
+     * browser, and it buys nothing: a forged id for another teacher's student
+     * is refused by the same rule that kept them out of the dialog.
      */
     public function addToQueue(AddToTrainingQueueRequest $request): RedirectResponse
     {
         $student = Student::findOrFail($request->integer('student_id'));
         $instructorId = $request->user()->instructorId() ?? 0;
 
-        if (! $this->queue->canAdd($instructorId, $student)) {
-            return back()->withErrors(['student_id' => __('This student belongs to another teacher.')]);
+        $verdict = $this->queue->eligibilityFor($instructorId, $student);
+
+        if (! $verdict->eligible) {
+            return back()->withErrors(['student_id' => $verdict->reason]);
         }
 
         try {
-            $this->queue->add($student, $request->user(), $request->queueData());
+            // Re-checked inside the transaction, with the student locked, so a
+            // double click cannot slip a second entry past the answer above.
+            $this->queue->add($student, $request->user(), $request->queueData(), null, $instructorId);
         } catch (RuntimeException $e) {
             return back()->withErrors(['student_id' => $e->getMessage()]);
         }

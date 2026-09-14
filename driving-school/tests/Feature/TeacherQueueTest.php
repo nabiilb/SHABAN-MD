@@ -122,9 +122,10 @@ class TeacherQueueTest extends TestCase
         $this->assertContains('Ahmed', $this->names($this->queue()->waitingFor($this->xasan->id, '2026-09-09')));
 
         // 10/09 with no transfer: Ahmed is Nasteexo's again.
+        // A new day starts empty — nothing enrols anybody — so the line for the
+        // 10th is the one somebody deliberately builds.
         Carbon::setTestNow(Carbon::parse('2026-09-10 09:00:00'));
-        $this->queue()->ensureQueuedFor($this->nasteexo->id, today(), $this->admin);
-        $this->queue()->ensureQueuedFor($this->xasan->id, today(), $this->admin);
+        $this->queue()->add($this->students['Ahmed'], $this->admin);
 
         $this->assertContains('Ahmed', $this->names($this->queue()->waitingFor($this->nasteexo->id, '2026-09-10')));
         $this->assertNotContains('Ahmed', $this->names($this->queue()->waitingFor($this->xasan->id, '2026-09-10')));
