@@ -32,6 +32,42 @@ class TrainingSessionService
     ) {}
 
     /**
+     * THE definition of "this teacher is busy".
+     *
+     * One query, asked by the console and by the claim alike, so the page and
+     * the validation can never disagree. Deliberately not filtered by date: a
+     * session left running overnight is still this teacher's session, and
+     * hiding it while it still blocks them is exactly the bug this method
+     * exists to make impossible.
+     */
+    public function activeForInstructor(int|Instructor|null $instructor): ?TrainingSession
+    {
+        $instructorId = $instructor instanceof Instructor ? $instructor->id : $instructor;
+
+        if (! $instructorId) {
+            return null;
+        }
+
+        return TrainingSession::query()
+            ->live()
+            ->where('instructor_id', $instructorId)
+            ->with(['student', 'instructor', 'lessonTopic', 'queueEntry.student'])
+            ->orderByDesc('started_at')
+            ->first();
+    }
+
+    /** The same question for a student: are they training anywhere, on any day? */
+    public function activeForStudent(int $studentId): ?TrainingSession
+    {
+        return TrainingSession::query()
+            ->live()
+            ->where('student_id', $studentId)
+            ->with(['instructor', 'student'])
+            ->orderByDesc('started_at')
+            ->first();
+    }
+
+    /**
      * Claims a waiting student and starts their session.
      *
      * The queue row is locked and re-checked inside the transaction, so two
@@ -61,13 +97,17 @@ class TrainingSessionService
             }
 
             // A student cannot be live in two sessions, whatever the queue says.
-            if (TrainingSession::where('student_id', $entry->student_id)->live()->exists()) {
+            if ($this->activeForStudent($entry->student_id)) {
                 throw new RuntimeException(__('This student is already in training with another teacher.'));
             }
 
-            // Nor can a teacher run two at once — one student at a time.
-            if (TrainingSession::where('instructor_id', $instructor->id)->live()->exists()) {
-                throw new RuntimeException(__('You already have a training session in progress.'));
+            // Nor can a teacher run two at once — one student at a time. Asked
+            // through activeForInstructor(), the same method the console reads,
+            // so what the page shows and what this refuses cannot drift apart.
+            if ($busy = $this->activeForInstructor($instructor->id)) {
+                throw new RuntimeException(__('You already have a training session in progress with :student. Finish or cancel it first.', [
+                    'student' => $busy->student?->full_name,
+                ]));
             }
 
             // The student must be in this teacher's line for this date —
@@ -163,6 +203,48 @@ class TrainingSessionService
             $session->queueEntry?->update(['status' => TrainingQueueEntry::ATTENDANCE_PENDING]);
 
             AuditLogger::log('training.ended', $session, __(':student\'s training ended — attendance and evaluation required', [
+                'student' => $session->student?->full_name,
+            ]));
+
+            return $session->fresh(['student', 'instructor', 'lessonTopic']);
+        });
+    }
+
+    /**
+     * Abandons a session without pretending it happened.
+     *
+     * For the one a teacher left running overnight, or started by mistake:
+     * the row stays exactly where it is, marked cancelled with the time it was
+     * abandoned and the reason, and the student goes back to waiting so they
+     * can still be trained. Nothing is deleted, and no attendance or
+     * evaluation is written — the student did not train.
+     */
+    public function cancel(TrainingSession $session, User $actor, ?string $reason = null): TrainingSession
+    {
+        return DB::transaction(function () use ($session, $actor, $reason) {
+            $session = TrainingSession::whereKey($session->id)->lockForUpdate()->firstOrFail();
+
+            if (! in_array($session->status, TrainingSession::LIVE_STATUSES, true)) {
+                throw new RuntimeException(__('Only a session that is still open can be cancelled.'));
+            }
+
+            $endedAt = now();
+
+            $session->update([
+                'status' => TrainingSession::CANCELLED,
+                'ended_at' => $session->ended_at ?? $endedAt,
+                'ended_by' => $actor->id,
+                'paused_at' => null,
+                'notes' => trim(($session->notes ? $session->notes.' ' : '').__('Cancelled: :reason', [
+                    'reason' => $reason ?: __('no reason given'),
+                ])),
+            ]);
+
+            // The student never trained, so they go back in the line rather
+            // than being recorded as finished.
+            $session->queueEntry?->update(['status' => TrainingQueueEntry::WAITING]);
+
+            AuditLogger::log('training.cancelled', $session, __(':student\'s training was cancelled', [
                 'student' => $session->student?->full_name,
             ]));
 

@@ -106,6 +106,27 @@ class TrainingController extends Controller
         ]));
     }
 
+    /**
+     * Abandons the session — for one left running overnight, or started by
+     * mistake. The row is kept; the student goes back to the line.
+     */
+    public function cancel(Request $request, TrainingSession $session): RedirectResponse
+    {
+        $this->authorize('update', $session);
+
+        try {
+            $this->sessions->cancel($session, $request->user(), $request->input('reason'));
+        } catch (RuntimeException $e) {
+            return back()->withErrors(['training' => $e->getMessage()]);
+        }
+
+        event(new TrainingBoardChanged('training.cancelled', ['session_id' => $session->id]));
+
+        return back()->with('status', __('Training session cancelled. :student is back in the waiting queue.', [
+            'student' => $session->student?->full_name,
+        ]));
+    }
+
     public function end(Request $request, TrainingSession $session): RedirectResponse
     {
         $this->authorize('manage', $session);

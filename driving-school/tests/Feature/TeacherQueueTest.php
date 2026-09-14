@@ -151,7 +151,7 @@ class TeacherQueueTest extends TestCase
         $second = $this->queue()->nextWaitingFor($this->xasan->id);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('You already have a training session in progress.');
+        $this->expectExceptionMessage('You already have a training session in progress with Mohamed.');
 
         $this->sessions()->start($second, $this->xasan, $this->xasanUser, ['assigned_duration_minutes' => 30]);
     }

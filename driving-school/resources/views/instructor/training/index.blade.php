@@ -35,6 +35,9 @@
                         <span class="badge-blue" x-show="board.current.ownership === 'transferred'">{{ __('Transferred') }}</span>
                         <span class="badge-slate" x-show="board.current.ownership === 'permanent'">{{ __('Permanent') }}</span>
                         <span class="badge-amber" x-show="board.current.ownership === 'unassigned'">{{ __('Unassigned') }}</span>
+                        <span class="badge-rose" x-show="board.current.carried_over">
+                            {{ __('Started') }} <span x-text="board.current.started_on"></span>
+                        </span>
                     </p>
 
                     <dl class="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
@@ -71,6 +74,21 @@
             </div>
 
             {{-- Controls while the session is running --}}
+            <template x-if="board.current.carried_over">
+                <div class="border-t border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-800">
+                    {{ __('This session was started on') }} <span class="font-semibold" x-text="board.current.started_on"></span>
+                    {{ __('and is still open. Finish and evaluate it, or cancel it — until then no new student can be started.') }}
+                    <form method="POST" :action="`{{ url('instructor/training') }}/${board.current.id}/cancel`" class="mt-2">
+                        @csrf
+                        <input type="hidden" name="reason" value="{{ __('Left open from an earlier day') }}">
+                        <button class="btn-ghost btn-sm text-rose-700 hover:bg-rose-100"
+                                onclick="return confirm('{{ __('Cancel this session? The student goes back to the waiting queue and nothing is recorded as trained.') }}')">
+                            {{ __('Cancel Session') }}
+                        </button>
+                    </form>
+                </div>
+            </template>
+
             <template x-if="board.current.status === 'in_progress' || board.current.status === 'paused'">
                 <div class="flex flex-wrap items-center gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
                     <form method="POST" :action="`{{ url('instructor/training') }}/${board.current.id}/end`">

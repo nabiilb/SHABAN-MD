@@ -154,6 +154,8 @@ Route::middleware(['auth', 'role:instructor', 'instructor.profile'])
         Route::post('training/queue', [Instructor\TrainingController::class, 'addToQueue'])->name('training.queue.store');
         Route::post('training/start', [Instructor\TrainingController::class, 'start'])->name('training.start');
         Route::post('training/{session}/end', [Instructor\TrainingController::class, 'end'])->name('training.end');
+        // Abandons a session without recording it as training that happened.
+        Route::post('training/{session}/cancel', [Instructor\TrainingController::class, 'cancel'])->name('training.cancel');
         Route::post('training/{session}/extend', [Instructor\TrainingController::class, 'extend'])->name('training.extend');
         Route::post('training/{session}/pause', [Instructor\TrainingController::class, 'pause'])->name('training.pause');
         Route::post('training/{session}/resume', [Instructor\TrainingController::class, 'resume'])->name('training.resume');

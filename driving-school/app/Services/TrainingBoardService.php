@@ -81,13 +81,10 @@ class TrainingBoardService
     {
         $date = Carbon::parse($date ?? today());
 
-        $current = TrainingSession::query()
-            ->live()
-            ->where('instructor_id', $instructorId)
-            ->whereDate('started_at', $date)
-            ->with(['student', 'instructor', 'lessonTopic', 'queueEntry.student'])
-            ->orderByDesc('started_at')
-            ->first();
+        // The teacher's open session, whatever day it began on. Filtering this
+        // to today is what let a session left running overnight vanish from
+        // the console while still refusing every new one.
+        $current = $this->sessions->activeForInstructor($instructorId);
 
         $waiting = $this->queue->waitingFor($instructorId, $date);
 
@@ -98,6 +95,10 @@ class TrainingBoardService
             'current' => $current ? $current->toBoardArray() + [
                 'ownership' => $current->queueEntry?->ownershipOn()
                     ?? ($current->student?->current_instructor_id === $instructorId ? 'permanent' : 'transferred'),
+                // Started on an earlier day: the console says so rather than
+                // presenting yesterday's session as if it began this morning.
+                'carried_over' => $current->started_at?->lt($date->copy()->startOfDay()) ?? false,
+                'started_on' => $current->started_at?->format('d/m/Y'),
             ] : null,
             'current_session_id' => $current?->id,
             'needs_evaluation' => $current?->status === TrainingSession::ATTENDANCE_PENDING,
