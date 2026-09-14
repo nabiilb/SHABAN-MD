@@ -62,7 +62,15 @@ return [
     |   99 => '2026-08-24',
     */
     'date_corrections' => [
-        //
+        // Approved by the school, 14/09/2026. In every one of these the day and
+        // the month match the rows around them exactly and only the year digit
+        // differs, so each is a slip of the pen in a 2026 register.
+        45 => '2026-07-29',   // written 29/7/2029, between two rows of 29/7/2026
+        99 => '2026-08-24',   // written 24.8.2027, the row above is 24.8.2026
+        100 => '2026-08-24',  // written 24.8.2028, same cluster
+        102 => '2026-08-25',  // written 25.8.2027, the row above is 25.8.2026
+        107 => '2026-08-26',  // written 26.8.2027, three rows above are 26.8.2026
+        108 => '2026-08-26',  // written 26.8.2028, same cluster
     ],
 
     /*
