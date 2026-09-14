@@ -19,7 +19,7 @@ class ImportAlphaSchool extends Command
 {
     protected $signature = 'alpha-school:import
         {--file= : Path to the .xlsx, default storage/app/imports/ALPHA SCHOOL.xlsx}
-        {--sheet=Sheet1 : Which sheet holds the register}
+        {--sheet= : Which sheet holds the register, default from config}
         {--dry-run : Report what would happen and change nothing}
         {--details=15 : How many rows to list under each heading}';
 
@@ -27,7 +27,7 @@ class ImportAlphaSchool extends Command
 
     public function handle(AlphaSchoolImporter $importer): int
     {
-        $path = $this->option('file') ?: storage_path('app/imports/ALPHA SCHOOL.xlsx');
+        $path = $this->option('file') ?: config('alpha_school_import.file');
 
         if (! is_readable($path)) {
             $this->error("Cannot read {$path}.");
@@ -38,7 +38,7 @@ class ImportAlphaSchool extends Command
 
         $this->line('Reading '.$path);
 
-        $plan = $importer->parse($path, $this->option('sheet'));
+        $plan = $importer->parse($path, $this->option('sheet') ?: config('alpha_school_import.sheet', 'Sheet1'));
 
         $dryRun = (bool) $this->option('dry-run');
         $limit = max(1, (int) $this->option('details'));
@@ -139,6 +139,8 @@ class ImportAlphaSchool extends Command
             'status_not_understood' => 'Status text that was not recognised (left active)',
             'duplicates_in_file' => 'Rows sharing a phone number with an earlier row',
             'years_out_of_step' => 'Dates whose year is not the register\'s year — check these for a slip of the pen',
+            'dates_corrected_by_config' => 'Dates corrected by config/alpha_school_import.php',
+            'rows_skipped_by_config' => 'Rows excluded by config/alpha_school_import.php',
         ];
 
         foreach ($headings as $key => $heading) {

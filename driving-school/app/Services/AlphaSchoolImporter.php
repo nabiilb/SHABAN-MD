@@ -64,6 +64,8 @@ class AlphaSchoolImporter
             'status_not_understood' => [],
             'duplicates_in_file' => [],
             'years_out_of_step' => [],
+            'dates_corrected_by_config' => [],
+            'rows_skipped_by_config' => [],
         ];
 
         $blank = 0;
@@ -85,6 +87,13 @@ class AlphaSchoolImporter
                 continue;
             }
 
+            if (in_array($number, $this->setting('skip_rows', []), true)) {
+                $notices['rows_skipped_by_config'][] = ['row' => $number, 'name' => $name];
+                $records[] = $this->rejected($number, $name, null, __('Excluded by config/alpha_school_import.php'));
+
+                continue;
+            }
+
             $phone = $this->cleanPhone($cells['D'] ?? null);
 
             if ($phone === null) {
@@ -93,7 +102,19 @@ class AlphaSchoolImporter
                 continue;
             }
 
-            [$date, $how] = $this->cleanDate($cells['A'] ?? null, $lastDate);
+            $corrections = $this->setting('date_corrections', []);
+
+            if (isset($corrections[$number])) {
+                [$asRead] = $this->cleanDate($cells['A'] ?? null, $lastDate);
+                $date = $corrections[$number];
+                $how = 'corrected';
+
+                $notices['dates_corrected_by_config'][] = [
+                    'row' => $number, 'name' => $name, 'was' => (string) $asRead, 'now' => $date,
+                ];
+            } else {
+                [$date, $how] = $this->cleanDate($cells['A'] ?? null, $lastDate);
+            }
 
             if ($date === null) {
                 $records[] = $this->rejected($number, $name, $phone, __('No usable date, and no dated row above it'));
@@ -170,7 +191,7 @@ class AlphaSchoolImporter
                 'payment' => $paid > 0 ? [
                     'amount' => round($paid, 2),
                     'payment_date' => $date,
-                    'payment_method' => 'cash',
+                    'payment_method' => $this->setting('payment_method', 'cash'),
                     'reference' => self::SOURCE.':'.$number,
                 ] : null,
             ];
@@ -335,6 +356,17 @@ class AlphaSchoolImporter
         return $odd;
     }
 
+    /**
+     * A setting from config/alpha_school_import.php.
+     *
+     * Read through here rather than inline so every judgement the importer
+     * makes about this spreadsheet is in one readable file.
+     */
+    protected function setting(string $key, mixed $default = null): mixed
+    {
+        return config("alpha_school_import.{$key}", $default);
+    }
+
     /* ----------------------------------------------------------------
      | Cleaning
      | ---------------------------------------------------------------- */
@@ -407,7 +439,7 @@ class AlphaSchoolImporter
         if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $text, $m)) {
             [, $year, $month, $day] = $m;
 
-            if ((int) $day <= 12) {
+            if ((int) $day <= 12 && $this->setting('read_stored_dates_day_first', true)) {
                 return [sprintf('%s-%02d-%02d', $year, (int) $day, (int) $month), 'day_first'];
             }
 
