@@ -8,6 +8,7 @@ use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\InstructorProfileService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,8 @@ use Illuminate\View\View;
 
 class UserController extends Controller
 {
+    public function __construct(private readonly InstructorProfileService $instructors) {}
+
     public function index(Request $request): View
     {
         $this->authorize('viewAny', User::class);
@@ -60,10 +63,17 @@ class UserController extends Controller
             $user = User::create($data);
             AuditLogger::created($user, "User {$user->email} created");
 
+            // An instructor account is nothing without its profile: every
+            // isolation scope in the app keys off instructors.id, so the two
+            // are written together or not at all.
+            $this->instructors->sync($user->refresh(), $request->instructorProfileData());
+
             return $user;
         });
 
-        return redirect()->route('admin.users.index')->with('status', __('User created.'));
+        return redirect()->route('admin.users.index')->with('status', __(
+            $user->hasRole(Role::INSTRUCTOR) ? 'User created with an instructor profile.' : 'User created.',
+        ));
     }
 
     public function show(User $user): View
@@ -100,8 +110,16 @@ class UserController extends Controller
             $data['password'] = Hash::make($data['password']);
         }
 
-        $user->update($data);
-        AuditLogger::updated($user, "User {$user->email} updated", $original);
+        DB::transaction(function () use ($user, $data, $original, $request) {
+            $user->update($data);
+            AuditLogger::updated($user, "User {$user->email} updated", $original);
+
+            // Name, phone and email follow the account; a user promoted to
+            // instructor gains the profile they now need, and one moved off
+            // the role keeps theirs, set inactive — the school's attendance
+            // and lessons still point at it.
+            $this->instructors->sync($user->refresh(), $request->instructorProfileData());
+        });
 
         return redirect()->route('admin.users.index')->with('status', __('User updated.'));
     }

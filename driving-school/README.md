@@ -59,6 +59,52 @@ Open <http://localhost:8000>.
 
 ---
 
+## Importing the school's register
+
+The school's own spreadsheet — `ALPHA SCHOOL.xlsx` — is read straight into
+students and payments. Put it at `storage/app/imports/ALPHA SCHOOL.xlsx` (or
+pass `--file=`) and look before you leap:
+
+```bash
+php artisan alpha-school:import --dry-run    # reads everything, writes nothing
+php artisan alpha-school:import              # applies it
+```
+
+The dry run is the point. The register is kept by hand, so it reports the rows
+that need a pen first: section totals, a student with no phone number, two rows
+sharing one, amounts written as words, and dates whose year looks like a slip.
+Nothing is invented — a row the sheet cannot answer for is skipped and named.
+
+| Excel column | Goes to |
+| --- | --- |
+| `TAARIIKHDA` | `students.start_date`, and the payment's date |
+| `MAGACA SEDDEXEN` | `students.full_name` |
+| `LAMBARKA` | `students.phone`, normalised to `+252…` |
+| `DEGMADA` | `students.address` |
+| `LACAGTA BAXSHEY` | a `student_payments` row, when it is more than zero |
+| `LACAGTA HARAA` | with the paid amount, `students.total_fee` (paid + owed) |
+| `Mudadda` | `students.required_training_days`, with the words kept in `notes` |
+| `Column1` | `students.status` — "complate" is completed |
+
+No email and no date of birth are invented; both stay NULL. Reading the file
+needs no package: `App\Support\XlsxReader` opens the .xlsx with PHP's own zip
+and SimpleXML, so a production box needs no `composer install` to import.
+
+**Rerunning is safe.** A student is matched on their normalised phone, and each
+payment carries the row it came from (`ALPHA-IMPORT:42`), so a second run
+creates nothing and takes nothing away — it only fills fields still empty.
+
+## Seeding
+
+`php artisan db:seed` installs roles, permissions and the reference lists, and
+stops there. The demo school — invented students, instructors, vehicles,
+attendance and finance — is `DemoDataSeeder`, which must be asked for by name
+and refuses to run outside `local` and `testing`:
+
+```bash
+php artisan db:seed --class=DemoDataSeeder   # development only
+```
+
 ## Development accounts
 
 Seeded by `database/seeders/DrivingSchoolSeeder.php`. **Change these before
@@ -475,7 +521,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-263 tests / 1,249 assertions, run against MySQL (`driving_school_test`; see
+282 tests / 1,338 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
@@ -495,6 +541,8 @@ php artisan test
 | `AdminCrudTest` | Real create/read/update/delete against MySQL, validation, search and filters |
 | `DashboardAndReportTest` | Dashboard figures computed from the database; reports and exports |
 | `TeacherQueueVisibilityTest` | The admin board and the teacher console describe one queue — two waiting students are counted by the admin and offered to the teacher, order and live positions match, a completed student keeps no position, claiming one promotes the next, two teachers cannot claim the same student, and no waiting student is invisible to every console |
+| `AlphaSchoolImportTest` | The register imports — a dry run writes nothing, the real run creates the students and their payments, a second run duplicates neither, "complate" becomes completed, "NONE" becomes nothing owed, and unusable rows are reported rather than fatal |
+| `InstructorAccountProvisioningTest` | An instructor account arrives with exactly one linked profile and can open its dashboard; editing the account moves the profile with it; a promotion creates one and a demotion stands it down rather than deleting it; a student needs neither email nor birthday; and assignment history keeps exactly one current row |
 | `StudentFeeIncomeTest` | A student's fee is owed, not earned — a new fee moves Unpaid Student Fees and not income, paying it moves the money across, an overpayment cannot offset another student's arrears, and a cancelled student drops out |
 | `InstructorFuelEntryTest` | An instructor records fuel — pending, own vehicle only, nothing posted until approval; approving writes the expense (cash) or the debt (credit); a failed ledger write rolls the approval back; foreign vehicle ids, bad numbers and future dates refused; a resubmitted form records nothing twice; the resulting debt visible to its instructor and the admin alone; and the admin's save-and-pay flow unchanged |
 | `InstructorFinanceAccessTest` | Fuel and Company Debts for instructors — own records only, another instructor's refused by id, every write still admin-only, the menu carries both entries and highlights the open one, empty states, and the admin's own pages unchanged |
