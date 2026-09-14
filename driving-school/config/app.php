@@ -63,9 +63,14 @@ return [
     | will be used by the PHP date and date-time functions. The timezone
     | is set to "UTC" by default as it is suitable for most use cases.
     |
+    | Driven by APP_TIMEZONE so the school's own timezone is a .env line rather
+    | than a code change — production sets Africa/Mogadishu. No stored timestamp
+    | is converted when it changes: rows written before the switch keep the
+    | wall-clock characters they already hold.
+    |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => env('APP_TIMEZONE', 'UTC'),
 
     /*
     |--------------------------------------------------------------------------
