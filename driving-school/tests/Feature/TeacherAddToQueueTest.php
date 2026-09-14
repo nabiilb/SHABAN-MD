@@ -356,6 +356,42 @@ class TeacherAddToQueueTest extends TestCase
         $this->assertSame(1, TrainingQueueEntry::where('student_id', $this->students['Ilyas']->id)->count());
     }
 
+    /**
+     * The dialog carries its own Alpine state in the page rather than reaching
+     * into the compiled bundle, so a console served with an older build still
+     * opens it. This is what broke it once: the button called a method the
+     * bundle did not have yet, and clicking it did nothing at all.
+     */
+    public function test_the_add_student_dialog_does_not_depend_on_the_compiled_bundle(): void
+    {
+        $page = $this->actingAs($this->teacherUser)->get(route('instructor.training.index'));
+
+        $html = $page->getContent();
+
+        foreach (['adding:', 'openAdd()', 'matchingStudents', 'pickedName', 'selectDuration:'] as $piece) {
+            $this->assertStringContainsString($piece, $html, "The page should define {$piece} itself.");
+        }
+    }
+
+    /** A student already in today's line is shown as such and cannot be picked. */
+    public function test_students_already_in_the_line_are_marked_in_the_dialog(): void
+    {
+        $this->addAs($this->teacherUser, $this->students['Ahmed']);
+
+        $addable = $this->actingAs($this->teacherUser)
+            ->get(route('instructor.training.index'))
+            ->viewData('addable')
+            ->keyBy('full_name');
+
+        $this->assertSame(TrainingQueueEntry::WAITING, $addable['Ahmed']->queue_status);
+        $this->assertNull($addable['Mohamed']->queue_status);
+
+        $this->actingAs($this->teacherUser)
+            ->get(route('instructor.training.index'))
+            ->assertOk()
+            ->assertSee('blocked_by', false);
+    }
+
     /** The console hands the browser exactly the students it may queue. */
     public function test_the_console_offers_only_addable_students(): void
     {

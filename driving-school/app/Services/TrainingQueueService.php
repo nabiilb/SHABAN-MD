@@ -122,7 +122,17 @@ class TrainingQueueService
         $date = Carbon::parse($date ?? today())->toDateString();
 
         return Student::query()
-            ->where('status', 'active')
+            ->select('students.*')
+            // Where each of them already stands in today's line, so the dialog
+            // can say so instead of letting somebody pick a student the server
+            // is about to refuse. One correlated sub-select, not a query a row.
+            ->addSelect(['queue_status' => TrainingQueueEntry::query()
+                ->select('status')
+                ->whereColumn('training_queue_entries.student_id', 'students.id')
+                ->whereDate('queue_date', $date)
+                ->limit(1),
+            ])
+            ->where('students.status', 'active')
             ->when(
                 ! Setting::flag('training_shared_queue'),
                 fn ($query) => $query->where(fn ($q) => $q
@@ -130,7 +140,7 @@ class TrainingQueueService
                     ->orWhere(fn ($open) => $open->unassignedOn($date))),
             )
             ->orderBy('full_name')
-            ->get(['id', 'full_name', 'student_number', 'phone', 'current_instructor_id']);
+            ->get();
     }
 
     /** Whether this teacher is allowed to queue this student for the date. */

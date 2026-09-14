@@ -8,8 +8,6 @@
 <div x-data="trainingBoard({
         endpoint: '{{ route('instructor.training.board') }}',
         initial: {{ Js::from($board) }},
-        defaultDuration: {{ $defaultDuration }},
-        students: {{ Js::from($addable->map->only(['id', 'full_name', 'student_number', 'phone'])->values()) }},
      })">
 
     {{-- CURRENT TRAINING ------------------------------------------------ --}}
@@ -209,7 +207,39 @@
 
     {{-- QUEUE + COMPLETED ------------------------------------------------ --}}
     <div class="mt-6 grid gap-4 lg:grid-cols-3">
-        <div class="card lg:col-span-1">
+        {{-- The queue card carries its own state rather than reaching into the
+             board component, so the Add Student dialog keeps working even when
+             the compiled bundle is older than this template. --}}
+        <div class="card lg:col-span-1"
+             x-data="{
+                 adding: false,
+                 search: '',
+                 picked: '',
+                 selectDuration: {{ $defaultDuration }},
+                 selectTopic: '',
+                 students: {{ Js::from($addable->map(fn ($student) => [
+                     'id' => $student->id,
+                     'full_name' => $student->full_name,
+                     'student_number' => $student->student_number,
+                     'phone' => $student->phone,
+                     // A student already in today's line cannot be added again;
+                     // one who finished may rejoin, so only the open states block.
+                     'blocked_by' => in_array($student->queue_status, \App\Models\TrainingQueueEntry::OPEN_STATUSES, true)
+                         ? __(ucwords(str_replace('_', ' ', $student->queue_status)))
+                         : null,
+                 ])->values()) }},
+                 openAdd() { this.adding = true; this.search = ''; this.picked = ''; },
+                 get matchingStudents() {
+                     const term = this.search.trim().toLowerCase();
+                     if (! term) return this.students;
+                     return this.students.filter((student) =>
+                         [student.full_name, student.student_number, student.phone]
+                             .some((field) => (field || '').toLowerCase().includes(term)));
+                 },
+                 get pickedName() {
+                     return (this.students.find((student) => student.id === this.picked) || {}).full_name || '';
+                 },
+             }">
             <div class="card-header">
                 <h3 class="card-title">🟡 {{ __('Waiting Queue') }}</h3>
                 <div class="flex items-center gap-2">
@@ -311,43 +341,6 @@
                     <span x-text="board.queue_overflow"></span> {{ __('more waiting') }}
                 </div>
             </template>
-        </div>
-
-        <div class="card lg:col-span-2">
-            <div class="card-header">
-                <h3 class="card-title">✅ {{ __('Completed Today') }}</h3>
-                <span class="badge-green">{{ $completed->count() }}</span>
-            </div>
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr><th>{{ __('Student') }}</th><th>{{ __('Evaluation') }}</th>
-                            <th>{{ __('Duration') }}</th><th>{{ __('Time') }}</th></tr>
-                    </thead>
-                    <tbody>
-                        @forelse ($completed as $session)
-                            <tr>
-                                <td class="font-medium">{{ $session->student?->full_name }}</td>
-                                <td>
-                                    @if ($session->evaluation?->evaluation)
-                                        <x-status-badge :status="$session->evaluation->evaluation" />
-                                    @else
-                                        <span class="text-xs text-slate-400">—</span>
-                                    @endif
-                                </td>
-                                <td class="whitespace-nowrap text-sm">{{ $session->actual_minutes }} {{ __('min') }}</td>
-                                <td class="whitespace-nowrap text-xs text-slate-500">
-                                    {{ $session->started_at?->format('g:i A') }} – {{ $session->ended_at?->format('g:i A') }}
-                                </td>
-                            </tr>
-                        @empty
-                            <x-empty-state colspan="4" :message="__('No training completed yet today.')" />
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
 
     {{-- ADD STUDENT TO QUEUE -------------------------------------------
          Adding only ever puts a student in `waiting`; the timer starts when
@@ -379,16 +372,21 @@
                         <ul class="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
                             <template x-for="student in matchingStudents" :key="student.id">
                                 <li>
-                                    <button type="button" @click="picked = student.id"
-                                            class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-slate-50"
-                                            :class="picked === student.id ? 'bg-brand-50' : ''">
+                                    <button type="button" @click="picked = student.id" :disabled="!! student.blocked_by"
+                                            class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+                                            :class="student.blocked_by
+                                                ? 'cursor-not-allowed opacity-50'
+                                                : (picked === student.id ? 'bg-brand-50' : 'hover:bg-slate-50')">
                                         <span class="min-w-0">
                                             <span class="block truncate text-sm font-semibold text-slate-800"
                                                   x-text="student.full_name"></span>
                                             <span class="block text-xs text-slate-400"
                                                   x-text="`${student.student_number} · ${student.phone ?? ''}`"></span>
                                         </span>
-                                        <span class="shrink-0 text-brand-600" x-show="picked === student.id">✓</span>
+                                        <span class="shrink-0 text-xs font-semibold text-amber-600"
+                                              x-show="student.blocked_by" x-text="student.blocked_by"></span>
+                                        <span class="shrink-0 text-brand-600"
+                                              x-show="! student.blocked_by && picked === student.id">✓</span>
                                     </button>
                                 </li>
                             </template>
@@ -429,6 +427,43 @@
             </div>
         </div>
     </template>
+        </div>
+
+        <div class="card lg:col-span-2">
+            <div class="card-header">
+                <h3 class="card-title">✅ {{ __('Completed Today') }}</h3>
+                <span class="badge-green">{{ $completed->count() }}</span>
+            </div>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr><th>{{ __('Student') }}</th><th>{{ __('Evaluation') }}</th>
+                            <th>{{ __('Duration') }}</th><th>{{ __('Time') }}</th></tr>
+                    </thead>
+                    <tbody>
+                        @forelse ($completed as $session)
+                            <tr>
+                                <td class="font-medium">{{ $session->student?->full_name }}</td>
+                                <td>
+                                    @if ($session->evaluation?->evaluation)
+                                        <x-status-badge :status="$session->evaluation->evaluation" />
+                                    @else
+                                        <span class="text-xs text-slate-400">—</span>
+                                    @endif
+                                </td>
+                                <td class="whitespace-nowrap text-sm">{{ $session->actual_minutes }} {{ __('min') }}</td>
+                                <td class="whitespace-nowrap text-xs text-slate-500">
+                                    {{ $session->started_at?->format('g:i A') }} – {{ $session->ended_at?->format('g:i A') }}
+                                </td>
+                            </tr>
+                        @empty
+                            <x-empty-state colspan="4" :message="__('No training completed yet today.')" />
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
     @include('partials.training-toasts')
 </div>

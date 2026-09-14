@@ -414,7 +414,8 @@ builds it, and any waiting student no console can reach.
 
 Teachers add to the line themselves: **+ Add Student** on the Waiting Queue card
 opens a dialog that searches the students they may take by name, student number
-or phone, and queues the chosen one for a duration (defaulting to the centre's
+or phone — marking anyone already waiting, training or pending so they cannot be
+picked — and queues the chosen one for a duration (defaulting to the centre's
 `default_training_minutes`). Adding only ever writes `waiting` — the countdown
 still starts when somebody presses Select, and the duration is carried into the
 session then. A student already in the day's line is refused by state: already
@@ -474,7 +475,7 @@ create/update/delete on the domain models), settings.
 php artisan test
 ```
 
-261 tests / 1,240 assertions, run against MySQL (`driving_school_test`; see
+263 tests / 1,249 assertions, run against MySQL (`driving_school_test`; see
 `phpunit.xml`). Coverage includes:
 
 | Suite | What it proves |
