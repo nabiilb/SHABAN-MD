@@ -17,6 +17,9 @@ class Student extends Model
 
     public const STATUSES = ['active', 'completed', 'suspended', 'cancelled'];
 
+    /** The status that declares a student's training finished. */
+    public const COMPLETED = 'completed';
+
     protected $fillable = [
         'student_number',
         'user_id',
@@ -300,20 +303,55 @@ class Student extends Model
             ->count('attendance_date');
     }
 
+    /**
+     * Whether the school has declared this student's training finished.
+     *
+     * THE rule behind the two accessors below. A completed student has nothing
+     * left to train and is 100% through, whatever the attendance ledger says —
+     * the status is the school's own statement about the student, and it wins
+     * over a count of rows.
+     *
+     * This is not a cosmetic override. The register import brings in students
+     * the school finished with years ago and carries no attendance for them, so
+     * counting days would report a student the school considers done as 0%
+     * complete with a full course still to run. The same happens whenever an
+     * admin marks somebody complete by hand — for a transfer credit, a retest,
+     * or a course finished before this system existed.
+     */
+    public function hasCompletedTraining(): bool
+    {
+        return $this->status === self::COMPLETED;
+    }
+
+    /**
+     * Training days still to run — never money. The financial balance is
+     * `balance`, is derived from payments alone, and is untouched by this:
+     * a student who has finished training may still owe the whole fee.
+     */
     public function getRemainingDaysAttribute(): int
     {
+        if ($this->hasCompletedTraining()) {
+            return 0;
+        }
+
         return max($this->required_training_days - $this->completed_days, 0);
     }
 
     public function getProgressPercentageAttribute(): float
     {
+        if ($this->hasCompletedTraining()) {
+            return 100.0;
+        }
+
         $required = (int) $this->required_training_days;
 
         if ($required <= 0) {
             return 0.0;
         }
 
-        return round(min($this->completed_days / $required * 100, 100), 1);
+        // Clamped at both ends: a student cannot be less than 0% or more than
+        // 100% through their course, however the two numbers were arrived at.
+        return round(min(max($this->completed_days, 0) / $required * 100, 100), 1);
     }
 
     public function isNearCompletion(int $threshold = 80): bool

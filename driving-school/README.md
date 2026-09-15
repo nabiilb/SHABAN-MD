@@ -256,6 +256,42 @@ When `completed_days >= required_days` the student is promoted to **Completed**
 with `completion_date` set to the final qualifying training day. Deleting
 attendance below the requirement reopens the student.
 
+### Completed overrides the count
+
+A student whose status is **Completed** always reads as finished:
+
+```
+remaining = 0
+progress  = 100%
+```
+
+whatever the attendance ledger holds. The status is the school's own statement
+about the student and it outranks a count of rows — which matters most for the
+register import, where the school finished with a student long before this
+system existed and there is no attendance to count. Without this, the Students
+list reported people the school considers done as 0% complete with a full
+course still to run.
+
+Nothing is written to make it true. `completed_days` still reports the real
+number of days attended, no attendance is invented, and the student's course
+length is untouched — so changing the status back to Active reveals the real
+figures again:
+
+```
+required 30, attended 12, status completed  →  remaining 0,  progress 100%
+required 30, attended 12, status active     →  remaining 18, progress 40%
+```
+
+The rule lives in two accessors on `Student` (`remaining_days` and
+`progress_percentage`) because every screen reads those: the Students list,
+Student details, both instructor views, the student's own pages, the
+dashboards, `StudentProgressService::summarise()` and both progress reports.
+There is one calculation and no screen has its own.
+
+**"Remaining" here is training days, never money.** The financial balance is
+`balance`, derived from payments alone (see *A fee is not income*), and a
+student who has finished training may still owe the whole fee.
+
 ---
 
 ## Daily attendance, lesson and hand-over
