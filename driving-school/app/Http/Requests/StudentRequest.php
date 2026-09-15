@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Student;
+use App\Models\StudentPayment;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -16,6 +17,9 @@ class StudentRequest extends FormRequest
             ? $this->user()->can('update', $student)
             : $this->user()->can('create', Student::class);
     }
+
+    /** The payment fields, which only a registration accepts. */
+    private const PAYMENT_FIELDS = ['amount_paid', 'payment_method', 'payment_reference'];
 
     public function rules(): array
     {
@@ -36,6 +40,52 @@ class StudentRequest extends FormRequest
             'total_fee' => ['nullable', 'numeric', 'min:0', 'max:9999999.99'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'profile_photo' => ['nullable', 'image', 'max:2048'],
+
+            // Money taken at the counter when the student registers. Only on
+            // the way in: editing a student never records a payment, so these
+            // are not accepted at all on an update and an Amount Paid posted
+            // there is ignored rather than silently banked twice.
+            ...$this->isRegistration() ? [
+                'amount_paid' => ['nullable', 'numeric', 'min:0', 'max:9999999.99'],
+                'payment_method' => ['nullable', Rule::in(StudentPayment::METHODS)],
+                'payment_reference' => ['nullable', 'string', 'max:100'],
+            ] : [],
+        ];
+    }
+
+    /** True when this request registers a new student rather than editing one. */
+    public function isRegistration(): bool
+    {
+        return $this->route('student') === null;
+    }
+
+    /** The student's own columns, with the payment fields taken out. */
+    public function studentData(): array
+    {
+        return array_diff_key($this->validated(), array_flip(self::PAYMENT_FIELDS));
+    }
+
+    /**
+     * What the counter took, in the shape StudentPaymentService wants — or null
+     * when this is an edit, or when Amount Paid was blank or zero.
+     */
+    public function registrationPayment(): ?array
+    {
+        if (! $this->isRegistration()) {
+            return null;
+        }
+
+        $amount = round((float) $this->input('amount_paid', 0), 2);
+
+        if ($amount <= 0) {
+            return null;
+        }
+
+        return [
+            'amount' => $amount,
+            'payment_date' => $this->input('start_date') ?: today()->toDateString(),
+            'payment_method' => $this->input('payment_method') ?: 'cash',
+            'reference' => $this->input('payment_reference') ?: null,
         ];
     }
 
@@ -44,6 +94,7 @@ class StudentRequest extends FormRequest
         return [
             'current_instructor_id' => __('instructor'),
             'required_training_days' => __('required training days'),
+            'amount_paid' => __('amount paid'),
         ];
     }
 }

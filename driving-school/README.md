@@ -475,6 +475,54 @@ moves the money across:
 floored at zero per student so an overpayment cannot cancel out somebody else's
 arrears, and cancelled students excluded.
 
+### A student payment *is* the income entry
+
+There is no income-transaction table, and deliberately so. **Income & Expenses**,
+the dashboard and the income trend all read company income straight out of
+`student_payments`:
+
+```php
+$income = StudentPayment::whereDate('payment_date', …)->sum('amount');
+```
+
+So a payment row and the income it represents are the same fact stored once.
+One payment is exactly one income entry because there is nothing else to be
+counted — income cannot drift from the payment behind it, be double-posted, or
+outlive a payment that was removed. Editing a payment moves income; soft-deleting
+one takes it out of income while the row stays on file for audit.
+
+Expenses work the other way round only because they have their own table: paying
+a company debt writes a `DebtPayment` **and** a mirroring `CompanyExpense`,
+linked by `company_debt_id` / `debt_payment_id` and marked `is_system_generated`
+so it cannot be edited apart from the payment. There is no matching income table
+for such a mirror to live in, and adding one would create a second source of
+truth for the same money.
+
+### Money taken at registration
+
+The New Student form has **Amount Paid** beside Total Fee, with a payment method
+and an optional receipt reference, and shows the remaining balance as you type.
+Registering a student with `Total Fee 100` and `Amount Paid 40` writes the
+student, their first instructor assignment and one `student_payments` row of 40
+**in a single transaction** — if any part fails, none of it happened, so there is
+no window in which money is banked against a student who was never created.
+`Amount Paid` of 0 (or left blank) writes no payment at all and the student
+simply owes the whole fee.
+
+`StudentPaymentService` is the only thing that records a payment: the
+registration form and the Student Payments screen both go through it, so a
+student's first payment and their fifth are banked by the same code.
+`recordRegistrationPayment()` is idempotent per student — it locks the student
+row and returns the payment they already have rather than taking the money
+twice, so a retry cannot double the income.
+
+**Editing a student never records a payment.** The payment fields are only
+accepted when registering; an `amount_paid` posted to the update route is
+ignored outright, and raising the Total Fee from 100 to 120 leaves the 40
+already paid, and the 40 already in income, exactly where they are — only the
+balance moves, to 80. The balance is always `total_fee` minus the sum of
+recorded payments, never read back from an income figure.
+
 ### The school's timezone
 
 `config/app.php` reads `APP_TIMEZONE`, defaulting to `UTC`. Production sets

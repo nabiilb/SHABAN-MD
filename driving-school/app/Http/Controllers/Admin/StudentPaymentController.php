@@ -7,14 +7,15 @@ use App\Http\Requests\StudentPaymentRequest;
 use App\Models\Student;
 use App\Models\StudentPayment;
 use App\Services\AuditLogger;
-use App\Support\DocumentNumber;
+use App\Services\StudentPaymentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class StudentPaymentController extends Controller
 {
+    public function __construct(private readonly StudentPaymentService $payments) {}
+
     public function index(Request $request): View
     {
         $this->authorize('viewAny', StudentPayment::class);
@@ -48,19 +49,19 @@ class StudentPaymentController extends Controller
         ]);
     }
 
+    /**
+     * Records a payment through the same service the registration form uses, so
+     * a student's first payment and their fifth are banked by one piece of code
+     * and appear in the accounts the same way.
+     */
     public function store(StudentPaymentRequest $request): RedirectResponse
     {
         $this->authorize('create', StudentPayment::class);
 
-        DB::transaction(function () use ($request) {
-            $payment = StudentPayment::create([
-                ...$request->validated(),
-                'payment_number' => DocumentNumber::next(StudentPayment::class, 'payment_number', 'PAY'),
-                'created_by' => $request->user()->id,
-            ]);
+        $data = $request->validated();
+        $student = Student::findOrFail($data['student_id']);
 
-            AuditLogger::created($payment, "Student payment {$payment->payment_number} of {$payment->amount}");
-        });
+        $this->payments->record($student, $data, $request->user());
 
         return redirect()->route('admin.student-payments.index')->with('status', __('Payment recorded.'));
     }

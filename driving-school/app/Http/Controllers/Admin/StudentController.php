@@ -7,6 +7,7 @@ use App\Http\Requests\StudentRequest;
 use App\Models\Instructor;
 use App\Models\Student;
 use App\Services\AuditLogger;
+use App\Services\StudentPaymentService;
 use App\Services\StudentTransferService;
 use App\Support\DocumentNumber;
 use Illuminate\Http\RedirectResponse;
@@ -16,7 +17,10 @@ use Illuminate\View\View;
 
 class StudentController extends Controller
 {
-    public function __construct(private readonly StudentTransferService $transfers) {}
+    public function __construct(
+        private readonly StudentTransferService $transfers,
+        private readonly StudentPaymentService $payments,
+    ) {}
 
     public function index(Request $request): View
     {
@@ -56,12 +60,24 @@ class StudentController extends Controller
         ]);
     }
 
+    /**
+     * Registers a student and banks whatever they paid at the counter.
+     *
+     * The student, their first assignment and the payment are one transaction:
+     * if any part of it fails, none of it happened. There is no window in which
+     * a student exists with money recorded against them that the school did not
+     * take, or in which cash is banked for a student who was never created.
+     *
+     * The payment is the income entry — see StudentPaymentService — so nothing
+     * further is written for the accounts, and Amount Paid of 0 writes no
+     * payment at all.
+     */
     public function store(StudentRequest $request): RedirectResponse
     {
         $this->authorize('create', Student::class);
 
         $student = DB::transaction(function () use ($request) {
-            $data = $request->validated();
+            $data = $request->studentData();
             $data['student_number'] = DocumentNumber::next(Student::class, 'student_number', 'STD');
 
             if ($request->hasFile('profile_photo')) {
@@ -72,14 +88,26 @@ class StudentController extends Controller
 
             $this->transfers->assignInitial($student, $student->current_instructor_id, $request->user());
 
+            if ($payment = $request->registrationPayment()) {
+                $this->payments->recordRegistrationPayment($student, $payment, $request->user());
+            }
+
             AuditLogger::created($student, "Student {$student->full_name} registered");
 
             return $student;
         });
 
+        $paid = $student->total_paid;
+
         return redirect()
             ->route('admin.students.show', $student)
-            ->with('status', __('Student :name has been registered.', ['name' => $student->full_name]));
+            ->with('status', $paid > 0
+                ? __('Student :name has been registered. :paid recorded as income; :balance still owing.', [
+                    'name' => $student->full_name,
+                    'paid' => number_format($paid, 2),
+                    'balance' => number_format($student->balance, 2),
+                ])
+                : __('Student :name has been registered.', ['name' => $student->full_name]));
     }
 
     public function show(Student $student): View
@@ -110,7 +138,10 @@ class StudentController extends Controller
 
         DB::transaction(function () use ($request, $student) {
             $original = $student->getOriginal();
-            $data = $request->validated();
+            // studentData(), not validated(): an edit never carries payment
+            // fields, and changing the Total Fee moves what is owed without
+            // touching a single payment or a penny of recorded income.
+            $data = $request->studentData();
 
             if ($request->hasFile('profile_photo')) {
                 $data['profile_photo'] = $request->file('profile_photo')->store('students', 'public');

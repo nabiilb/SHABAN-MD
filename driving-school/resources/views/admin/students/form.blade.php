@@ -4,8 +4,18 @@
 @section('heading', $student->exists ? __('Edit Student') : __('New Student'))
 
 @section('content')
+{{-- The remaining balance shown while registering is only a preview of the
+     arithmetic; the authoritative balance is always Total Fee minus the sum of
+     recorded payments, computed server-side. --}}
 <form method="POST" enctype="multipart/form-data"
-      action="{{ $student->exists ? route('admin.students.update', $student) : route('admin.students.store') }}">
+      action="{{ $student->exists ? route('admin.students.update', $student) : route('admin.students.store') }}"
+      x-data="{
+          totalFee: {{ (float) old('total_fee', $student->total_fee ?: 0) }},
+          amountPaid: {{ (float) old('amount_paid', 0) }},
+          get remaining() {
+              return (Number(this.totalFee) || 0) - (Number(this.amountPaid) || 0);
+          },
+      }">
     @csrf
     @if ($student->exists) @method('PUT') @endif
 
@@ -88,8 +98,53 @@
 
                     <x-field name="total_fee" :label="__('Total Fee')">
                         <input id="total_fee" name="total_fee" type="number" step="0.01" min="0"
+                               x-model.number="totalFee"
                                value="{{ old('total_fee', $student->total_fee ?: '0.00') }}" class="input">
                     </x-field>
+
+                    @if (! $student->exists)
+                        {{-- Money handed over at the counter. Recorded as a
+                             student payment, which is the company's income
+                             entry — leave it at 0 and the student simply owes
+                             the whole fee. --}}
+                        <x-field name="amount_paid" :label="__('Amount Paid')">
+                            <input id="amount_paid" name="amount_paid" type="number" step="0.01" min="0"
+                                   x-model.number="amountPaid"
+                                   value="{{ old('amount_paid', '0.00') }}" class="input">
+                            <p class="mt-1 text-xs text-slate-400">
+                                {{ __('Recorded as a student payment and counted as company income. Leave at 0 if nothing was paid today.') }}
+                            </p>
+                        </x-field>
+
+                        <x-field name="payment_method" :label="__('Payment Method')">
+                            <select id="payment_method" name="payment_method" class="input"
+                                    :disabled="! (amountPaid > 0)">
+                                @foreach (\App\Models\StudentPayment::METHODS as $method)
+                                    <option value="{{ $method }}" @selected(old('payment_method', 'cash') === $method)>
+                                        {{ __(ucwords(str_replace('_', ' ', $method))) }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        </x-field>
+
+                        <x-field name="payment_reference" :label="__('Payment Reference')">
+                            <input id="payment_reference" name="payment_reference" type="text" maxlength="100"
+                                   value="{{ old('payment_reference') }}" class="input"
+                                   placeholder="{{ __('Receipt or transfer number (optional)') }}">
+                        </x-field>
+
+                        <div class="rounded-lg bg-slate-50 px-4 py-3 sm:col-span-2">
+                            <div class="flex items-center justify-between text-sm">
+                                <span class="text-slate-500">{{ __('Remaining Balance') }}</span>
+                                <span class="text-base font-bold"
+                                      :class="remaining > 0 ? 'text-amber-600' : 'text-emerald-600'"
+                                      x-text="remaining.toFixed(2)"></span>
+                            </div>
+                            <p class="mt-1 text-xs text-slate-400">
+                                {{ __('Total Fee minus Amount Paid. The balance is always recalculated from recorded payments.') }}
+                            </p>
+                        </div>
+                    @endif
                 </div>
             </div>
 
