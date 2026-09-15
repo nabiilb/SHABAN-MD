@@ -1,0 +1,157 @@
+@import 'tailwindcss';
+
+@source '../../app/**/*.php';
+@source '../../resources/views/**/*.blade.php';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+
+/* ------------------------------------------------------------------
+   Alpha Driving School design tokens
+   ------------------------------------------------------------------ */
+@theme {
+    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+    --color-brand-50: #eef4ff;
+    --color-brand-100: #d9e6ff;
+    --color-brand-200: #bcd3ff;
+    --color-brand-300: #8eb6ff;
+    --color-brand-400: #598eff;
+    --color-brand-500: #3366f2;
+    --color-brand-600: #2049e0;
+    --color-brand-700: #1b39b5;
+    --color-brand-800: #1c3390;
+    --color-brand-900: #1c3072;
+    --color-brand-950: #141f45;
+
+    --color-shell-800: #1b2436;
+    --color-shell-900: #141b29;
+    --color-shell-950: #0d121c;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    @apply bg-slate-100 text-slate-800 antialiased;
+}
+
+/* ------------------------------------------------------------------
+   Reusable UI primitives — the shared vocabulary of every screen
+   ------------------------------------------------------------------ */
+@layer components {
+    .card {
+        @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+    }
+
+    .card-header {
+        @apply flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4;
+    }
+
+    .card-title {
+        @apply text-sm font-semibold uppercase tracking-wide text-slate-500;
+    }
+
+    .btn,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger,
+    .btn-ghost {
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition
+               focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2
+               disabled:cursor-not-allowed disabled:opacity-60;
+    }
+
+    .btn-primary {
+        @apply bg-brand-600 text-white hover:bg-brand-700;
+    }
+
+    .btn-secondary {
+        @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+    }
+
+    .btn-danger {
+        @apply bg-rose-600 text-white hover:bg-rose-700;
+    }
+
+    .btn-ghost {
+        @apply text-slate-600 hover:bg-slate-100;
+    }
+
+    .btn-sm {
+        @apply px-3 py-1.5 text-xs;
+    }
+
+    .label {
+        @apply mb-1.5 block text-sm font-medium text-slate-700;
+    }
+
+    .input {
+        @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800
+               shadow-sm placeholder:text-slate-400
+               focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500
+               disabled:bg-slate-100;
+    }
+
+    .input-error {
+        @apply border-rose-400 focus:border-rose-500 focus:ring-rose-500;
+    }
+
+    .field-error {
+        @apply mt-1 text-xs font-medium text-rose-600;
+    }
+
+    .table-wrap {
+        @apply overflow-x-auto;
+    }
+
+    .table {
+        @apply min-w-full divide-y divide-slate-200 text-sm;
+    }
+
+    .table thead th {
+        @apply whitespace-nowrap bg-slate-50 px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500;
+    }
+
+    .table tbody tr {
+        @apply border-b border-slate-100 last:border-0 hover:bg-slate-50/70;
+    }
+
+    .table tbody td {
+        @apply px-5 py-3 align-middle text-slate-700;
+    }
+
+    .badge,
+    .badge-green,
+    .badge-blue,
+    .badge-amber,
+    .badge-rose,
+    .badge-slate {
+        @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap;
+    }
+
+    .badge { @apply bg-slate-100 text-slate-600 ring-1 ring-slate-200; }
+    .badge-green { @apply bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200; }
+    .badge-blue  { @apply bg-brand-50 text-brand-700 ring-1 ring-brand-200; }
+    .badge-amber { @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200; }
+    .badge-rose  { @apply bg-rose-50 text-rose-700 ring-1 ring-rose-200; }
+    .badge-slate { @apply bg-slate-100 text-slate-600 ring-1 ring-slate-200; }
+
+    .nav-link {
+        @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-300
+               transition hover:bg-white/10 hover:text-white;
+    }
+
+    .nav-link-active {
+        @apply bg-brand-600 text-white shadow-sm hover:bg-brand-600 hover:text-white;
+    }
+
+    .nav-heading {
+        @apply px-3 pb-1 pt-5 text-[11px] font-bold uppercase tracking-widest text-slate-500;
+    }
+}
+
+@media print {
+    .no-print { display: none !important; }
+    body { @apply bg-white; }
+    .card { @apply border-slate-300 shadow-none; }
+}
