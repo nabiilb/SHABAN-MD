@@ -498,6 +498,43 @@ so it cannot be edited apart from the payment. There is no matching income table
 for such a mirror to live in, and adding one would create a second source of
 truth for the same money.
 
+### One student, one phone number
+
+The school identifies a student by their phone number: the register is kept by
+it, and the import rejects a row without one and matches existing students on
+it. So **two active students may not share a number**, and a double-clicked
+New Student form cannot register the same person twice.
+
+A validation rule alone could not do it — a second request that arrives while
+the first is still in flight passes the check, because the first has not
+committed when the second looks. So `students.active_phone_key` is a guard
+column, like `active_student_id` on the training tables: it carries
+`PhoneNumber::normalize($phone)` while the student is active and not deleted,
+NULL once they are neither, and a unique index over it refuses the second
+registration outright. The 1062 is caught in `StudentController::store()` and
+turned back into the same message validation would have given.
+
+`App\Support\PhoneNumber` is the one place the rule lives, used by the form
+and by the import alike, so `0611000111`, `252611000111` and
+`+252 611 000 111` are recognised as one number. Normalising is not rewriting:
+`students.phone` still holds exactly what was typed.
+
+Because the key is only held while a student is **active and undeleted**,
+somebody who completed, cancelled or was removed frees their number for a
+genuine re-registration, and a soft-deleted record keeps its history. Two
+genuinely different students are never merged.
+
+Any pair of active students already sharing a number — an older database may
+hold some — is left exactly as it is: the migration gives the key to the first
+and reports the rest by name, and the Student model lets such a row go on being
+edited rather than turning every future save into a unique-key error. The
+grandfathering is narrow: it applies only to a row already on the books, already
+holding no key, whose phone, status and deletion this save does not touch. A new
+student always claims their key.
+
+The form disables Register Student on submit and shows *Registering…*, which is
+comfort for the admin rather than the protection.
+
 ### Money taken at registration
 
 The New Student form has **Amount Paid** beside Total Fee, with a payment method

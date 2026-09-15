@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\Student;
 use App\Models\StudentPayment;
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -27,7 +28,21 @@ class StudentRequest extends FormRequest
 
         return [
             'full_name' => ['required', 'string', 'max:150'],
-            'phone' => ['required', 'string', 'max:30', 'regex:/^[0-9+\-\s()]{6,30}$/'],
+            // The school identifies a student by their phone number — the
+            // register is kept by it and the import matches on it — so two
+            // active students may not share one, however each was written.
+            // Backed by a unique index; this rule is only the polite refusal.
+            'phone' => [
+                'required', 'string', 'max:30', 'regex:/^[0-9+\-\s()]{6,30}$/',
+                function (string $attribute, mixed $value, Closure $fail) use ($id) {
+                    if ($existing = Student::activeWithPhone($value, $id)) {
+                        $fail(__('An active student with this phone number is already registered: :name (:number).', [
+                            'name' => $existing->full_name,
+                            'number' => $existing->student_number,
+                        ]));
+                    }
+                },
+            ],
             'email' => ['nullable', 'email', 'max:150', Rule::unique('students', 'email')->ignore($id)->whereNull('deleted_at')],
             'address' => ['nullable', 'string', 'max:255'],
             'date_of_birth' => ['nullable', 'date', 'before:today'],

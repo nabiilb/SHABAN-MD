@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\PhoneNumber;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -35,6 +36,94 @@ class Student extends Model
         'notes',
         'profile_photo',
     ];
+
+    /**
+     * active_phone_key is a guard column, not data: it carries the student's
+     * normalised phone number while they are an active student and NULL once
+     * they are not, and the unique index over it is what makes "two active
+     * students cannot share a phone number" a guarantee the database keeps
+     * rather than one the form hopes for. A double-clicked registration is
+     * refused by the index even when both requests pass validation, because
+     * neither had committed when the other looked.
+     *
+     * Derived here, on every save, so no caller can change a phone or a status
+     * and forget it. `phone` itself is never rewritten — what the admin typed
+     * is what is stored and shown.
+     *
+     * A row that was already not holding its key — one of the pre-existing
+     * duplicates the migration reported — goes on not holding it, so those rows
+     * stay editable instead of turning every future save into a 1062. That
+     * grandfathering is deliberately narrow: it only applies to a row that is
+     * already on the books, whose stored key is already NULL, and whose phone,
+     * status and deleted_at this save does not touch. A new student always
+     * claims their key, which is what makes the index refuse the second half of
+     * a double-clicked registration.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $student): void {
+            $student->active_phone_key = $student->claimablePhoneKey();
+        });
+
+        // SoftDeletes writes deleted_at with its own query rather than a model
+        // save, so `saving` never fires for it: a removed student would keep
+        // holding their number and could never be registered again.
+        static::deleted(function (self $student): void {
+            if ($student->isForceDeleting()) {
+                return;
+            }
+
+            static::withoutEvents(fn () => static::withTrashed()
+                ->whereKey($student->getKey())
+                ->update(['active_phone_key' => null]));
+        });
+    }
+
+    /**
+     * The key this student may hold: their normalised number while they are
+     * active and undeleted, and null when they are not — or when another active
+     * student is already holding it.
+     */
+    protected function claimablePhoneKey(): ?string
+    {
+        if ($this->status !== 'active' || $this->deleted_at !== null) {
+            return null;
+        }
+
+        $key = PhoneNumber::normalize($this->phone);
+
+        if ($key === null) {
+            return null;
+        }
+
+        // Grandfathered: an existing row that already holds no key, being saved
+        // for some reason other than its number, its status or its deletion.
+        // Everything else claims, and lets the unique index decide.
+        $grandfathered = $this->exists
+            && $this->getRawOriginal('active_phone_key') === null
+            && ! $this->isDirty(['phone', 'status', 'deleted_at']);
+
+        return $grandfathered ? null : $key;
+    }
+
+    /**
+     * The active student holding this number, whichever way it was written.
+     * The one question the registration form asks before accepting a phone.
+     */
+    public static function activeWithPhone(mixed $phone, ?int $ignoreId = null): ?self
+    {
+        $key = PhoneNumber::normalize($phone);
+
+        if ($key === null) {
+            return null;
+        }
+
+        return static::query()
+            ->where('status', 'active')
+            ->where('active_phone_key', $key)
+            ->when($ignoreId, fn ($q) => $q->whereKeyNot($ignoreId))
+            ->first();
+    }
 
     protected function casts(): array
     {

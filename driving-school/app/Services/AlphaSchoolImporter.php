@@ -6,6 +6,7 @@ use App\Models\Student;
 use App\Models\StudentPayment;
 use App\Models\User;
 use App\Support\DocumentNumber;
+use App\Support\PhoneNumber;
 use App\Support\XlsxReader;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -392,27 +393,12 @@ class AlphaSchoolImporter
     /**
      * Somali mobile numbers are nine digits; the register writes them bare.
      * Everything is stored in the same +252 form the rest of the app uses, so
-     * a phone typed into the admin screen and one imported here match.
+     * a phone typed into the admin screen and one imported here match — which
+     * is why this is PhoneNumber's job and not a second copy of the rule.
      */
     protected function cleanPhone(mixed $value): ?string
     {
-        if ($value === null) {
-            return null;
-        }
-
-        $digits = preg_replace('/\D+/', '', (string) (is_float($value) ? number_format($value, 0, '', '') : $value));
-
-        if ($digits === '') {
-            return null;
-        }
-
-        $digits = match (true) {
-            str_starts_with($digits, '252') => substr($digits, 3),
-            str_starts_with($digits, '0') => ltrim($digits, '0'),
-            default => $digits,
-        };
-
-        return $digits === '' ? null : '+252'.$digits;
+        return PhoneNumber::normalize($value);
     }
 
     /**

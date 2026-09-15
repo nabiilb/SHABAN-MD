@@ -46,12 +46,19 @@ abstract class TestCase extends BaseTestCase
         ]);
     }
 
+    /**
+     * Phone numbers are sequential, not random: two active students may not
+     * share one, so a test fixture that rolled the same two digits twice would
+     * fail for a reason that has nothing to do with what it is testing.
+     */
     protected function makeStudent(string $name, ?Instructor $instructor = null, array $attributes = []): Student
     {
+        $sequence = Student::withTrashed()->max('id') + 1;
+
         return Student::create([
             'student_number' => 'STD-'.str_pad((string) (Student::count() + 1), 4, '0', STR_PAD_LEFT),
             'full_name' => $name,
-            'phone' => '+2526120000'.rand(10, 99),
+            'phone' => $attributes['phone'] ?? '+25261'.str_pad((string) $sequence, 7, '0', STR_PAD_LEFT),
             'start_date' => $attributes['start_date'] ?? Carbon::today()->subDays(30),
             'required_training_days' => $attributes['required_training_days'] ?? 24,
             'current_instructor_id' => $instructor?->id,

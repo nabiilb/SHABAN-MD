@@ -12,10 +12,25 @@
       x-data="{
           totalFee: {{ (float) old('total_fee', $student->total_fee ?: 0) }},
           amountPaid: {{ (float) old('amount_paid', 0) }},
+          submitting: false,
           get remaining() {
               return (Number(this.totalFee) || 0) - (Number(this.amountPaid) || 0);
           },
-      }">
+          /*
+           * Submit once. A second click, or Enter held down, is swallowed
+           * rather than sent — the back end refuses a duplicate registration
+           * either way, but the admin should not have to read an error to
+           * find that out. This is comfort, not the protection.
+           */
+          submitOnce(event) {
+              if (this.submitting) {
+                  event.preventDefault();
+                  return;
+              }
+              this.submitting = true;
+          },
+      }"
+      @submit="submitOnce($event)">
     @csrf
     @if ($student->exists) @method('PUT') @endif
 
@@ -160,8 +175,18 @@
     </div>
 
     <div class="mt-6 flex gap-2">
-        <button class="btn-primary">{{ $student->exists ? __('Save Changes') : __('Register Student') }}</button>
-        <a href="{{ route('admin.students.index') }}" class="btn-secondary">{{ __('Cancel') }}</a>
+        <button class="btn-primary" :disabled="submitting"
+                :class="submitting ? 'cursor-not-allowed opacity-60' : ''">
+            <span x-show="! submitting">{{ $student->exists ? __('Save Changes') : __('Register Student') }}</span>
+            {{-- Hidden inline rather than with x-cloak: this page has no
+                 [x-cloak] rule, and x-show writes style.display anyway, so the
+                 label cannot flash before Alpine boots. --}}
+            <span x-show="submitting" style="display: none">
+                {{ $student->exists ? __('Saving…') : __('Registering…') }}
+            </span>
+        </button>
+        <a href="{{ route('admin.students.index') }}" class="btn-secondary"
+           :class="submitting ? 'pointer-events-none opacity-60' : ''">{{ __('Cancel') }}</a>
     </div>
 </form>
 @endsection

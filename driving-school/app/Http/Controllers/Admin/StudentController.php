@@ -10,9 +10,11 @@ use App\Services\AuditLogger;
 use App\Services\StudentPaymentService;
 use App\Services\StudentTransferService;
 use App\Support\DocumentNumber;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class StudentController extends Controller
@@ -71,31 +73,57 @@ class StudentController extends Controller
      * The payment is the income entry — see StudentPaymentService — so nothing
      * further is written for the accounts, and Amount Paid of 0 writes no
      * payment at all.
+     *
+     * A double-clicked form sends this twice. The phone rule refuses the second
+     * one, and where both requests are in flight at once — neither committed
+     * when the other validated — the unique index over `active_phone_key`
+     * refuses it instead, and the 1062 is turned back into the same message the
+     * admin would have seen anyway. One registration, one student, one payment.
      */
     public function store(StudentRequest $request): RedirectResponse
     {
         $this->authorize('create', Student::class);
 
-        $student = DB::transaction(function () use ($request) {
-            $data = $request->studentData();
-            $data['student_number'] = DocumentNumber::next(Student::class, 'student_number', 'STD');
+        try {
+            $student = DB::transaction(function () use ($request) {
+                $data = $request->studentData();
+                $data['student_number'] = DocumentNumber::next(Student::class, 'student_number', 'STD');
 
-            if ($request->hasFile('profile_photo')) {
-                $data['profile_photo'] = $request->file('profile_photo')->store('students', 'public');
+                if ($request->hasFile('profile_photo')) {
+                    $data['profile_photo'] = $request->file('profile_photo')->store('students', 'public');
+                }
+
+                $student = Student::create($data);
+
+                $this->transfers->assignInitial($student, $student->current_instructor_id, $request->user());
+
+                if ($payment = $request->registrationPayment()) {
+                    $this->payments->recordRegistrationPayment($student, $payment, $request->user());
+                }
+
+                AuditLogger::created($student, "Student {$student->full_name} registered");
+
+                return $student;
+            });
+        } catch (QueryException $e) {
+            // The guard index caught the race the validation rule could not
+            // see. Nothing was written — the transaction took the student, the
+            // assignment and the payment with it.
+            if (! str_contains($e->getMessage(), 'students_active_phone_unique')) {
+                throw $e;
             }
 
-            $student = Student::create($data);
+            $existing = Student::activeWithPhone($request->input('phone'));
 
-            $this->transfers->assignInitial($student, $student->current_instructor_id, $request->user());
-
-            if ($payment = $request->registrationPayment()) {
-                $this->payments->recordRegistrationPayment($student, $payment, $request->user());
-            }
-
-            AuditLogger::created($student, "Student {$student->full_name} registered");
-
-            return $student;
-        });
+            throw ValidationException::withMessages([
+                'phone' => $existing
+                    ? __('An active student with this phone number is already registered: :name (:number).', [
+                        'name' => $existing->full_name,
+                        'number' => $existing->student_number,
+                    ])
+                    : __('An active student with this phone number is already registered.'),
+            ]);
+        }
 
         $paid = $student->total_paid;
 
