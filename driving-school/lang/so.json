@@ -1,4 +1,5 @@
 {
+    ":count completed this month": ":count ayaa bishan dhammaystiray",
     ":name added to the waiting queue.": ":name waxaa lagu daray safka sugitaanka.",
     ":name is not an active student.": ":name ma aha arday firfircoon.",
     ":student completed training. Now training: :next": ":student wuu dhammeeyay tababarka. Hadda waxaa tababaraya: :next",
@@ -71,6 +72,7 @@
     "Company Debts": "Deymaha Shirkadda",
     "Completed": "La dhammeeyay",
     "Completed Days": "Maalmaha La Dhammeeyay",
+    "Completed Students": "Ardayda Dhammaystirtay",
     "Completed Today": "Maanta La Dhammeeyay",
     "Completion Date": "Taariikhda Dhammaystirka",
     "Confirm Transfer": "Xaqiiji Wareejinta",

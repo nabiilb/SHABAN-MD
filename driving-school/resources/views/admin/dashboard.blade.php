@@ -24,9 +24,15 @@
 </div>
 
 {{-- Operational cards --}}
-<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
     <x-stat-card :label="__('Active Students')" :value="$metrics['active_students']" icon="users" tone="brand"
                  :href="route('admin.students.index', ['status' => 'active'])" />
+    {{-- Students the school has finished with. They stay in the ordinary
+         Students list like everybody else; this card is the shortcut to them,
+         filtered the same way the Active card is. --}}
+    <x-stat-card :label="__('Completed Students')" :value="$metrics['completed_students']" icon="check" tone="green"
+                 :hint="__(':count completed this month', ['count' => $metrics['completions_this_month']])"
+                 :href="route('admin.students.index', ['status' => 'completed'])" />
     <x-stat-card :label="__('Check-ins Today')" :value="$metrics['checkins_today']" icon="check" tone="green"
                  :href="route('admin.attendance.index')" />
     <x-stat-card :label="__('Registrations This Month')" :value="$metrics['registrations_this_month']" icon="plus" tone="violet" />

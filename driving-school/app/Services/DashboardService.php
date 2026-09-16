@@ -29,6 +29,19 @@ class DashboardService
             'outstanding_debt' => (float) CompanyDebt::outstanding()->sum('remaining_amount'),
             'outstanding_fees' => $this->outstandingFees(),
             'active_students' => Student::where('status', 'active')->count(),
+            // Counted from the status the school set, never inferred from how
+            // much attendance happens to be on file: the register import
+            // brings in students the school finished with long ago and carries
+            // no attendance for them at all.
+            'completed_students' => Student::where('status', Student::COMPLETED)->count(),
+            // Only students whose completion was dated. An imported student
+            // finished before this system existed has no completion_date, so
+            // they count in the total above and not in this month's figure.
+            'completions_this_month' => Student::where('status', Student::COMPLETED)
+                ->whereBetween('completion_date', [
+                    $today->copy()->startOfMonth(),
+                    $today->copy()->endOfMonth(),
+                ])->count(),
             'checkins_today' => Attendance::whereDate('attendance_date', $today)->where('status', 'present')->count(),
             'registrations_this_month' => Student::whereBetween('start_date', [
                 $today->copy()->startOfMonth(),

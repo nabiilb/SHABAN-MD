@@ -256,6 +256,26 @@ When `completed_days >= required_days` the student is promoted to **Completed**
 with `completion_date` set to the final qualifying training day. Deleting
 attendance below the requirement reopens the student.
 
+### Completed students stay in the records
+
+A completed student is still one of the school's students. They remain in
+**Admin → Students** with no filter applied, under `status=completed`, in a
+search, under their instructor's filter, in both the Students and Student
+Progress reports, and on their own instructor's list — nothing scopes them out
+anywhere, and nothing archives them.
+
+The dashboard carries a **Completed Students** card counting
+`status = completed` (never inferred from attendance, which the register import
+does not bring), with this month's dated completions underneath it, linking to
+`/admin/students?status=completed` exactly as the Active Students card links to
+`?status=active`. Both numbers come from `DashboardService::adminMetrics()`; no
+count is queried from a Blade template.
+
+The waiting queue is the one place they do not appear, and that is deliberate:
+it is operational rather than a record list, and `TrainingEligibilityService`
+refuses any student who is not active. Completed students are neither offered
+under Add Student nor accepted if their id is posted directly.
+
 ### Completed overrides the count
 
 A student whose status is **Completed** always reads as finished:
