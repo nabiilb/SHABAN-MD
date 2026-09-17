@@ -141,7 +141,9 @@ class TrainingController extends Controller
         $this->authorize('viewAny', TrainingSession::class);
 
         $sessions = TrainingSession::query()
-            ->with(['student', 'instructor', 'evaluation', 'lessonTopic'])
+            // currentInstructor too: the history distinguishes who trained the
+            // student from the teacher they belong to.
+            ->with(['student.currentInstructor', 'instructor', 'evaluation', 'lessonTopic'])
             ->when($request->filled('student_id'), fn ($q) => $q->where('student_id', $request->integer('student_id')))
             ->when($request->filled('instructor_id'), fn ($q) => $q->where('instructor_id', $request->integer('instructor_id')))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))

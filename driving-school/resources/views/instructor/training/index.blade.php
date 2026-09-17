@@ -232,37 +232,46 @@
              x-data="{
                  adding: false,
                  search: '',
-                 picked: '',
                  selectDuration: {{ $defaultDuration }},
                  selectTopic: '',
-                 students: {{ Js::from($addable->map(fn ($student) => [
-                     'id' => $student->id,
-                     'full_name' => $student->full_name,
-                     'student_number' => $student->student_number,
-                     'phone' => $student->phone,
-                     // Why this student cannot be picked, straight from the
-                     // same TrainingEligibilityService the POST will consult —
-                     // so the dialog never offers somebody the server refuses.
-                     // Students belonging to another teacher are not in this
-                     // list at all; these are only this teacher's own.
-                     'blocked_by' => $student->queue_eligibility?->eligible === false
-                         ? ($student->queue_eligibility->code === \App\Support\QueueEligibility::COOLING_DOWN
-                             ? __('Available at :time', ['time' => $student->queue_eligibility->availableAt()])
-                             : $student->queue_eligibility->reason)
-                         : null,
-                     // The same wait as a duration, for the tooltip.
-                     'available_in' => $student->queue_eligibility?->remainingLabel(),
-                 ])->values()) }},
-                 openAdd() { this.adding = true; this.search = ''; this.picked = ''; },
-                 get matchingStudents() {
-                     const term = this.search.trim().toLowerCase();
-                     if (! term) return this.students;
-                     return this.students.filter((student) =>
-                         [student.full_name, student.student_number, student.phone]
-                             .some((field) => (field || '').toLowerCase().includes(term)));
+                 results: [],
+                 searching: false,
+                 searched: false,
+                 picked: null,
+                 timer: null,
+                 openAdd() { this.adding = true; this.search = ''; this.picked = null; this.results = []; this.searched = false; },
+                 /*
+                  * Any instructor may train any eligible student, so the dialog
+                  * searches the whole school rather than listing one teacher's
+                  * students. Typed straight against the server: the list is far
+                  * too long to ship to the browser, and the eligibility each row
+                  * shows has to be the server's answer, not a guess.
+                  */
+                 searchStudents() {
+                     clearTimeout(this.timer);
+                     const term = this.search.trim();
+                     this.picked = null;
+
+                     if (term.length < 2) {
+                         this.results = []; this.searched = false; this.searching = false;
+                         return;
+                     }
+
+                     this.timer = setTimeout(async () => {
+                         this.searching = true;
+                         try {
+                             const url = '{{ route('instructor.training.students.search') }}?q=' + encodeURIComponent(term);
+                             const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                             this.results = response.ok ? (await response.json()).results : [];
+                         } catch (e) {
+                             this.results = [];
+                         }
+                         this.searching = false;
+                         this.searched = true;
+                     }, 250);
                  },
                  get pickedName() {
-                     return (this.students.find((student) => student.id === this.picked) || {}).full_name || '';
+                     return (this.results.find((student) => student.id === this.picked) || {}).full_name || '';
                  },
              }">
             <div class="card-header">
@@ -390,36 +399,68 @@
                     <div class="space-y-4 px-5 py-4">
                         <div>
                             <label for="student-search" class="label">{{ __('Search Student') }}</label>
-                            <input id="student-search" type="search" x-model="search" autocomplete="off"
-                                   class="input" placeholder="{{ __('Search by name, student ID, phone…') }}">
+                            <input id="student-search" type="search" x-model="search" @input="searchStudents()"
+                                   autocomplete="off" class="input"
+                                   placeholder="{{ __('Search by name, student number or phone…') }}">
+                            <p class="mt-1 text-xs text-slate-400">
+                                {{ __('Searches every active student in the school. Training a student does not change who they are assigned to.') }}
+                            </p>
                         </div>
 
-                        <ul class="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
-                            <template x-for="student in matchingStudents" :key="student.id">
+                        <ul class="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+                            <template x-for="student in results" :key="student.id">
                                 <li>
-                                    <button type="button" @click="picked = student.id" :disabled="!! student.blocked_by"
-                                            class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
-                                            :class="student.blocked_by
+                                    <button type="button" @click="picked = student.id" :disabled="! student.eligible"
+                                            class="w-full px-3 py-2 text-left"
+                                            :class="! student.eligible
                                                 ? 'cursor-not-allowed opacity-50'
                                                 : (picked === student.id ? 'bg-brand-50' : 'hover:bg-slate-50')">
-                                        <span class="min-w-0">
-                                            <span class="block truncate text-sm font-semibold text-slate-800"
-                                                  x-text="student.full_name"></span>
-                                            <span class="block text-xs text-slate-400"
-                                                  x-text="`${student.student_number} · ${student.phone ?? ''}`"></span>
+                                        <span class="flex items-center justify-between gap-3">
+                                            <span class="min-w-0">
+                                                <span class="block truncate text-sm font-semibold text-slate-800"
+                                                      x-text="student.full_name"></span>
+                                                <span class="block truncate text-xs text-slate-400"
+                                                      x-text="`${student.student_number} · ${student.phone ?? ''}`"></span>
+                                            </span>
+                                            <span class="shrink-0 text-right">
+                                                <span class="block text-xs font-semibold text-amber-600"
+                                                      x-show="student.blocked_by" x-text="student.blocked_by"
+                                                      :title="student.available_in
+                                                          ? '{{ __('Available in') }} ' + student.available_in
+                                                          : student.blocked_by"></span>
+                                                <span class="block text-brand-600"
+                                                      x-show="student.eligible && picked === student.id">✓</span>
+                                            </span>
                                         </span>
-                                        <span class="shrink-0 text-xs font-semibold text-amber-600"
-                                              x-show="student.blocked_by" x-text="student.blocked_by"
-                                              :title="student.available_in
-                                                  ? '{{ __('Available in') }} ' + student.available_in
-                                                  : student.blocked_by"></span>
-                                        <span class="shrink-0 text-brand-600"
-                                              x-show="! student.blocked_by && picked === student.id">✓</span>
+                                        {{-- Whose student they permanently are, and how far through
+                                             they are. Named so a teacher knows they are taking
+                                             somebody else's student for this session only. --}}
+                                        <span class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                                            <span x-show="student.permanent_instructor">
+                                                {{ __('Instructor') }}:
+                                                <span class="font-semibold" x-text="student.permanent_instructor"></span>
+                                            </span>
+                                            <span x-show="! student.permanent_instructor" class="text-slate-400">
+                                                {{ __('No instructor assigned') }}
+                                            </span>
+                                            <span x-text="`{{ __('Remaining') }}: ${student.remaining_days}`"></span>
+                                            <span x-text="`${student.progress}%`"></span>
+                                            <span class="badge-slate" x-text="student.status_label"></span>
+                                        </span>
                                     </button>
                                 </li>
                             </template>
-                            <template x-if="! matchingStudents.length">
+
+                            <template x-if="searching">
+                                <li class="px-3 py-6 text-center text-sm text-slate-400">{{ __('Searching…') }}</li>
+                            </template>
+                            <template x-if="! searching && searched && ! results.length">
                                 <li class="px-3 py-6 text-center text-sm text-slate-400">{{ __('No students found.') }}</li>
+                            </template>
+                            <template x-if="! searching && ! searched">
+                                <li class="px-3 py-6 text-center text-sm text-slate-400">
+                                    {{ __('Type at least two characters to search.') }}
+                                </li>
                             </template>
                         </ul>
 

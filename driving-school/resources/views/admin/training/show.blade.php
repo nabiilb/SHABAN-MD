@@ -13,7 +13,11 @@
         <dl class="space-y-3 text-sm">
             @foreach ([
                 __('Student') => $session->student?->full_name,
-                __('Teacher') => $session->instructor?->full_name,
+                // Who actually ran the session, which need not be the teacher
+                // the student belongs to: any instructor may train any student,
+                // and doing so never changes the assignment.
+                __('Training Performed By') => $session->instructor?->full_name,
+                __('Permanent Instructor') => $session->student?->currentInstructor?->full_name ?? __('—'),
                 __('Lesson') => $session->lessonTopic?->display_name ?? '—',
                 __('Vehicle') => $session->vehicle?->plate_number ?? '—',
                 __('Assigned Duration') => $session->assigned_duration_minutes.' '.__('minutes'),

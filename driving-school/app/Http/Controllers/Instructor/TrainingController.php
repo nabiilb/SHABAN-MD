@@ -16,6 +16,7 @@ use App\Models\Vehicle;
 use App\Services\TrainingBoardService;
 use App\Services\TrainingQueueService;
 use App\Services\TrainingSessionService;
+use App\Support\QueueEligibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -47,9 +48,42 @@ class TrainingController extends Controller
             'vehicles' => Vehicle::visibleTo($user)->orderBy('vehicle_number')->get(),
             'durations' => TrainingSession::DURATION_OPTIONS,
             'defaultDuration' => (int) Setting::get('default_training_minutes', 30),
-            // The students this teacher may put in the line — the same reach
-            // they have over the line itself.
-            'addable' => $this->queue->addableFor($user->instructorId() ?? 0),
+        ]);
+    }
+
+    /**
+     * Searches the school for a student to train.
+     *
+     * Any instructor may train any eligible student, so this searches every
+     * active student by number, name or phone — not one teacher's list. Each
+     * result says whose student they permanently are and whether they can be
+     * taken right now, and the answer is re-asked when Add to Queue is
+     * actually submitted.
+     */
+    public function searchStudents(Request $request): JsonResponse
+    {
+        $this->authorize('addToQueue', TrainingQueueEntry::class);
+
+        $students = $this->queue->searchFor((string) $request->query('q', ''));
+
+        return response()->json([
+            'results' => $students->map(fn (Student $student) => [
+                'id' => $student->id,
+                'student_number' => $student->student_number,
+                'full_name' => $student->full_name,
+                'phone' => $student->phone,
+                'permanent_instructor' => $student->currentInstructor?->full_name,
+                'status_label' => __(ucfirst($student->status)),
+                'remaining_days' => $student->remaining_days,
+                'progress' => $student->progress_percentage,
+                'eligible' => $student->queue_eligibility?->eligible ?? false,
+                'blocked_by' => $student->queue_eligibility?->eligible === false
+                    ? ($student->queue_eligibility->code === QueueEligibility::COOLING_DOWN
+                        ? __('Available at :time', ['time' => $student->queue_eligibility->availableAt()])
+                        : $student->queue_eligibility->reason)
+                    : null,
+                'available_in' => $student->queue_eligibility?->remainingLabel(),
+            ])->values(),
         ]);
     }
 
@@ -58,17 +92,17 @@ class TrainingController extends Controller
      * student waits their turn like anybody else.
      *
      * The only thing that ever creates a queue entry for a teacher. Every check
-     * is made again here, server-side, against the instructor resolved from the
-     * session — the request's own student_id is the only thing taken from the
-     * browser, and it buys nothing: a forged id for another teacher's student
-     * is refused by the same rule that kept them out of the dialog.
+     * is made again here, server-side. The student may belong to any teacher —
+     * that is the point — but the rules about the student still hold, and the
+     * instructor who will train them is the one in the session, never a value
+     * from the browser.
      */
     public function addToQueue(AddToTrainingQueueRequest $request): RedirectResponse
     {
         $student = Student::findOrFail($request->integer('student_id'));
         $instructorId = $request->user()->instructorId() ?? 0;
 
-        $verdict = $this->queue->eligibilityFor($instructorId, $student);
+        $verdict = $this->queue->eligibilityFor($student);
 
         if (! $verdict->eligible) {
             return back()->withErrors(['student_id' => $verdict->reason]);

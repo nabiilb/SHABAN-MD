@@ -53,7 +53,7 @@
     <div class="table-wrap">
         <table class="table">
             <thead>
-                <tr><th>{{ __('Date') }}</th><th>{{ __('Student') }}</th><th>{{ __('Teacher') }}</th>
+                <tr><th>{{ __('Date') }}</th><th>{{ __('Student') }}</th><th>{{ __('Trained By') }}</th>
                     <th>{{ __('Lesson') }}</th><th>{{ __('Evaluation') }}</th><th>{{ __('Duration') }}</th>
                     <th>{{ __('Time') }}</th><th>{{ __('Status') }}</th></tr>
             </thead>
@@ -66,7 +66,17 @@
                                 {{ $session->student?->full_name }}
                             </a>
                         </td>
-                        <td class="text-sm">{{ $session->instructor?->full_name }}</td>
+                        <td class="text-sm">
+                            {{ $session->instructor?->full_name }}
+                            {{-- Named only when somebody other than the student's
+                                 own teacher ran the session. --}}
+                            @if ($session->student?->current_instructor_id
+                                 && $session->student->current_instructor_id !== $session->instructor_id)
+                                <span class="block text-xs text-slate-400">
+                                    {{ __('for') }} {{ $session->student->currentInstructor?->full_name }}
+                                </span>
+                            @endif
+                        </td>
                         <td class="text-sm">{{ $session->lessonTopic?->display_name ?? '—' }}</td>
                         <td>
                             @if ($session->evaluation?->evaluation)

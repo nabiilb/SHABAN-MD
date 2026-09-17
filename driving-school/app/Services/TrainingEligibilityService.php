@@ -19,13 +19,20 @@ use Illuminate\Support\Collection;
  * writes the row all ask this same object, so what the teacher is offered, what
  * the server accepts and what the database ends up holding cannot drift apart.
  *
- * Five questions, in the order a teacher would ask them:
+ * Four questions, in the order a teacher would ask them:
  *
  *   1. Is the student still an active student at all?
- *   2. Is this teacher the one responsible for them on this date?
- *   3. Are they already in this date's line?
- *   4. Are they in a live session somewhere — any teacher, any day?
- *   5. Has it been long enough since they last finished?
+ *   2. Are they already in this date's line?
+ *   3. Are they in a live session somewhere — any teacher, any day?
+ *   4. Has it been long enough since they last finished?
+ *
+ * Ownership is deliberately NOT among them. Any instructor may train any
+ * eligible student in the school: the floor runs on whoever is free, and a
+ * student whose own teacher is out should not have to wait for them. Training
+ * somebody is not taking them — the permanent assignment is untouched by any of
+ * this, and the session records who actually did the training. The rules that
+ * remain are about the student: whether they are still training here, whether
+ * somebody already has them, and whether they have rested long enough.
  *
  * Deliberately depends on no other training service: TrainingQueueService and
  * TrainingSessionService both depend on this, and a cycle between them would be
@@ -45,26 +52,23 @@ class TrainingEligibilityService
     }
 
     /**
-     * The brief's own signature. An instructor is always required here, so this
-     * is the call that says "this teacher, this student".
+     * "May this teacher train this student?" — which, since any instructor may
+     * train anyone, is the same question as `check()`. Kept because it reads
+     * the way the rule is spoken, and because the instructor is what the caller
+     * has in hand.
      */
     public function canQueueStudent(Instructor $instructor, Student $student, $date = null): QueueEligibility
     {
-        return $this->check($instructor->id, $student, $date);
+        return $this->check($student, $date);
     }
 
-    /**
-     * The same question, with the instructor given as an id — or as null for an
-     * admin, who queues on behalf of the floor and so is not asked to own the
-     * student. Every other check still applies to them.
-     */
-    public function check(?int $instructorId, Student $student, $date = null): QueueEligibility
+    /** Whether this student may be put in the line for this date, by anybody. */
+    public function check(Student $student, $date = null): QueueEligibility
     {
         $date = Carbon::parse($date ?? today())->toDateString();
 
         return $this->decide(
             student: $student,
-            owned: $instructorId === null || $this->owns($instructorId, $student, $date),
             openEntry: TrainingQueueEntry::query()
                 ->where('student_id', $student->id)
                 ->forDate($date)
@@ -82,7 +86,7 @@ class TrainingEligibilityService
      * @param  Collection<int, Student>  $students
      * @return Collection<int, QueueEligibility> keyed by student id
      */
-    public function checkMany(?int $instructorId, Collection $students, $date = null): Collection
+    public function checkMany(Collection $students, $date = null): Collection
     {
         $date = Carbon::parse($date ?? today())->toDateString();
         $ids = $students->pluck('id')->all();
@@ -90,14 +94,6 @@ class TrainingEligibilityService
         if ($ids === []) {
             return collect();
         }
-
-        $owned = $instructorId === null
-            ? array_flip($ids)
-            : array_flip(Student::query()
-                ->whereIn('id', $ids)
-                ->ownedByInstructorOn($instructorId, $date)
-                ->pluck('id')
-                ->all());
 
         $openEntries = TrainingQueueEntry::query()
             ->whereIn('student_id', $ids)
@@ -116,7 +112,6 @@ class TrainingEligibilityService
 
         return $students->mapWithKeys(fn (Student $student) => [$student->id => $this->decide(
             student: $student,
-            owned: isset($owned[$student->id]),
             openEntry: $openEntries->get($student->id),
             live: $live->has($student->id),
             lastFinishedAt: $finished[$student->id] ?? null,
@@ -147,22 +142,17 @@ class TrainingEligibilityService
      */
     private function decide(
         Student $student,
-        bool $owned,
         ?TrainingQueueEntry $openEntry,
         bool $live,
         ?Carbon $lastFinishedAt,
     ): QueueEligibility {
+        // Covers a student who has completed, been suspended or cancelled. A
+        // completed student is not quietly reopened by being queued: an admin
+        // sets them back to active first, on the student's own record.
         if ($student->status !== 'active') {
             return QueueEligibility::blocked(
                 QueueEligibility::NOT_ACTIVE,
                 __(':name is not an active student.', ['name' => $student->full_name]),
-            );
-        }
-
-        if (! $owned) {
-            return QueueEligibility::blocked(
-                QueueEligibility::NOT_YOURS,
-                __('This student is assigned to another instructor.'),
             );
         }
 
@@ -207,15 +197,6 @@ class TrainingEligibilityService
         }
 
         return QueueEligibility::allowed();
-    }
-
-    /** Whether this teacher is the one responsible for the student that day. */
-    private function owns(int $instructorId, Student $student, string $date): bool
-    {
-        return Student::query()
-            ->whereKey($student->id)
-            ->ownedByInstructorOn($instructorId, $date)
-            ->exists();
     }
 
     /**

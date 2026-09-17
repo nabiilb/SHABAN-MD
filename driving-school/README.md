@@ -276,6 +276,46 @@ it is operational rather than a record list, and `TrainingEligibilityService`
 refuses any student who is not active. Completed students are neither offered
 under Add Student nor accepted if their id is posted directly.
 
+### Students who arrived mid-course
+
+The register import brings in students the school has been teaching for weeks,
+with no attendance in this system at all. Counting days would say their whole
+course is still to run, so the register's own Column1 answers it instead:
+
+| Column1 | Meaning |
+|---|---|
+| `complate` (and complete / completed / compleated / dhameystiray) | finished — remaining 0, progress 100% |
+| a whole number | that many training days still to run |
+| anything else | reported by the import, never guessed |
+
+A number is stored as an **opening balance**, not turned into attendance:
+
+```
+students.opening_remaining_days   the number the register gave
+students.opening_remaining_from   the date it was true (the import date)
+```
+
+Remaining days then become that number less the training days recorded from
+that date onwards. Days before it are already inside the opening number, so
+counting them again would take the same training off twice. Nothing historical
+is fabricated and `completed_days` still reports the real attendance count —
+which for a freshly imported student is zero.
+
+Both columns are nullable, and null means "no opening balance", which is every
+student registered through the application: they keep the attendance-based
+calculation exactly as it was.
+
+Progress is one formula for both kinds of student:
+
+```
+progress = (required_training_days - remaining_days) / required_training_days * 100
+```
+
+For an ordinary student `required - remaining` is exactly the days attended, so
+this is the old calculation unchanged; for an imported one it is the days the
+register says are behind them. Clamped to 0–100, so an opening balance longer
+than the course reads 0% rather than a negative.
+
 ### Completed overrides the count
 
 A student whose status is **Completed** always reads as finished:
@@ -392,18 +432,33 @@ The order is FIFO by `joined_at`; `position` only breaks ties and is what an
 admin's manual reorder writes to. A student who has finished is no longer
 waiting, so they drop out of the numbering rather than holding a place.
 
-### Who a teacher may queue
+### Any instructor may train any student
 
-Their own students, and nobody else's. Ownership is
-`Student::ownedByInstructorOn()` — `students.current_instructor_id` as a
-transfer leaves it, overridden for a single date by an attendance hand-over — so
-a transfer moves a student between two teachers' Add Student lists with no
-special case of its own. The old teacher stops seeing them; the new one starts.
+The Training Console searches the **whole school**. Add Student is a search box
+over student number, name and phone rather than a list of one teacher's
+students, and any instructor may take any eligible student:
 
-The instructor is always resolved from the authenticated user. Nothing in the
-request is believed: posting another teacher's `student_id` straight at the
-route, with or without an `instructor_id` alongside it, is refused by the same
-rule that kept that student out of the dialog.
+```
+STD-0105  Ahmed Ali  +252…
+Instructor: Cabdi · Remaining: 12 · 60% · Active      [Add to Queue]
+```
+
+**Training somebody is not taking them.** The queue entry records the adding
+instructor as who will train the student, so it lands on *their* console and
+not the owner's, and that is the only thing it changes. The student's permanent
+assignment, their instructor history and every earlier record stay exactly as
+they were; no transfer is created and no assignment is rewritten. The session,
+its evaluation and the day's attendance all name the instructor who actually
+did the training, and the admin's training history shows both — *Trained By*,
+with the permanent instructor named beneath when they differ.
+
+The instructor is always resolved from the authenticated user: an
+`instructor_id` in the request is ignored, so nobody can record somebody else
+as the trainer.
+
+This widening is scoped to the Training Console. Instructor student lists,
+attendance and every other module keep `Student::visibleTo()` — an instructor
+still sees and manages only their own students there.
 
 ### The twelve-hour rule
 
@@ -671,10 +726,11 @@ prints, for a date, the admin's count, every teacher's line as the board service
 builds it, and any waiting student no console can reach.
 
 Teachers add to the line themselves, and only that way: **+ Add Student** on the
-Waiting Queue card opens a dialog listing the students they are responsible for
-that day, searchable by name, student number or phone. Students belonging to
-another teacher are not in the list at all. Students who are in it but cannot be
-picked say why — *already in the waiting queue*, *currently in training*,
+Waiting Queue card opens a dialog that searches every active student in the
+school by name, student number or phone — any instructor may train anyone (see
+*Any instructor may train any student*), and each result names whose student
+they permanently are. Students who cannot be picked say why — *already in the
+waiting queue*, *currently in training*,
 *attendance/evaluation is pending*, or *Available at 20:00* for one still inside
 the twelve-hour cooldown. Adding only ever writes `waiting` — the countdown
 still starts when somebody presses Select, and the duration (defaulting to the

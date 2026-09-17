@@ -55,7 +55,7 @@ class TrainingQueueService
             // lock on a queue row that may not exist yet.
             Student::whereKey($student->id)->lockForUpdate()->firstOrFail();
 
-            $verdict = $this->eligibility->check($instructorId, $student, $date);
+            $verdict = $this->eligibility->check($student, $date);
 
             if (! $verdict->eligible) {
                 throw new RuntimeException($verdict->reason);
@@ -71,7 +71,11 @@ class TrainingQueueService
                 'queue_date' => $date,
                 'position' => $position,
                 'status' => TrainingQueueEntry::WAITING,
-                'preferred_instructor_id' => $data['preferred_instructor_id'] ?? null,
+                // Whoever added the student is who will train them: the entry
+                // goes on THEIR console, not the console of whoever the student
+                // permanently belongs to. Ownership is not changed by this —
+                // the student's own teacher stays their own teacher.
+                'preferred_instructor_id' => $data['preferred_instructor_id'] ?? $instructorId,
                 'assigned_duration_minutes' => $data['assigned_duration_minutes'] ?? null,
                 'joined_at' => now(),
                 'notes' => $data['notes'] ?? null,
@@ -94,32 +98,54 @@ class TrainingQueueService
     }
 
     /**
-     * The students a teacher may put in the line for a date: the ones they are
-     * responsible for that day, and nobody else's.
+     * Students a teacher may put in the line, found by searching the school.
      *
-     * Ownership comes from Student::ownedByInstructorOn() — the application's
-     * own current-assignment rule, which is students.current_instructor_id as
-     * a transfer leaves it, overridden for the date by any attendance
-     * hand-over. So a transfer moves a student between these lists with no
-     * special case of its own.
+     * Any instructor may train any eligible student, so this searches every
+     * active student rather than one teacher's list — by student number, name
+     * or phone, the three things somebody at the desk actually has. A short
+     * search term would return most of the school, so a term is required and
+     * the result is capped.
      *
-     * Each student is returned carrying their QueueEligibility, so the dialog
-     * can disable a student in cooldown and say when they come back rather than
-     * offering somebody the server is about to refuse.
+     * Each student comes back carrying their QueueEligibility and their
+     * permanent instructor, so the dialog can say whose student this is and why
+     * they cannot be picked rather than offering somebody the server is about
+     * to refuse.
      *
      * @return Collection<int, Student>
      */
-    public function addableFor(int $instructorId, $date = null): Collection
+    public function searchFor(string $term, $date = null, int $limit = 20): Collection
     {
+        $term = trim($term);
+
+        // A one-character search would return most of the school, which is not
+        // a search. Same Eloquent collection type as the real result.
+        if (mb_strlen($term) < 2) {
+            return Student::query()->whereRaw('1 = 0')->get();
+        }
+
         $date = Carbon::parse($date ?? today())->toDateString();
+        $like = '%'.$term.'%';
+        $digits = preg_replace('/\D+/', '', $term);
 
         $students = Student::query()
+            ->with('currentInstructor')
             ->where('students.status', 'active')
-            ->ownedByInstructorOn($instructorId, $date)
+            ->where(fn ($q) => $q
+                ->where('full_name', 'like', $like)
+                ->orWhere('student_number', 'like', $like)
+                ->orWhere('phone', 'like', $like)
+                // A number typed without its punctuation still finds the
+                // student whose stored number carries some.
+                ->when($digits !== '' && mb_strlen($digits) >= 3, fn ($p) => $p
+                    ->orWhereRaw(
+                        "replace(replace(replace(replace(phone, '+', ''), '-', ''), ' ', ''), '(', '') like ?",
+                        ['%'.$digits.'%'],
+                    )))
             ->orderBy('full_name')
+            ->limit($limit)
             ->get();
 
-        $verdicts = $this->eligibility->checkMany($instructorId, $students, $date);
+        $verdicts = $this->eligibility->checkMany($students, $date);
 
         return $students->each(fn (Student $student) => $student->setAttribute(
             'queue_eligibility',
@@ -127,16 +153,16 @@ class TrainingQueueService
         ));
     }
 
-    /** Whether this teacher may queue this student for the date, and why not. */
-    public function eligibilityFor(int $instructorId, Student $student, $date = null): QueueEligibility
+    /** Whether this student may be queued for the date, and why not. */
+    public function eligibilityFor(Student $student, $date = null): QueueEligibility
     {
-        return $this->eligibility->check($instructorId, $student, $date);
+        return $this->eligibility->check($student, $date);
     }
 
-    /** Whether this teacher is allowed to queue this student for the date. */
-    public function canAdd(int $instructorId, Student $student, $date = null): bool
+    /** Whether this student is allowed into the line for the date. */
+    public function canAdd(Student $student, $date = null): bool
     {
-        return $this->eligibilityFor($instructorId, $student, $date)->eligible;
+        return $this->eligibilityFor($student, $date)->eligible;
     }
 
     /** Takes a student out of the line and closes the gap behind them. */

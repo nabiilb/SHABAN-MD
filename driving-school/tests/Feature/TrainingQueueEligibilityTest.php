@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Attendance;
 use App\Models\Instructor;
 use App\Models\Role;
 use App\Models\Setting;
@@ -112,14 +113,19 @@ class TrainingQueueEligibilityTest extends TestCase
         ]);
     }
 
-    /** @return array<int, string> the names the Add Student dialog offers. */
-    private function offeredTo(User $user): array
+    /** @return array<int, array<string, mixed>> what Add Student's search returns. */
+    private function searchAs(User $user, string $term): array
     {
         return $this->actingAs($user)
-            ->get(route('instructor.training.index'))
-            ->viewData('addable')
-            ->pluck('full_name')
-            ->all();
+            ->getJson(route('instructor.training.students.search', ['q' => $term]))
+            ->assertOk()
+            ->json('results');
+    }
+
+    /** @return array<int, string> just the names that search found. */
+    private function foundBy(User $user, string $term): array
+    {
+        return array_column($this->searchAs($user, $term), 'full_name');
     }
 
     /** Queue, train and evaluate one student through to completion. */
@@ -145,60 +151,148 @@ class TrainingQueueEligibilityTest extends TestCase
      | 12 — ownership and transfers
      | ================================================================ */
 
-    /** 12.1 */
-    public function test_a_teacher_sees_their_own_student_under_add_student(): void
+    /** 9 — a teacher finds their own student. */
+    public function test_a_teacher_finds_their_own_student(): void
     {
-        $this->assertContains('Ilyas CABDI', $this->offeredTo($this->teacherUser));
+        $this->assertContains('Ilyas CABDI', $this->foundBy($this->teacherUser, 'Ilyas'));
 
         $verdict = $this->eligibility()->canQueueStudent($this->teacher, $this->mine);
         $this->assertTrue($verdict->eligible);
         $this->assertSame(QueueEligibility::ELIGIBLE, $verdict->code);
     }
 
-    /** 12.2 */
-    public function test_a_teacher_never_sees_another_teachers_student(): void
+    /**
+     * 10 — and finds a student who belongs to somebody else. Any instructor
+     * may train any eligible student; the search covers the school.
+     */
+    public function test_a_teacher_finds_another_teachers_student(): void
     {
-        $offered = $this->offeredTo($this->teacherUser);
+        $results = $this->searchAs($this->teacherUser, 'Faadumo');
 
-        $this->assertNotContains('Faadumo XUSEEN', $offered);
-        $this->assertFalse($this->eligibility()->canQueueStudent($this->teacher, $this->theirs)->eligible);
+        $this->assertSame(['Faadumo XUSEEN'], array_column($results, 'full_name'));
+        $this->assertTrue($results[0]['eligible'], 'Somebody else\'s student is still trainable.');
+
+        // And the row says whose student they are, so nobody takes them unaware.
+        $this->assertSame('Nasteexo', $results[0]['permanent_instructor']);
+
+        $this->assertTrue($this->eligibility()->canQueueStudent($this->teacher, $this->theirs)->eligible);
+    }
+
+    /** 18 + 19 + 20 — by name, by phone, by student number. */
+    public function test_search_works_by_name_phone_and_student_number(): void
+    {
+        foreach ([
+            'XUSEEN',
+            $this->theirs->phone,
+            $this->theirs->student_number,
+            substr($this->theirs->phone, -6),
+        ] as $term) {
+            $this->assertContains(
+                'Faadumo XUSEEN',
+                $this->foundBy($this->teacherUser, (string) $term),
+                "Searching for {$term} should find the student.",
+            );
+        }
+
+        // A term too short to be a search returns nothing rather than the school.
+        $this->assertSame([], $this->searchAs($this->teacherUser, 'F'));
+    }
+
+    /**
+     * 11 + 12 — Instructor B queues a student who belongs to Instructor A.
+     *
+     * The entry lands on B's console, because B is who will train them, and
+     * the student still belongs to A afterwards.
+     */
+    public function test_a_teacher_can_queue_another_teachers_student_without_taking_them(): void
+    {
+        $this->addAs($this->teacherUser, $this->theirs)->assertSessionHasNoErrors();
+
+        $entry = TrainingQueueEntry::firstOrFail();
+
+        $this->assertSame($this->theirs->id, $entry->student_id);
+        $this->assertSame(TrainingQueueEntry::WAITING, $entry->status);
+        $this->assertSame($this->teacher->id, $entry->preferred_instructor_id, 'The adder is who will train them.');
+        $this->assertSame($this->teacherUser->id, $entry->created_by);
+
+        // 12 — permanent assignment untouched.
+        $this->assertSame($this->other->id, $this->theirs->fresh()->current_instructor_id);
+
+        // 14 — and no transfer was created.
+        $this->assertSame(0, StudentTransfer::count());
+        $this->assertDatabaseCount('attendance_transfers', 0);
+
+        // The entry is on the adding teacher's board, not the owner's.
         $this->assertSame(
-            QueueEligibility::NOT_YOURS,
-            $this->eligibility()->canQueueStudent($this->teacher, $this->theirs)->code,
+            ['Faadumo XUSEEN'],
+            collect(app(TrainingBoardService::class)->board($this->teacherUser)['queue'])->pluck('student')->all(),
+        );
+        $this->assertSame(
+            [],
+            collect(app(TrainingBoardService::class)->board($this->otherUser)['queue'])->pluck('student')->all(),
         );
     }
 
     /**
-     * 12.3 — the list is a convenience, not the control. Posting the id
-     * straight at the route, as anyone editing the HTML would, is refused by
-     * the server for the same reason the id was never offered.
+     * 13 — and the session records who actually did the training, while the
+     * student keeps the instructor they belong to.
      */
-    public function test_a_teacher_cannot_forge_a_request_for_another_teachers_student(): void
+    public function test_the_session_records_the_teacher_who_actually_trained(): void
     {
-        $this->addAs($this->teacherUser, $this->theirs)
-            ->assertSessionHasErrors(['student_id' => 'This student is assigned to another instructor.']);
+        $this->addAs($this->teacherUser, $this->theirs)->assertSessionHasNoErrors();
 
-        $this->assertSame(0, TrainingQueueEntry::count());
+        $session = $this->sessions()->startNext($this->teacher, $this->teacherUser, [
+            'assigned_duration_minutes' => 30,
+        ]);
+
+        $this->assertNotNull($session);
+        $this->assertSame($this->teacher->id, $session->instructor_id, 'The trainer is who ran the session.');
+        $this->assertSame($this->theirs->id, $session->student_id);
+        $this->assertSame($this->other->id, $this->theirs->fresh()->current_instructor_id);
+
+        // Through to evaluation: attendance and evaluation name the trainer too.
+        $this->sessions()->end($session, $this->teacherUser);
+        $this->sessions()->evaluate($session->fresh(), [
+            'attendance_status' => 'present', 'evaluation' => 'good',
+        ], $this->teacherUser);
+
+        $this->assertSame($this->teacher->id, TrainingEvaluation::firstOrFail()->instructor_id);
+        $this->assertSame($this->teacher->id, Attendance::firstOrFail()->instructor_id);
+
+        // 14 + 23 — still no transfer, still Nasteexo's student.
+        $this->assertSame(0, StudentTransfer::count());
+        $this->assertSame($this->other->id, $this->theirs->fresh()->current_instructor_id);
     }
 
     /**
-     * 12.3b — and no instructor_id in the request is believed either: the
-     * teacher is whoever is logged in.
+     * The instructor is taken from the session, never the request. Posting a
+     * different instructor_id does not make somebody else the trainer.
      */
     public function test_an_instructor_id_in_the_request_is_ignored(): void
     {
         $this->actingAs($this->teacherUser)->post(route('instructor.training.queue.store'), [
-            'student_id' => $this->theirs->id,
+            'student_id' => $this->mine->id,
             'instructor_id' => $this->other->id,
             'assigned_duration_minutes' => 30,
-        ])->assertSessionHasErrors(['student_id']);
+        ])->assertSessionHasNoErrors();
 
-        $this->assertSame(0, TrainingQueueEntry::count());
+        $this->assertSame(
+            $this->teacher->id,
+            TrainingQueueEntry::firstOrFail()->preferred_instructor_id,
+            'The trainer is the signed-in instructor, not the posted id.',
+        );
     }
 
-    /** 12.4 */
-    public function test_a_transfer_moves_the_student_between_the_two_add_student_lists(): void
+    /**
+     * A transfer changes who the student belongs to. It does not change who may
+     * train them — since the console rule changed, that is everybody — so the
+     * visible effect is on the permanent assignment the search reports, not on
+     * whether either teacher can find them.
+     */
+    public function test_a_transfer_changes_who_the_student_belongs_to_not_who_may_train_them(): void
     {
+        $this->assertSame('Xasan', $this->searchAs($this->otherUser, 'Ilyas')[0]['permanent_instructor']);
+
         app(StudentTransferService::class)->transfer(
             $this->mine,
             $this->other,
@@ -208,18 +302,22 @@ class TrainingQueueEligibilityTest extends TestCase
 
         $this->mine->refresh();
 
-        // The old teacher can no longer see or queue them.
-        $this->assertNotContains('Ilyas CABDI', $this->offeredTo($this->teacherUser));
-        $this->addAs($this->teacherUser, $this->mine)
-            ->assertSessionHasErrors(['student_id' => 'This student is assigned to another instructor.']);
+        // Both still find them, and the row now names their new teacher.
+        foreach ([$this->teacherUser, $this->otherUser] as $viewer) {
+            $found = $this->searchAs($viewer, 'Ilyas');
 
-        // The new one can do both.
-        $this->assertContains('Ilyas CABDI', $this->offeredTo($this->otherUser));
-        $this->addAs($this->otherUser, $this->mine)->assertSessionHasNoErrors();
+            $this->assertSame(['Ilyas CABDI'], array_column($found, 'full_name'));
+            $this->assertSame('Nasteexo', $found[0]['permanent_instructor']);
+            $this->assertTrue($found[0]['eligible']);
+        }
+
+        // And the teacher who no longer owns them may still train them.
+        $this->addAs($this->teacherUser, $this->mine)->assertSessionHasNoErrors();
 
         $entry = TrainingQueueEntry::where('student_id', $this->mine->id)->firstOrFail();
         $this->assertSame(TrainingQueueEntry::WAITING, $entry->status);
-        $this->assertSame($this->otherUser->id, $entry->created_by);
+        $this->assertSame($this->teacherUser->id, $entry->created_by);
+        $this->assertSame($this->other->id, $this->mine->fresh()->current_instructor_id);
     }
 
     /**
@@ -272,11 +370,10 @@ class TrainingQueueEligibilityTest extends TestCase
             'The day the student actually trained still names the teacher who taught it.',
         );
 
-        // And the new teacher may queue them from tomorrow, without any of the
-        // above changing.
+        // And the search now names their new teacher, without any of the above
+        // changing.
         Carbon::setTestNow(Carbon::parse('2026-09-15 08:00:00', self::BUSINESS_TIMEZONE));
-        $this->assertContains('Ilyas CABDI', $this->offeredTo($this->otherUser));
-        $this->assertNotContains('Ilyas CABDI', $this->offeredTo($this->teacherUser));
+        $this->assertSame('Nasteexo', $this->searchAs($this->otherUser, 'Ilyas')[0]['permanent_instructor']);
     }
 
     /* ================================================================
@@ -569,15 +666,20 @@ class TrainingQueueEligibilityTest extends TestCase
         $this->assertSame(1, TrainingQueueEntry::count());
     }
 
-    /** A student who has left the school is not offered at all. */
-    public function test_an_inactive_student_is_neither_offered_nor_accepted(): void
+    /**
+     * 22 — a completed student is not quietly reopened by the Training Console.
+     * They are not found by the search and not accepted if posted; an admin
+     * sets them back to active on the student's own record first.
+     */
+    public function test_a_completed_student_is_neither_found_nor_accepted(): void
     {
         $this->mine->forceFill(['status' => 'completed'])->save();
 
-        $this->assertNotContains('Ilyas CABDI', $this->offeredTo($this->teacherUser));
+        $this->assertSame([], $this->foundBy($this->teacherUser, 'Ilyas'));
         $this->addAs($this->teacherUser, $this->mine->fresh())->assertSessionHasErrors(['student_id']);
 
         $this->assertSame(0, TrainingQueueEntry::count());
+        $this->assertSame('completed', $this->mine->fresh()->status, 'Still completed — nothing reopened them.');
     }
 
     /**
@@ -617,20 +719,46 @@ class TrainingQueueEligibilityTest extends TestCase
         }
     }
 
-    /** The dialog says when a student in cooldown comes back. */
-    public function test_the_dialog_marks_a_student_in_cooldown_with_the_time_they_return(): void
+    /**
+     * 15 — the search says when a student in cooldown comes back, and that
+     * holds for every instructor, not just the one who trained them.
+     */
+    public function test_the_search_marks_a_student_in_cooldown_for_every_instructor(): void
     {
         $this->completeOneSession($this->mine);
 
-        $page = $this->actingAs($this->teacherUser)->get(route('instructor.training.index'));
+        foreach ([$this->teacherUser, $this->otherUser] as $viewer) {
+            $found = $this->searchAs($viewer, 'Ilyas');
 
-        $addable = $page->viewData('addable')->keyBy('full_name');
-        $verdict = $addable['Ilyas CABDI']->queue_eligibility;
+            $this->assertFalse($found[0]['eligible']);
+            $this->assertSame('Available at 20:00', $found[0]['blocked_by']);
+            $this->assertSame('12h 0m', $found[0]['available_in']);
+        }
 
-        $this->assertFalse($verdict->eligible);
-        $this->assertSame(QueueEligibility::COOLING_DOWN, $verdict->code);
-        $this->assertSame('20:00', $verdict->availableAt());
+        // And a different instructor cannot get round it by adding them.
+        $this->addAs($this->otherUser, $this->mine)
+            ->assertSessionHasErrors(['student_id' => 'This student can be added again at 20:00.']);
 
-        $page->assertSee('Available at 20:00', false);
+        $this->assertSame(1, TrainingQueueEntry::count());
+    }
+
+    /**
+     * 16 + 17 — a student already waiting, or already training, cannot be
+     * picked up by a second instructor either.
+     */
+    public function test_a_second_instructor_cannot_take_a_student_who_is_already_spoken_for(): void
+    {
+        $this->addAs($this->teacherUser, $this->mine)->assertSessionHasNoErrors();
+
+        $this->addAs($this->otherUser, $this->mine)
+            ->assertSessionHasErrors(['student_id' => 'This student is already in the waiting queue.']);
+
+        // Now put them in training, and try again from the other console.
+        $this->sessions()->startNext($this->teacher, $this->teacherUser, ['assigned_duration_minutes' => 30]);
+
+        $this->addAs($this->otherUser, $this->mine)
+            ->assertSessionHasErrors(['student_id' => 'This student is currently in training.']);
+
+        $this->assertSame(1, TrainingQueueEntry::count());
     }
 }

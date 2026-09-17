@@ -281,10 +281,13 @@ class CompletedStudentsVisibilityTest extends TestCase
      */
     public function test_a_completed_student_is_never_added_to_the_waiting_queue(): void
     {
-        $addable = app(TrainingQueueService::class)->addableFor($this->instructor->id);
-
-        $this->assertNotContains('Sihaam Cali Mumin', $addable->pluck('full_name')->all());
-        $this->assertContains('Ubax Abdi Xirsi', $addable->pluck('full_name')->all());
+        // Not found by the console's search, which covers active students only.
+        $found = app(TrainingQueueService::class)->searchFor('Sihaam');
+        $this->assertSame([], $found->pluck('full_name')->all());
+        $this->assertSame(
+            ['Ubax Abdi Xirsi'],
+            app(TrainingQueueService::class)->searchFor('Ubax')->pluck('full_name')->all(),
+        );
 
         $verdict = app(TrainingEligibilityService::class)
             ->canQueueStudent($this->instructor, $this->finished);

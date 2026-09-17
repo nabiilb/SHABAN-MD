@@ -13,7 +13,6 @@ use App\Models\User;
 use App\Services\TrainingBoardService;
 use App\Services\TrainingQueueService;
 use App\Services\TrainingSessionService;
-use App\Support\QueueEligibility;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -90,6 +89,15 @@ class TeacherAddToQueueTest extends TestCase
             'student_id' => $student->id,
             'assigned_duration_minutes' => $minutes,
         ]));
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function searchResults(string $term): array
+    {
+        return $this->actingAs($this->teacherUser)
+            ->getJson(route('instructor.training.students.search', ['q' => $term]))
+            ->assertOk()
+            ->json('results');
     }
 
     private function teacherQueueNames(): array
@@ -291,18 +299,24 @@ class TeacherAddToQueueTest extends TestCase
     }
 
     /* N -------------------------------------------------------------- */
-    public function test_only_a_teacher_or_admin_may_add_and_only_their_own_students(): void
+    public function test_only_a_teacher_or_admin_may_add_but_any_student_may_be_trained(): void
     {
         $student = $this->makeUser(Role::STUDENT);
 
         $this->addAs($student, $this->students['Ahmed'])->assertForbidden();
 
-        // A teacher cannot queue somebody else's student into a line they
-        // would not then be able to see.
-        $this->addAs($this->teacherUser, $this->students['Faadumo'])
-            ->assertSessionHasErrors(['student_id' => 'This student is assigned to another instructor.']);
+        // Being an instructor is the requirement; owning the student is not.
+        // Faadumo belongs to the other teacher and may still be trained.
+        $this->addAs($this->teacherUser, $this->students['Faadumo'])->assertSessionHasNoErrors();
 
-        $this->assertSame(0, TrainingQueueEntry::where('student_id', $this->students['Faadumo']->id)->count());
+        $entry = TrainingQueueEntry::where('student_id', $this->students['Faadumo']->id)->firstOrFail();
+
+        $this->assertSame($this->teacher->id, $entry->preferred_instructor_id);
+        $this->assertSame(
+            $this->other->id,
+            $this->students['Faadumo']->fresh()->current_instructor_id,
+            'Training somebody is not taking them.',
+        );
     }
 
     /** A teacher is given no admin queue controls along with it. */
@@ -392,44 +406,48 @@ class TeacherAddToQueueTest extends TestCase
 
         $html = $page->getContent();
 
-        foreach (['adding:', 'openAdd()', 'matchingStudents', 'pickedName', 'selectDuration:'] as $piece) {
+        foreach (['adding:', 'openAdd()', 'searchStudents()', 'results:', 'pickedName', 'selectDuration:'] as $piece) {
             $this->assertStringContainsString($piece, $html, "The page should define {$piece} itself.");
         }
     }
 
-    /** A student already in today's line is shown as such and cannot be picked. */
-    public function test_students_already_in_the_line_are_marked_in_the_dialog(): void
+    /** A student already in today's line is returned marked, not hidden. */
+    public function test_students_already_in_the_line_are_marked_in_the_search(): void
     {
         $this->addAs($this->teacherUser, $this->students['Ahmed']);
 
-        $addable = $this->actingAs($this->teacherUser)
-            ->get(route('instructor.training.index'))
-            ->viewData('addable')
-            ->keyBy('full_name');
+        $waiting = $this->searchResults('Ahmed')[0];
+        $free = $this->searchResults('Mohamed')[0];
 
-        $this->assertSame(
-            QueueEligibility::ALREADY_WAITING,
-            $addable['Ahmed']->queue_eligibility->code,
-        );
-        $this->assertFalse($addable['Ahmed']->queue_eligibility->eligible);
-        $this->assertTrue($addable['Mohamed']->queue_eligibility->eligible);
-
-        $this->actingAs($this->teacherUser)
-            ->get(route('instructor.training.index'))
-            ->assertOk()
-            ->assertSee('blocked_by', false);
+        $this->assertFalse($waiting['eligible']);
+        $this->assertSame('This student is already in the waiting queue.', $waiting['blocked_by']);
+        $this->assertTrue($free['eligible']);
+        $this->assertNull($free['blocked_by']);
     }
 
-    /** The console hands the browser exactly the students it may queue. */
-    public function test_the_console_offers_only_addable_students(): void
+    /**
+     * The search reaches the whole school — this teacher's students, the other
+     * teacher's, and the one nobody is assigned to.
+     */
+    public function test_the_search_reaches_every_active_student(): void
     {
-        $page = $this->actingAs($this->teacherUser)->get(route('instructor.training.index'));
+        foreach (['Ahmed', 'Mohamed', 'Hassan', 'Ilyas', 'Faadumo', 'Cali'] as $name) {
+            $this->assertSame(
+                [$name],
+                array_column($this->searchResults($name), 'full_name'),
+                "The search should find {$name}.",
+            );
+        }
 
-        $addable = $page->viewData('addable')->pluck('full_name')->all();
+        // Each row carries what the teacher needs in order to decide.
+        $row = $this->searchResults('Faadumo')[0];
 
-        $this->assertEqualsCanonicalizing(['Ahmed', 'Mohamed', 'Hassan', 'Ilyas'], $addable);
-        $this->assertNotContains('Faadumo', $addable);
-        // Nobody's student is nobody's to queue either.
-        $this->assertNotContains('Cali', $addable);
+        $this->assertSame('Nasteexo', $row['permanent_instructor']);
+        $this->assertArrayHasKey('remaining_days', $row);
+        $this->assertArrayHasKey('status_label', $row);
+        $this->assertTrue($row['eligible']);
+
+        // A student with no instructor says so rather than showing a blank.
+        $this->assertNull($this->searchResults('Cali')[0]['permanent_instructor']);
     }
 }

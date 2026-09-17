@@ -62,7 +62,7 @@ class AlphaSchoolImporter
             'dates_carried_forward' => [],
             'amounts_not_numeric' => [],
             'durations_not_understood' => [],
-            'status_not_understood' => [],
+            'column_one_not_understood' => [],
             'duplicates_in_file' => [],
             'years_out_of_step' => [],
             'dates_corrected_by_config' => [],
@@ -163,10 +163,12 @@ class AlphaSchoolImporter
                 $notices['durations_not_understood'][] = ['row' => $number, 'name' => $name, 'value' => $durationText];
             }
 
-            [$status, $statusText] = $this->cleanStatus($cells['I'] ?? null);
+            // Column1 says one of two things: that the student finished, or how
+            // many training days they have left. Anything else is reported.
+            [$status, $openingRemaining, $columnOneText] = $this->cleanColumnOne($cells['I'] ?? null);
 
-            if ($statusText !== null && $status === null) {
-                $notices['status_not_understood'][] = ['row' => $number, 'name' => $name, 'value' => $statusText];
+            if ($columnOneText !== null && $status === null && $openingRemaining === null) {
+                $notices['column_one_not_understood'][] = ['row' => $number, 'name' => $name, 'value' => $columnOneText];
             }
 
             $existing = Student::withTrashed()->where('phone', $phone)->first();
@@ -183,8 +185,14 @@ class AlphaSchoolImporter
                     'start_date' => $date,
                     'required_training_days' => $days ?? 24,
                     'status' => $status ?? 'active',
+                    // The register's own count of days still to run, and the
+                    // date it was true. Null for a completed student and for a
+                    // row that gave no number — those keep the ordinary
+                    // attendance-based calculation.
+                    'opening_remaining_days' => $openingRemaining,
+                    'opening_remaining_from' => $openingRemaining === null ? null : $this->openingDate(),
                     'total_fee' => round($paid + $remaining, 2),
-                    'notes' => $this->notes($number, $durationText, $paidNote, $statusText),
+                    'notes' => $this->notes($number, $durationText, $paidNote, $columnOneText),
                     'email' => null,
                     'date_of_birth' => null,
                     'current_instructor_id' => null,
@@ -514,23 +522,63 @@ class AlphaSchoolImporter
      *
      * @return array{0: ?string, 1: ?string}
      */
-    protected function cleanStatus(mixed $value): array
+    /**
+     * The register's Column1, which carries two different kinds of answer.
+     *
+     * A word — the school writes "complate", and has spelled it four ways —
+     * means the student finished, and their remaining days are none.
+     *
+     * A number means that many training days are still to run. It is the
+     * school's own count, made against a history this application never saw,
+     * so it is kept as an opening balance rather than turned into attendance.
+     *
+     * Anything else — "5/" is in the file once — is neither, and is returned as
+     * text alone so the caller reports the row instead of guessing which was
+     * meant. A guess here would either finish a student who has not, or invent
+     * a number of days out of a typo.
+     *
+     * @return array{0: ?string, 1: ?int, 2: ?string} status, opening days, raw text
+     */
+    protected function cleanColumnOne(mixed $value): array
     {
         $text = $this->cleanText($value);
 
         if ($text === null) {
-            return [null, null];
+            return [null, null, null];
         }
 
-        $normalised = preg_replace('/[^a-z]/', '', mb_strtolower($text));
+        $letters = preg_replace('/[^a-z]/', '', mb_strtolower($text));
 
-        return match ($normalised) {
-            'complate', 'complete', 'completed', 'compleated', 'dhameystiray' => ['completed', $text],
-            'active', 'firfircoon' => ['active', $text],
-            'cancelled', 'canceled' => ['cancelled', $text],
-            'suspended' => ['suspended', $text],
-            default => [null, $text],
+        $status = match ($letters) {
+            'complate', 'complete', 'completed', 'compleated', 'dhameystiray' => 'completed',
+            'active', 'firfircoon' => 'active',
+            'cancelled', 'canceled' => 'cancelled',
+            'suspended' => 'suspended',
+            default => null,
         };
+
+        if ($status !== null) {
+            return [$status, null, $text];
+        }
+
+        // A whole number of days, and nothing else in the cell. "5/" has a
+        // stray character, so it is not one — and is reported rather than read
+        // as five.
+        if (preg_match('/^\d+$/', $text) && (int) $text >= 0) {
+            return [null, (int) $text, $text];
+        }
+
+        return [null, null, $text];
+    }
+
+    /**
+     * The date an opening balance is true from. The register's figure is
+     * current as at the moment it is imported, so training recorded from today
+     * onwards is what reduces it.
+     */
+    protected function openingDate(): string
+    {
+        return today()->toDateString();
     }
 
     /** Whatever the row said that the columns could not hold on their own. */

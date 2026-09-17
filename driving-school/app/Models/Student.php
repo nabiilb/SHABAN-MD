@@ -38,6 +38,8 @@ class Student extends Model
         'total_fee',
         'notes',
         'profile_photo',
+        'opening_remaining_days',
+        'opening_remaining_from',
     ];
 
     /**
@@ -135,6 +137,8 @@ class Student extends Model
             'start_date' => 'date',
             'completion_date' => 'date',
             'required_training_days' => 'integer',
+            'opening_remaining_days' => 'integer',
+            'opening_remaining_from' => 'date',
             'total_fee' => 'decimal:2',
         ];
     }
@@ -324,9 +328,47 @@ class Student extends Model
     }
 
     /**
+     * Whether this student arrived with an opening balance of training days
+     * rather than a full attendance history — a register import.
+     */
+    public function hasOpeningBalance(): bool
+    {
+        return $this->opening_remaining_days !== null;
+    }
+
+    /**
+     * Training days recorded since the opening balance was taken.
+     *
+     * Only days on or after `opening_remaining_from` count: everything before
+     * that date is already represented by the opening number itself, so
+     * counting it again would take the same training off twice.
+     */
+    public function getTrainingDaysSinceOpeningAttribute(): int
+    {
+        if (! $this->hasOpeningBalance() || ! $this->opening_remaining_from) {
+            return 0;
+        }
+
+        return (int) $this->attendance()
+            ->where('status', 'present')
+            ->whereDate('attendance_date', '>=', $this->opening_remaining_from->toDateString())
+            ->distinct()
+            ->count('attendance_date');
+    }
+
+    /**
      * Training days still to run — never money. The financial balance is
      * `balance`, is derived from payments alone, and is untouched by this:
      * a student who has finished training may still owe the whole fee.
+     *
+     * Three sources, in order of authority:
+     *
+     *   1. A completed status. The school has said the student is finished.
+     *   2. An opening balance, less whatever they have trained since it was
+     *      taken. This is the register import: the school knew how many days
+     *      were left, and this application has no attendance from before then.
+     *   3. Otherwise the ordinary count — the course length less the days
+     *      attended — which is every student registered through the app.
      */
     public function getRemainingDaysAttribute(): int
     {
@@ -334,9 +376,21 @@ class Student extends Model
             return 0;
         }
 
+        if ($this->hasOpeningBalance()) {
+            return max((int) $this->opening_remaining_days - $this->training_days_since_opening, 0);
+        }
+
         return max($this->required_training_days - $this->completed_days, 0);
     }
 
+    /**
+     * How far through the course the student is, from the days still to run.
+     *
+     * One formula for both kinds of student: for an ordinary student
+     * `required - remaining` is exactly the days they have attended, so this is
+     * the same number the old calculation produced; for an imported one it is
+     * the days the register says are behind them.
+     */
     public function getProgressPercentageAttribute(): float
     {
         if ($this->hasCompletedTraining()) {
@@ -349,9 +403,12 @@ class Student extends Model
             return 0.0;
         }
 
+        $done = $required - $this->remaining_days;
+
         // Clamped at both ends: a student cannot be less than 0% or more than
-        // 100% through their course, however the two numbers were arrived at.
-        return round(min(max($this->completed_days, 0) / $required * 100, 100), 1);
+        // 100% through their course, however the two numbers were arrived at —
+        // an opening balance larger than the course length included.
+        return round(min(max($done / $required * 100, 0), 100), 1);
     }
 
     public function isNearCompletion(int $threshold = 80): bool

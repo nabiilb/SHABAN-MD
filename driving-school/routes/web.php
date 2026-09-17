@@ -151,6 +151,8 @@ Route::middleware(['auth', 'role:instructor', 'instructor.profile'])
         /* Training console */
         Route::get('training', [Instructor\TrainingController::class, 'index'])->name('training.index');
         Route::get('training/board', [Instructor\TrainingController::class, 'board'])->name('training.board');
+        // Searches the whole school: any instructor may train any eligible student.
+        Route::get('training/students', [Instructor\TrainingController::class, 'searchStudents'])->name('training.students.search');
         Route::post('training/queue', [Instructor\TrainingController::class, 'addToQueue'])->name('training.queue.store');
         Route::post('training/start', [Instructor\TrainingController::class, 'start'])->name('training.start');
         Route::post('training/{session}/end', [Instructor\TrainingController::class, 'end'])->name('training.end');
