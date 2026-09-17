@@ -165,27 +165,74 @@ class TrainingQueueService
         return $this->eligibilityFor($student, $date)->eligible;
     }
 
-    /** Takes a student out of the line and closes the gap behind them. */
-    public function remove(TrainingQueueEntry $entry, User $actor, ?string $reason = null): void
-    {
-        DB::transaction(function () use ($entry, $reason) {
-            if ($entry->status === TrainingQueueEntry::TRAINING_IN_PROGRESS) {
-                throw new RuntimeException(__('End the training session before removing this student from the queue.'));
+    /** Why a cycle was closed. Both paths write the same row, differently worded. */
+    public const REMOVED_BY_INSTRUCTOR = 'Removed from queue by instructor';
+
+    public const AUTO_EXPIRED = 'Auto-expired after 12 hours';
+
+    public const AUTO_EXPIRED_PENDING = 'Auto-expired: evaluation/attendance not completed within 12 hours';
+
+    /**
+     * THE one way a queue cycle ends without the student having trained.
+     *
+     * Used by the instructor's Remove button and by the twelve-hour expiry
+     * alike, so a cycle closed by a person and a cycle closed by the clock end
+     * up in exactly the same shape — a terminal status, the time, the reason,
+     * and who did it when it was somebody.
+     *
+     * Nothing is deleted. The row stays in the queue history saying what
+     * happened to it, and no attendance, evaluation or lesson is written: the
+     * student did not train, and closing the cycle must never pretend they did.
+     *
+     * Idempotent and concurrency-safe: the row is locked and re-read, and a
+     * cycle somebody else has already closed is left exactly as they closed it.
+     * Two clicks, or a click racing the expiry, produce one terminal transition.
+     */
+    public function closeCycle(
+        TrainingQueueEntry $entry,
+        string $reason,
+        ?User $actor = null,
+        string $status = TrainingQueueEntry::CANCELLED,
+    ): bool {
+        $closed = DB::transaction(function () use ($entry, $reason, $actor, $status) {
+            $locked = TrainingQueueEntry::whereKey($entry->getKey())->lockForUpdate()->first();
+
+            if (! $locked || ! $locked->isOpen()) {
+                return false;
             }
 
-            $entry->update([
-                'status' => TrainingQueueEntry::CANCELLED,
-                'notes' => $reason ?: $entry->notes,
+            if ($locked->status === TrainingQueueEntry::TRAINING_IN_PROGRESS) {
+                throw new RuntimeException(__('End or cancel the training session before closing this queue entry.'));
+            }
+
+            $locked->update([
+                'status' => $status,
+                'closed_at' => now(),
+                'closed_by' => $actor?->id,
+                'close_reason' => $reason,
             ]);
 
-            $this->compact($entry->queue_date);
+            $this->compact($locked->queue_date);
 
-            AuditLogger::log('training.queue_removed', $entry, __(':name was removed from the queue', [
-                'name' => $entry->student?->full_name,
+            AuditLogger::log('training.queue_closed', $locked, __(':name left the queue — :reason', [
+                'name' => $locked->student?->full_name,
+                'reason' => __($reason),
             ]));
+
+            return true;
         });
 
-        event(new TrainingBoardChanged('queue.removed'));
+        if ($closed) {
+            event(new TrainingBoardChanged('queue.removed'));
+        }
+
+        return $closed;
+    }
+
+    /** The admin's Remove control, which is the same close with their wording. */
+    public function remove(TrainingQueueEntry $entry, User $actor, ?string $reason = null): void
+    {
+        $this->closeCycle($entry, $reason ?: self::REMOVED_BY_INSTRUCTOR, $actor);
     }
 
     /**

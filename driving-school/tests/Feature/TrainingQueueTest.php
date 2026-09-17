@@ -117,7 +117,7 @@ class TrainingQueueTest extends TestCase
         app(TrainingSessionService::class)->start($entry, $this->teacher, $this->teacherUser, ['assigned_duration_minutes' => 30]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('End the training session before removing this student from the queue.');
+        $this->expectExceptionMessage('End or cancel the training session before closing this queue entry.');
 
         $this->queue()->remove($entry->fresh(), $this->admin);
     }

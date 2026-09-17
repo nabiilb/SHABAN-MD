@@ -384,6 +384,27 @@ class Student extends Model
     }
 
     /**
+     * The "Completed" figure the screens show.
+     *
+     * For a student with an opening balance — or one the school has marked
+     * finished — it is the course length less what is left, which is what the
+     * register says is behind them. It is a DISPLAY figure derived from the
+     * remaining count, not a claim that this many attendance rows exist; the
+     * real attendance count is `completed_days` and is never overwritten.
+     *
+     * For an ordinary student the two are the same number anyway, so they keep
+     * their real attendance count with no capping applied.
+     */
+    public function getEffectiveCompletedDaysAttribute(): int
+    {
+        if ($this->hasCompletedTraining() || $this->hasOpeningBalance()) {
+            return max($this->required_training_days - $this->remaining_days, 0);
+        }
+
+        return $this->completed_days;
+    }
+
+    /**
      * How far through the course the student is, from the days still to run.
      *
      * One formula for both kinds of student: for an ordinary student

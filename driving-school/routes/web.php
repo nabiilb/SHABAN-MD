@@ -154,6 +154,8 @@ Route::middleware(['auth', 'role:instructor', 'instructor.profile'])
         // Searches the whole school: any instructor may train any eligible student.
         Route::get('training/students', [Instructor\TrainingController::class, 'searchStudents'])->name('training.students.search');
         Route::post('training/queue', [Instructor\TrainingController::class, 'addToQueue'])->name('training.queue.store');
+        // Closes a waiting cycle, keeping the row. Never deletes.
+        Route::delete('training/queue/{entry}', [Instructor\TrainingController::class, 'removeFromQueue'])->name('training.queue.remove');
         Route::post('training/start', [Instructor\TrainingController::class, 'start'])->name('training.start');
         Route::post('training/{session}/end', [Instructor\TrainingController::class, 'end'])->name('training.end');
         // Abandons a session without recording it as training that happened.

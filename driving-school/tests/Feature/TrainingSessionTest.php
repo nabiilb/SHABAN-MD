@@ -324,7 +324,7 @@ class TrainingSessionTest extends TestCase
      | The next student
      | ---------------------------------------------------------------- */
 
-    public function test_completing_a_student_starts_the_next_one_automatically(): void
+    public function test_completing_a_student_leaves_the_next_one_waiting(): void
     {
         $ahmedEntry = $this->queue($this->ahmed);
         $this->queue($this->mohamed);
@@ -337,16 +337,17 @@ class TrainingSessionTest extends TestCase
         $this->service()->end($session, $this->teacherUser);
         $this->service()->evaluate($session->fresh(), ['attendance_status' => 'present', 'evaluation' => 'good'], $this->teacherUser);
 
-        // Nobody had to pick him: he is already training.
-        $next = TrainingSession::where('student_id', $this->mohamed->id)->first();
-
-        $this->assertNotNull($next, 'The next student should have started automatically.');
-        $this->assertSame(TrainingSession::IN_PROGRESS, $next->status);
-        $this->assertNotNull($next->started_at);
-        $this->assertSame(TrainingQueueEntry::TRAINING_IN_PROGRESS, $next->queueEntry->fresh()->status);
-
-        // ...and the queue behind him is empty.
-        $this->assertNull(app(TrainingQueueService::class)->nextWaitingFor($this->teacher->id));
+        // Mohamed is still only waiting: nothing started him.
+        $this->assertNull(
+            TrainingSession::where('student_id', $this->mohamed->id)->first(),
+            'Finishing Ahmed must not start Mohamed.',
+        );
+        $this->assertSame(1, TrainingSession::count());
+        $this->assertSame(
+            TrainingQueueEntry::WAITING,
+            TrainingQueueEntry::where('student_id', $this->mohamed->id)->value('status'),
+        );
+        $this->assertSame('Mohamed', app(TrainingQueueService::class)->nextWaitingFor($this->teacher->id)?->student->full_name);
     }
 
     public function test_start_next_returns_nothing_when_the_queue_is_empty(): void

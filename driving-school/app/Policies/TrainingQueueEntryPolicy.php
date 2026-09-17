@@ -46,6 +46,36 @@ class TrainingQueueEntryPolicy
         return $user->isAdmin();
     }
 
+    /**
+     * Removing a waiting student from the line.
+     *
+     * Scoped deliberately: being allowed to TRAIN anybody is not being allowed
+     * to CANCEL anybody's work. A teacher may remove an entry their own console
+     * holds — one they were named on, or one they added — and an admin may
+     * remove any. Another instructor's active queue entry is theirs to manage.
+     *
+     * Only before training starts. Once a session exists the entry is closed
+     * through the session's own cancellation, so timestamps and history stay
+     * consistent.
+     */
+    public function removeFromQueue(User $user, TrainingQueueEntry $entry): bool
+    {
+        if ($entry->status !== TrainingQueueEntry::WAITING) {
+            return false;
+        }
+
+        if ($user->isAdmin()) {
+            return true;
+        }
+
+        if (! $user->isInstructor() || $user->instructorId() === null) {
+            return false;
+        }
+
+        return $entry->preferred_instructor_id === $user->instructorId()
+            || $entry->created_by === $user->id;
+    }
+
     /** Taking the next student into training. */
     public function claim(User $user, TrainingQueueEntry $entry): bool
     {

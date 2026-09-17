@@ -16,6 +16,7 @@ use App\Models\Vehicle;
 use App\Services\TrainingBoardService;
 use App\Services\TrainingQueueService;
 use App\Services\TrainingSessionService;
+use App\Services\TrainingStaleCycleService;
 use App\Support\QueueEligibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -33,6 +34,7 @@ class TrainingController extends Controller
         private readonly TrainingBoardService $board,
         private readonly TrainingSessionService $sessions,
         private readonly TrainingQueueService $queue,
+        private readonly TrainingStaleCycleService $stale,
     ) {}
 
     public function index(Request $request): View
@@ -63,6 +65,10 @@ class TrainingController extends Controller
     public function searchStudents(Request $request): JsonResponse
     {
         $this->authorize('addToQueue', TrainingQueueEntry::class);
+
+        // Stale cycles are closed before eligibility is judged, so a student
+        // held by an entry nobody finished yesterday shows as available today.
+        $this->stale->expireStale($request->user());
 
         $students = $this->queue->searchFor((string) $request->query('q', ''));
 
@@ -102,6 +108,8 @@ class TrainingController extends Controller
         $student = Student::findOrFail($request->integer('student_id'));
         $instructorId = $request->user()->instructorId() ?? 0;
 
+        $this->stale->expireStale($request->user());
+
         $verdict = $this->queue->eligibilityFor($student);
 
         if (! $verdict->eligible) {
@@ -119,6 +127,33 @@ class TrainingController extends Controller
         return back()->with('status', __(':name added to the waiting queue.', ['name' => $student->full_name]));
     }
 
+    /**
+     * Removes a student from the waiting queue, keeping the row.
+     *
+     * The cycle is closed, not deleted: the entry stays in the history saying
+     * who removed it and why. No attendance, evaluation or lesson is written —
+     * the student did not train — and no cooldown is started, so they can be
+     * queued again straight away.
+     */
+    public function removeFromQueue(Request $request, TrainingQueueEntry $entry): RedirectResponse
+    {
+        $this->authorize('removeFromQueue', $entry);
+
+        try {
+            $closed = $this->queue->closeCycle(
+                $entry,
+                TrainingQueueService::REMOVED_BY_INSTRUCTOR,
+                $request->user(),
+            );
+        } catch (RuntimeException $e) {
+            return back()->withErrors(['queue' => $e->getMessage()]);
+        }
+
+        return back()->with('status', $closed
+            ? __(':name was removed from the waiting queue.', ['name' => $entry->student?->full_name])
+            : __('That student had already left the waiting queue.'));
+    }
+
     /** Polled by the dashboards so nobody has to press refresh. */
     public function board(Request $request): JsonResponse
     {
@@ -127,8 +162,18 @@ class TrainingController extends Controller
         return response()->json($this->board->board($request->user()));
     }
 
+    /**
+     * Starts training for a waiting student — and nothing else ever does.
+     *
+     * Reaching the front of the queue starts nobody; finishing the previous
+     * student starts nobody; polling, refreshing and opening the console start
+     * nobody. A session exists because an instructor pressed this button, and
+     * started_at is the moment they pressed it.
+     */
     public function start(StartTrainingRequest $request): RedirectResponse
     {
+        $this->stale->expireStale($request->user());
+
         $entry = TrainingQueueEntry::findOrFail($request->integer('training_queue_entry_id'));
         $this->authorize('claim', $entry);
 

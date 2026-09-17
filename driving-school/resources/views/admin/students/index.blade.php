@@ -65,7 +65,7 @@
                         <td class="whitespace-nowrap text-sm">{{ $student->phone }}</td>
                         <td class="text-sm">{{ $student->currentInstructor?->full_name ?? '—' }}</td>
                         <td class="whitespace-nowrap text-sm">{{ $student->start_date?->format('d/m/Y') }}</td>
-                        <td class="text-center font-semibold">{{ $student->completed_days }}</td>
+                        <td class="text-center font-semibold">{{ $student->effective_completed_days }}</td>
                         <td class="text-center">{{ $student->remaining_days }}</td>
                         <td><x-progress-bar :value="$student->progress_percentage" /></td>
                         <td><x-status-badge :status="$student->status" /></td>

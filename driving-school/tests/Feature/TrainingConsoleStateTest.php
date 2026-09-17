@@ -158,6 +158,11 @@ class TrainingConsoleStateTest extends TestCase
     /* 4 + 5 — the page and the button agree, including across midnight. */
     public function test_a_session_left_from_yesterday_is_shown_and_still_blocks(): void
     {
+        // Late evening, so that 00:37 the next morning is across midnight but
+        // still inside the twelve hours a cycle may stay open. Past that it is
+        // stale and the expiry closes it — which the test below covers.
+        Carbon::setTestNow(Carbon::parse('2026-09-14 20:10:00'));
+
         $this->queueAll();
         $session = $this->sessions()->start($this->entryFor($this->students['Ali']), $this->teacher, $this->teacherUser, [
             'assigned_duration_minutes' => 30,
@@ -300,6 +305,7 @@ class TrainingConsoleStateTest extends TestCase
     /* 14 — cancelling a stale session keeps the row and frees the teacher. */
     public function test_cancelling_a_stale_session_keeps_the_row_and_returns_the_student(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-09-14 20:10:00'));
         $this->queueAll();
         $session = $this->sessions()->start($this->entryFor($this->students['Ali']), $this->teacher, $this->teacherUser, [
             'assigned_duration_minutes' => 30,

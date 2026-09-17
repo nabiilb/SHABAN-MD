@@ -31,8 +31,15 @@ class TrainingQueueEntry extends Model
         self::CANCELLED,
     ];
 
-    /** Statuses that still occupy a place in the line. */
+    /**
+     * THE definition of an open cycle: a student the school still has
+     * something to finish. Every Training Console path asks this same list, so
+     * "already in a queue" means the same thing wherever it is asked.
+     */
     public const OPEN_STATUSES = [self::WAITING, self::TRAINING_IN_PROGRESS, self::ATTENDANCE_PENDING];
+
+    /** And the two it can end in. Nothing else is terminal. */
+    public const TERMINAL_STATUSES = [self::COMPLETED, self::CANCELLED];
 
     protected $fillable = [
         'student_id',
@@ -44,6 +51,9 @@ class TrainingQueueEntry extends Model
         'joined_at',
         'notes',
         'created_by',
+        'closed_at',
+        'closed_by',
+        'close_reason',
     ];
 
     /**
@@ -71,6 +81,7 @@ class TrainingQueueEntry extends Model
         return [
             'queue_date' => 'date',
             'joined_at' => 'datetime',
+            'closed_at' => 'datetime',
             'position' => 'integer',
             'assigned_duration_minutes' => 'integer',
             'active_student_id' => 'integer',
@@ -97,6 +108,12 @@ class TrainingQueueEntry extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    /** Who closed the cycle. Null when the twelve-hour rule expired it. */
+    public function closer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'closed_by');
+    }
+
     /* ----------------------------------------------------------------
      | Scopes
      | ---------------------------------------------------------------- */
@@ -114,6 +131,52 @@ class TrainingQueueEntry extends Model
     public function scopeInLine(Builder $query): Builder
     {
         return $query->whereIn('status', self::OPEN_STATUSES);
+    }
+
+    /**
+     * Open cycles, school-wide. Deliberately says nothing about a date: an
+     * entry left open yesterday is still open today, and the day boundary must
+     * not hide it from the teacher who searches the student tomorrow.
+     */
+    public function scopeOpen(Builder $query): Builder
+    {
+        return $query->whereIn('status', self::OPEN_STATUSES);
+    }
+
+    /** Whether this cycle is still open. */
+    public function isOpen(): bool
+    {
+        return in_array($this->status, self::OPEN_STATUSES, true);
+    }
+
+    /**
+     * When the twelve hours this cycle is allowed to stay open run out.
+     *
+     * The clock starts when the CURRENT unresolved state began, not when the
+     * row was created — a student who trained for an hour and is now awaiting
+     * evaluation has been pending since the session ended, not since they
+     * joined the queue this morning:
+     *
+     *   waiting               joined_at            they have been waiting since
+     *   training_in_progress  session started_at   the session has run since
+     *   attendance_pending    session ended_at     the evaluation has been due since
+     *
+     * Falls back to updated_at when a session timestamp is somehow missing, so
+     * a malformed row still expires rather than blocking a student for ever.
+     */
+    public function openedCurrentStateAt(): ?Carbon
+    {
+        $session = $this->sessions()
+            ->whereIn('status', TrainingSession::LIVE_STATUSES)
+            ->orderByDesc('started_at')
+            ->first();
+
+        return match ($this->status) {
+            self::WAITING => $this->joined_at ?? $this->created_at,
+            self::TRAINING_IN_PROGRESS => $session?->started_at ?? $this->updated_at,
+            self::ATTENDANCE_PENDING => $session?->ended_at ?? $session?->started_at ?? $this->updated_at,
+            default => null,
+        };
     }
 
     /**

@@ -181,7 +181,7 @@ class DashboardService
     {
         return [
             'required_days' => (int) $student->required_training_days,
-            'completed_days' => $student->completed_days,
+            'completed_days' => $student->effective_completed_days,
             'remaining_days' => $student->remaining_days,
             'progress' => $student->progress_percentage,
             'lessons' => $student->lessons()->count(),

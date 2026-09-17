@@ -394,7 +394,8 @@ class CompletedStudentProgressTest extends TestCase
 
         $this->assertSame(0, $metrics['remaining_days']);
         $this->assertSame(100.0, $metrics['progress']);
-        $this->assertSame(3, $metrics['completed_days'], 'The real attendance count is still reported as itself.');
+        $this->assertSame(30, $metrics['completed_days'], 'The display figure reads as the whole course.');
+        $this->assertSame(3, $student->fresh()->completed_days, 'The real attendance is untouched underneath it.');
 
         $this->actingAs($user)->get(route('student.progress'))->assertOk()->assertSee('100');
     }

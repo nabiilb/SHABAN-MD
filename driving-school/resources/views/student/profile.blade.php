@@ -34,7 +34,7 @@
                 __('Current Instructor') => $student->currentInstructor?->full_name ?? '—',
                 __('Start Date') => $student->start_date?->format('d/m/Y'),
                 __('Required Days') => $student->required_training_days,
-                __('Completed Days') => $student->completed_days,
+                __('Completed Days') => $student->effective_completed_days,
                 __('Remaining Days') => $student->remaining_days,
                 __('Completion Date') => $student->completion_date?->format('d/m/Y') ?? '—',
             ] as $label => $value)

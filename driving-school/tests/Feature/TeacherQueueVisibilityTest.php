@@ -261,10 +261,11 @@ class TeacherQueueVisibilityTest extends TestCase
         $this->assertSame(TrainingQueueEntry::COMPLETED, $ahmed->status);
         $this->assertSame(TrainingSession::COMPLETED, TrainingSession::where('student_id', $students['Ahmed']->id)->value('status'));
 
-        // L: auto-start is on by default, so Mohamed is already training —
-        // either way he is the one the board offers next.
-        $this->assertSame('Mohamed', $next?->student?->full_name);
-        $this->assertSame('Mohamed', $this->boards()->board($this->xasanUser)['current']['student']);
+        // L: Mohamed is the one the board offers next — waiting, not training.
+        // Nothing starts him but a teacher pressing Start Training.
+        $this->assertNull($next, 'Finishing Ahmed must not start Mohamed.');
+        $this->assertNull($this->boards()->board($this->xasanUser)['current']);
+        $this->assertSame(['Mohamed'], $this->teacherQueueNames($this->xasanUser));
     }
 
     /**

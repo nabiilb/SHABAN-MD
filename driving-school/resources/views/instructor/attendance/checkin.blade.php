@@ -34,7 +34,7 @@
             <x-progress-bar :value="$student->progress_percentage" class="mt-3" />
             <p class="mt-1 text-xs text-slate-400">
                 {{ __(':completed of :required days · :remaining remaining', [
-                    'completed' => $student->completed_days,
+                    'completed' => $student->effective_completed_days,
                     'required' => $student->required_training_days,
                     'remaining' => $student->remaining_days,
                 ]) }}

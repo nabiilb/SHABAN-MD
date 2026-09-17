@@ -351,19 +351,44 @@
                             </p>
                         </div>
 
-                        {{-- One click takes this student, whoever is at the top
-                             of the line. The claim itself is still checked and
-                             locked server-side. --}}
-                        <form method="POST" action="{{ route('instructor.training.start') }}" class="shrink-0">
-                            @csrf
-                            <input type="hidden" name="training_queue_entry_id" :value="item.id">
-                            <input type="hidden" name="assigned_duration_minutes" :value="selectDuration">
-                            <input type="hidden" name="lesson_topic_id" :value="selectTopic">
-                            <button class="btn-primary btn-sm" :disabled="!! board.current"
-                                    :class="board.current ? 'cursor-not-allowed opacity-40' : ''">
-                                {{ __('Select') }}
-                            </button>
-                        </form>
+                        <div class="flex shrink-0 items-center gap-2">
+                            {{-- The ONLY thing that starts a session. Reaching
+                                 the front of the line starts nobody, and
+                                 finishing the previous student starts nobody:
+                                 a clock begins because somebody pressed this.
+                                 The claim is still re-checked and locked
+                                 server-side. --}}
+                            <form method="POST" action="{{ route('instructor.training.start') }}"
+                                  x-data="{ starting: false }"
+                                  @submit="starting ? $event.preventDefault() : starting = true">
+                                @csrf
+                                <input type="hidden" name="training_queue_entry_id" :value="item.id">
+                                <input type="hidden" name="assigned_duration_minutes" :value="selectDuration">
+                                <input type="hidden" name="lesson_topic_id" :value="selectTopic">
+                                <button class="btn-primary btn-sm"
+                                        :disabled="!! board.current || starting"
+                                        :class="(board.current || starting) ? 'cursor-not-allowed opacity-40' : ''">
+                                    <span x-show="! starting">▶ {{ __('Start Training') }}</span>
+                                    <span x-show="starting" style="display: none">{{ __('Starting…') }}</span>
+                                </button>
+                            </form>
+
+                            {{-- Removes them from the line without deleting the
+                                 row: the cycle is closed with a reason, no
+                                 attendance is written, and no cooldown starts
+                                 because no training happened. --}}
+                            <template x-if="item.can_remove">
+                                <form method="POST" action="/instructor/training/queue/0"
+                                      :action="`{{ url('instructor/training/queue') }}/${item.id}`"
+                                      @submit="if (! confirm('{{ __('Remove this student from the waiting queue?') }}')) $event.preventDefault()">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button class="btn-ghost btn-sm text-rose-600 hover:bg-rose-50">
+                                        {{ __('Remove') }}
+                                    </button>
+                                </form>
+                            </template>
+                        </div>
                     </li>
                 </template>
                 <template x-if="! (board.queue || []).length">

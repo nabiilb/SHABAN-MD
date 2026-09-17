@@ -19,6 +19,7 @@ class TrainingBoardService
     public function __construct(
         private readonly TrainingQueueService $queue,
         private readonly TrainingSessionService $sessions,
+        private readonly TrainingStaleCycleService $stale,
     ) {}
 
     /**
@@ -32,6 +33,12 @@ class TrainingBoardService
         // Anything whose clock ran out moves on before we read the board, so a
         // finished session never lingers as "in progress" on someone's screen.
         $this->sessions->closeExpired($viewer);
+
+        // And anything nobody finished within twelve hours is closed, so a
+        // stale entry never blocks a student just because cron did not run.
+        // Reading a board only ever REMOVES work this way: it cannot add a
+        // student to a queue and it cannot start a session.
+        $this->stale->expireStale($viewer);
 
         $instructorId = $viewer?->isInstructor() ? $viewer->instructorId() : null;
 
@@ -129,6 +136,11 @@ class TrainingBoardService
         $owner = $entry->ownerIdOn();
 
         return [
+            // Whether the console showing this row may close it. Being allowed
+            // to train anybody is not being allowed to cancel anybody's work,
+            // so only the console holding the entry gets the control.
+            'can_remove' => $entry->status === TrainingQueueEntry::WAITING
+                && ($instructorId === null || $entry->preferred_instructor_id === $instructorId),
             'id' => $entry->id,
             'position' => $entry->position,
             'display_position' => $index + 1,

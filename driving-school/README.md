@@ -460,6 +460,63 @@ This widening is scoped to the Training Console. Instructor student lists,
 attendance and every other module keep `Student::visibleTo()` — an instructor
 still sees and manages only their own students there.
 
+### One open cycle, and nothing stays open for ever
+
+A student may hold **one open training cycle at a time, school-wide** — not per
+teacher and not per day. `training_queue_entries.status` has five values; three
+are open (`waiting`, `training_in_progress`, `attendance_pending`) and two are
+terminal (`completed`, `cancelled`). `TrainingQueueEntry::scopeOpen()` is the
+one definition, and `TrainingEligibilityService::hasOpenCycle()` the one
+question. A unique index over `active_student_id` — no longer paired with
+`queue_date` — makes it the database's rule too, so yesterday's unfinished entry
+still blocks today.
+
+Which means nothing may stay open indefinitely, or a forgotten entry would lock
+a student out for good. Twelve hours after the **current unresolved state**
+began, the cycle closes:
+
+| Status | Measured from |
+|---|---|
+| `waiting` | `joined_at` |
+| `training_in_progress` | the session's `started_at` |
+| `attendance_pending` | the session's `ended_at` — the evaluation has been due since training ended, not since the student joined the queue |
+
+`TrainingStaleCycleService::expireStale()` does it, and runs **at request time**
+before any Training Console decision — the board, the search, Add to Queue and
+Start Training all call it — so a stale entry never blocks a student because
+cron did not run. `php artisan training:expire-stale` (with `--dry-run`) is the
+same thing for the hours when nobody is looking at a console; hourly is the
+right cadence. It is idempotent, and cleanup only ever *removes* work: it can
+close a cycle, and it can never queue a student, start a session or write
+attendance.
+
+Closing keeps the row. `closed_at`, `closed_by` and `close_reason` say what
+happened — *Auto-expired after 12 hours*, *Auto-expired: evaluation/attendance
+not completed within 12 hours*, or *Removed from queue by instructor* — and no
+attendance, evaluation or lesson is written, because the student did not train.
+
+**The two twelve-hour rules are different rules.** A cycle that expired means
+nothing happened, so it starts no cooldown and the student may be queued again
+at once. The cooldown below applies only after a session that really was
+completed.
+
+### Queue is not training
+
+Adding a student to the queue creates no session, no `started_at` and no clock.
+A student may wait all morning. **Only Start Training begins a session**, and
+nothing else ever does — not reaching the front of the line, not the previous
+student finishing, not polling, refreshing or opening the console. (An earlier
+version auto-started the next student on evaluation; that is gone.) Start locks
+the entry, expires stale cycles, re-checks eligibility and creates exactly one
+session, with `started_at` set to the moment the button was pressed. Reloading
+resumes that session from server state rather than starting another.
+
+An instructor may **Remove** a waiting student — their own console's entry, or
+any as an admin. It closes the cycle rather than deleting the row, and being
+allowed to *train* anyone is deliberately not being allowed to *cancel* anyone's
+work. Once a session has started the simple Remove is refused; the session's own
+cancellation is the way, so its timestamps stay honest.
+
 ### The twelve-hour rule
 
 After a student finishes, they cannot be queued again for **twelve rolling

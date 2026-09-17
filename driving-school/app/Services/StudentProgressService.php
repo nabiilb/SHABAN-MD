@@ -11,9 +11,12 @@ class StudentProgressService
      * Recomputes a student's progress from the attendance ledger and promotes
      * him to "completed" once the required training days are reached.
      *
-     * completed_days = distinct dates marked present
-     * remaining      = max(required - completed, 0)
-     * progress       = required > 0 ? completed / required * 100 : 0
+     * completed_days = the EFFECTIVE figure the screens show — real attendance
+     *                  for an ordinary student, course-length-less-remaining
+     *                  for one carrying an imported opening balance
+     * remaining      = max(required - completed, 0), or the opening balance
+     *                  less training since it was taken
+     * progress       = required > 0 ? (required - remaining) / required * 100 : 0
      */
     public function recalculate(Student $student): Student
     {
@@ -56,7 +59,7 @@ class StudentProgressService
     {
         return [
             'required_days' => (int) $student->required_training_days,
-            'completed_days' => $student->completed_days,
+            'completed_days' => $student->effective_completed_days,
             'remaining_days' => $student->remaining_days,
             'progress' => $student->progress_percentage,
         ];

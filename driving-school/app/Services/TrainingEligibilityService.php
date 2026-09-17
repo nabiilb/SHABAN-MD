@@ -69,10 +69,13 @@ class TrainingEligibilityService
 
         return $this->decide(
             student: $student,
+            // School-wide, and deliberately not filtered by date: a cycle left
+            // open yesterday is still open today, and the day boundary must not
+            // hide it from whoever searches this student tomorrow.
             openEntry: TrainingQueueEntry::query()
                 ->where('student_id', $student->id)
-                ->forDate($date)
-                ->inLine()
+                ->open()
+                ->orderByDesc('queue_date')
                 ->first(),
             live: TrainingSession::query()->live()->where('student_id', $student->id)->exists(),
             lastFinishedAt: $this->lastFinishedAt($student->id),
@@ -97,8 +100,8 @@ class TrainingEligibilityService
 
         $openEntries = TrainingQueueEntry::query()
             ->whereIn('student_id', $ids)
-            ->forDate($date)
-            ->inLine()
+            ->open()
+            ->orderByDesc('queue_date')
             ->get()
             ->keyBy('student_id');
 
@@ -116,6 +119,25 @@ class TrainingEligibilityService
             live: $live->has($student->id),
             lastFinishedAt: $finished[$student->id] ?? null,
         )]);
+    }
+
+    /**
+     * Whether this student already has an unfinished cycle anywhere in the
+     * school. One definition, asked by every Training Console path.
+     */
+    public function hasOpenCycle(Student|int $student): bool
+    {
+        return $this->openCycle($student) !== null;
+    }
+
+    /** That student's open cycle, if they have one. */
+    public function openCycle(Student|int $student): ?TrainingQueueEntry
+    {
+        return TrainingQueueEntry::query()
+            ->where('student_id', $student instanceof Student ? $student->id : $student)
+            ->open()
+            ->orderByDesc('queue_date')
+            ->first();
     }
 
     /**

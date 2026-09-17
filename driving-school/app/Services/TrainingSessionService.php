@@ -364,41 +364,13 @@ class TrainingSessionService
                 'rating' => $evaluation->rating_label,
             ]), null, $evaluation->getAttributes());
 
-            // The teacher should not have to pick the next student: the first
-            // student still waiting in their queue starts straight away, with
-            // a fresh timer of their own.
-            $this->advanceQueue($session, $actor);
-
+            // Finishing one student does NOT start the next. Whoever is first
+            // in the line stays waiting, with no session and no clock, until an
+            // instructor presses Start Training for them. Queue and training
+            // are separate stages, and only a person moves a student between
+            // them.
             return $evaluation->load(['student', 'instructor', 'session']);
         });
-    }
-
-    /**
-     * Starts the next waiting student for the teacher who just finished one.
-     *
-     * Only the student who reaches "training now" gets a clock — everybody
-     * behind them is still only waiting, with no started_at and nothing
-     * counting down.
-     */
-    public function advanceQueue(TrainingSession $finished, User $actor): ?TrainingSession
-    {
-        if (! Setting::flag('training_auto_start_next', true)) {
-            return null;
-        }
-
-        $date = $finished->queueEntry?->queue_date ?? $finished->started_at?->copy()->startOfDay() ?? today();
-        $next = $this->queue->nextWaitingFor($finished->instructor_id, $date);
-
-        if (! $next) {
-            return null;
-        }
-
-        return $this->start($next, $finished->instructor, $actor, [
-            // The next student keeps whatever duration was set for them,
-            // falling back to the one just used.
-            'assigned_duration_minutes' => $next->assigned_duration_minutes ?: $finished->assigned_duration_minutes,
-            'lesson_topic_id' => null,
-        ]);
     }
 
     /**

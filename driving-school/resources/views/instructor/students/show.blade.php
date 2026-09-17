@@ -12,7 +12,7 @@
 
 <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
     <x-stat-card :label="__('Required Days')" :value="$student->required_training_days" icon="clock" tone="slate" />
-    <x-stat-card :label="__('Completed Days')" :value="$student->completed_days" icon="check" tone="green" />
+    <x-stat-card :label="__('Completed Days')" :value="$student->effective_completed_days" icon="check" tone="green" />
     <x-stat-card :label="__('Remaining Days')" :value="$student->remaining_days" icon="clock" tone="amber" />
     <x-stat-card :label="__('Progress')" :value="$student->progress_percentage.'%'" icon="trend" tone="brand" />
 </div>

@@ -213,7 +213,12 @@ class CompletedStudentsVisibilityTest extends TestCase
         $this->assertSame('completed', $row->status);
         $this->assertSame(0, $row->remaining_days);
         $this->assertSame(100.0, $row->progress_percentage);
+        // The DISPLAY figure reads as the whole course, which is what 100%
+        // means; the real attendance underneath it is still three days, and no
+        // rows were invented to reach thirty.
+        $this->assertSame(30, $row->effective_completed_days);
         $this->assertSame(3, $row->completed_days, 'The real attendance count is still the real count.');
+        $this->assertSame(3, Attendance::where('student_id', $this->finished->id)->count());
 
         // 4 — and the money is a separate question.
         $this->assertSame(100.0, (float) $row->total_fee);

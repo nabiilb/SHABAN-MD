@@ -14,6 +14,7 @@ use App\Services\AttendanceTransferService;
 use App\Services\TrainingBoardService;
 use App\Services\TrainingQueueService;
 use App\Services\TrainingSessionService;
+use App\Services\TrainingStaleCycleService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -116,22 +117,47 @@ class TeacherQueueTest extends TestCase
     }
 
     /* 3 + 20 -------------------------------------------------------- */
-    public function test_a_transferred_student_returns_the_next_day_and_the_new_day_stands_alone(): void
+    /**
+     * Yesterday's unfinished cycle is still yesterday's unfinished cycle.
+     *
+     * A student may hold one open cycle school-wide, and the day boundary does
+     * not release it: until somebody closes the 09/09 entry, Ahmed cannot be
+     * queued again on the 10th. The twelve-hour expiry is what closes it, and
+     * once it has, he is free.
+     */
+    public function test_an_unfinished_cycle_blocks_the_next_day_until_it_expires(): void
     {
         $this->transferForToday($this->students['Ahmed'], $this->xasan);
         $this->assertContains('Ahmed', $this->names($this->queue()->waitingFor($this->xasan->id, '2026-09-09')));
 
-        // 10/09 with no transfer: Ahmed is Nasteexo's again.
-        // A new day starts empty — nothing enrols anybody — so the line for the
-        // 10th is the one somebody deliberately builds.
         Carbon::setTestNow(Carbon::parse('2026-09-10 09:00:00'));
+
+        try {
+            $this->queue()->add($this->students['Ahmed'], $this->admin);
+            $this->fail('Yesterday\'s open cycle should still block a new one.');
+        } catch (RuntimeException $e) {
+            $this->assertSame('This student is already in the waiting queue.', $e->getMessage());
+        }
+
+        // The expiry closes it — twenty-four hours after he joined — and keeps
+        // the row, with a reason. Every other entry queued yesterday is just as
+        // stale, so they all go: five students were put in the line on the 9th.
+        $this->assertSame(5, app(TrainingStaleCycleService::class)->expireStale());
+
+        $yesterday = TrainingQueueEntry::where('student_id', $this->students['Ahmed']->id)->firstOrFail();
+        $this->assertSame(TrainingQueueEntry::CANCELLED, $yesterday->status);
+        $this->assertSame('Auto-expired after 12 hours', $yesterday->close_reason);
+        $this->assertNotNull($yesterday->closed_at);
+        $this->assertNull($yesterday->closed_by, 'The clock closed it, not a person.');
+
+        // And now the 10th can have its own line. Ahmed is Nasteexo's again.
         $this->queue()->add($this->students['Ahmed'], $this->admin);
 
         $this->assertContains('Ahmed', $this->names($this->queue()->waitingFor($this->nasteexo->id, '2026-09-10')));
         $this->assertNotContains('Ahmed', $this->names($this->queue()->waitingFor($this->xasan->id, '2026-09-10')));
 
-        // Yesterday's queue is untouched by today's.
-        $this->assertContains('Ahmed', $this->names($this->queue()->waitingFor($this->xasan->id, '2026-09-09')));
+        // Yesterday's row is still on file, closed rather than deleted.
+        $this->assertSame(2, TrainingQueueEntry::where('student_id', $this->students['Ahmed']->id)->count());
     }
 
     /* 19 ------------------------------------------------------------ */
@@ -244,8 +270,14 @@ class TeacherQueueTest extends TestCase
         $this->assertSame(0, $ended->fresh()->remaining_seconds);
     }
 
-    /* 10 + 6 (auto-advance) ----------------------------------------- */
-    public function test_the_evaluation_advances_the_queue_automatically(): void
+    /**
+     * 10 — finishing one student does NOT start the next.
+     *
+     * Ali is first in the line and stays there, with no session and no clock,
+     * until a teacher presses Start Training for him. Queue and training are
+     * separate stages and only a person moves a student between them.
+     */
+    public function test_finishing_a_student_leaves_the_next_one_waiting(): void
     {
         $first = $this->startFor($this->xasan, $this->xasanUser, 30);
         $this->sessions()->end($first, $this->xasanUser);
@@ -256,13 +288,27 @@ class TeacherQueueTest extends TestCase
 
         $this->assertSame(TrainingSession::COMPLETED, $first->fresh()->status);
 
-        // Ali was next and is already training, with his own fresh clock.
-        $next = TrainingSession::where('student_id', $this->students['Ali']->id)->first();
-        $this->assertNotNull($next, 'The next student should start automatically.');
-        $this->assertSame(TrainingSession::IN_PROGRESS, $next->status);
-        $this->assertSame(30 * 60, $next->remaining_seconds);
+        // Ali started nothing.
+        $this->assertNull(
+            TrainingSession::where('student_id', $this->students['Ali']->id)->first(),
+            'Reaching the front of the line must not start a session.',
+        );
+        $this->assertSame(1, TrainingSession::count(), 'Exactly the one session that was started by hand.');
 
-        $this->assertSame(['Hassan', 'Abdi'], $this->names($this->queue()->waitingFor($this->xasan->id)));
+        // He is still waiting, still first, and the teacher is free again.
+        $this->assertSame(['Ali', 'Hassan', 'Abdi'], $this->names($this->queue()->waitingFor($this->xasan->id)));
+        $this->assertNull($this->sessions()->activeForInstructor($this->xasan->id));
+
+        // And pressing Start is what starts him.
+        $started = $this->sessions()->start(
+            $this->queue()->nextWaitingFor($this->xasan->id),
+            $this->xasan,
+            $this->xasanUser,
+            ['assigned_duration_minutes' => 30],
+        );
+
+        $this->assertSame($this->students['Ali']->id, $started->student_id);
+        $this->assertSame(TrainingSession::IN_PROGRESS, $started->status);
     }
 
     /* 11 + 12 ------------------------------------------------------- */
@@ -278,12 +324,14 @@ class TeacherQueueTest extends TestCase
         $this->sessions()->end($session, $this->xasanUser);
         $this->sessions()->evaluate($session->fresh(), ['attendance_status' => 'present', 'evaluation' => 'good'], $this->xasanUser);
 
-        // Mohamed is completed and Ali is training, so the line renumbers from
-        // the first student still waiting.
+        // Mohamed is completed, so the line renumbers from the first student
+        // still waiting. Ali is now at the head of it — waiting, not training:
+        // finishing Mohamed started nobody.
         $after = $board->instructorBoard($this->xasan->id);
-        $this->assertSame(['Hassan', 'Abdi'], array_column($after['queue'], 'student'));
-        $this->assertSame([1, 2], array_column($after['queue'], 'display_position'));
+        $this->assertSame(['Ali', 'Hassan', 'Abdi'], array_column($after['queue'], 'student'));
+        $this->assertSame([1, 2, 3], array_column($after['queue'], 'display_position'));
         $this->assertNotContains('Mohamed', array_column($after['queue'], 'student'));
+        $this->assertNull($after['current'], 'Nobody is training until somebody presses Start.');
     }
 
     /* 13 ------------------------------------------------------------ */
@@ -310,8 +358,9 @@ class TeacherQueueTest extends TestCase
         $this->assertSame('very_good', $evaluation->evaluation);
         $this->assertSame(TrainingSession::COMPLETED, $session->fresh()->status);
 
-        // And the next student in Xasan's queue started by itself.
-        $this->assertNotNull(TrainingSession::where('student_id', $this->students['Mohamed']->id)->first());
+        // And the next student in Xasan's queue is still only waiting.
+        $this->assertNull(TrainingSession::where('student_id', $this->students['Mohamed']->id)->first());
+        $this->assertSame('Mohamed', $this->queue()->nextWaitingFor($this->xasan->id)?->student?->full_name);
 
         // Ahmed's permanent instructor never moved.
         $this->assertSame($this->nasteexo->id, $this->students['Ahmed']->fresh()->current_instructor_id);
