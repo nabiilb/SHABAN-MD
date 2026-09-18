@@ -8,6 +8,7 @@ use App\Models\Instructor;
 use App\Models\Student;
 use App\Services\AuditLogger;
 use App\Services\DashboardService;
+use App\Services\NoAttendanceService;
 use App\Services\StudentPaymentService;
 use App\Services\StudentTransferService;
 use App\Support\DocumentNumber;
@@ -83,6 +84,39 @@ class StudentController extends Controller
             // be checked against the dashboard card at a glance.
             'outstanding' => $this->dashboard->outstandingFees(),
             'filtered' => round((float) (clone $query)->sum(DB::raw('students.total_fee - coalesce(p.paid, 0)')), 2),
+        ]);
+    }
+
+    /**
+     * Students with finished days nobody recorded anything for.
+     *
+     * Read-only throughout: the count, the rows and the dates are all
+     * calculated from what the register already holds, and opening this page
+     * writes nothing. The dashboard card and this list call the same service,
+     * so the number somebody clicks is the number of rows they land on.
+     */
+    public function noAttendance(Request $request, NoAttendanceService $noAttendance): View
+    {
+        $this->authorize('viewAny', Student::class);
+
+        $filters = array_filter([
+            'search' => $request->string('search')->trim()->value(),
+            'instructor_id' => $request->input('instructor_id'),
+            'min_days' => $request->input('min_days'),
+            'date_from' => $request->input('date_from'),
+            'date_to' => $request->input('date_to'),
+        ], fn ($value) => filled($value));
+
+        $students = $noAttendance->studentsQuery($filters)->paginate(25)->withQueryString();
+
+        return view('admin.students.no-attendance', [
+            'students' => $students,
+            // One query for the whole page, so the expandable dates cost
+            // nothing per row.
+            'missingDates' => $noAttendance->missingDaysForMany($students->getCollection(), $filters),
+            'instructors' => Instructor::active()->orderBy('full_name')->get(),
+            'lastFinishedDay' => $noAttendance->lastFinishedDay(),
+            'total' => $students->total(),
         ]);
     }
 

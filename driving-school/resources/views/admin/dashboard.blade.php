@@ -37,6 +37,13 @@
                  :href="route('admin.attendance.index')" />
     <x-stat-card :label="__('Registrations This Month')" :value="$metrics['registrations_this_month']" icon="plus" tone="violet" />
     <x-stat-card :label="__('Near Completion')" :value="$metrics['near_completion']" icon="trend" tone="amber" />
+    {{-- Days nobody wrote anything down for. Counted when this page is read,
+         never written into the register. --}}
+    <x-stat-card :label="__('No Attendance')"
+                 :value="trans_choice('{0}No students|{1}:count student|[2,*]:count students', $metrics['no_attendance_students'], ['count' => $metrics['no_attendance_students']])"
+                 :hint="__('With a finished day that has no record')"
+                 icon="clock" tone="rose"
+                 :href="route('admin.students.no-attendance')" />
 </div>
 
 {{-- Charts --}}

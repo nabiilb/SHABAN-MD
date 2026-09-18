@@ -49,6 +49,7 @@ Route::middleware(['auth', 'role:admin'])
 
         // Before the resource route, or {student} would swallow "unpaid".
         Route::get('students/unpaid', [Admin\StudentController::class, 'unpaid'])->name('students.unpaid');
+        Route::get('students/no-attendance', [Admin\StudentController::class, 'noAttendance'])->name('students.no-attendance');
         Route::resource('students', Admin\StudentController::class);
         Route::resource('instructors', Admin\InstructorController::class);
         Route::resource('vehicles', Admin\VehicleController::class);

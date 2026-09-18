@@ -53,6 +53,9 @@ class DashboardService
             'total_instructors' => Instructor::where('status', 'active')->count(),
             'total_vehicles' => Vehicle::count(),
             'lessons_today' => Lesson::whereDate('lesson_date', $today)->count(),
+            // Active students with at least one finished day nobody recorded.
+            // Calculated on the spot — no attendance row is written for it.
+            'no_attendance_students' => app(NoAttendanceService::class)->dashboardCount(),
         ];
     }
 

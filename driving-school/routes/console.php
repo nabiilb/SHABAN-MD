@@ -17,20 +17,15 @@ Artisan::command('inspire', function () {
 | up to cron. Every command below is written to be run by hand as well, and
 | to be safe to run twice, so a missed night costs nothing.
 |
+| Nothing here writes attendance. A day a student did not attend is counted
+| by NoAttendanceService when somebody looks at it — see "No Attendance" in
+| the README — rather than being written into the register overnight.
+|
 | One cron entry drives all of it:
 |
 |     * * * * * cd /path/to/app && php artisan schedule:run >> /dev/null 2>&1
 |
 */
-
-// Closes off yesterday's register: every active student with no record for
-// it is marked absent. Half past midnight, in the school's own timezone, so
-// the day is genuinely over before anything is written.
-Schedule::command('attendance:mark-absent')
-    ->dailyAt('00:30')
-    ->timezone(config('app.timezone'))
-    ->withoutOverlapping()
-    ->onOneServer();
 
 // Closes training cycles nobody finished. Hourly, because a cycle left open
 // at 20:00 reaches its twelve hours in the middle of the night.

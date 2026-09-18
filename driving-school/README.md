@@ -678,49 +678,46 @@ on cannot drift apart. Fee less payments, per student: cancelled students have
 left and are excluded, a fully paid student is not a row with 0.00 in it, and no
 student's overpayment offsets another's arrears.
 
-### Closing off the day's register
+### No Attendance
 
-The register is kept by check-in, so a student who does not train leaves no row
-at all — and "did not attend" ends up indistinguishable from "nobody wrote
-anything down". Once a day is **over**, every active student with no record for
-it is marked `absent`:
+The register holds what the school actually did: a check-in, a transfer, a
+teacher marking somebody absent. A day nobody wrote anything down for is not a
+record, and inventing one would put rows in the register that no human event
+produced. So **No Attendance is counted, never written**:
 
 ```
-php artisan attendance:mark-absent                      # yesterday
-php artisan attendance:mark-absent --date=2026-09-18    # a day that was missed
-php artisan attendance:mark-absent --dry-run            # count, write nothing
+no-attendance days = finished days since the student started
+                   − days that actually have a record
 ```
 
-Yesterday means yesterday in the school's own timezone. The day in progress is
-refused outright: a student who has not arrived by lunchtime has not missed the
-day yet. A student who already has **any** record for the date is skipped —
-present, absent, excused and cancelled are all somebody's record of that day and
-none is overwritten — so running it twice writes nothing the second time, and
-each row is written inside a transaction that re-checks under a lock.
+For each **active** student, over the window from their `start_date` to the
+last day that has **finished** — today is excluded, because a student who has
+not come in yet has not missed it, and future dates are not counted at all.
+Days before they enrolled are never counted.
 
-A normal run does yesterday alone. It never sweeps back over history: filling in
-months of absences behind the school's back would rewrite what it knows about
-its own students, so an older date has to be asked for by name.
+`NoAttendanceService` is the one calculation: `dashboardCount()` for the
+dashboard card, `studentsQuery()` for the page behind it, and
+`missingDaysFor()` / `missingDaysForMany()` for the dates themselves. The card
+and the list therefore show the same people. It costs one query for the list
+(the count and the last-attendance date are SQL sub-selects, not a query per
+student) and one more for a whole page of expandable date lists.
 
-**A student carrying an imported opening balance is held back** until they have
-actually turned up. The register import brings in people the school was teaching
-months ago, with no attendance here and a remaining-days figure that already
-accounts for everything they did before; marking them absent every night would
-fill the register with days they were never expected at, for students who may
-never come back. Once one real attendance record exists **on or after
-`opening_remaining_from`**, they are being taught here and join the ordinary
-rule from that point on — the days before it are never filled in. An absence
-written by the command cannot open that gate (none can exist before it opens),
-a record dated before the opening balance does not either, and neither does one
-that has since been removed.
+**A real `absent` row is a different thing.** The school marking a student
+absent means they were expected and did not come; No Attendance means the
+school said nothing at all. A day with any record — present, absent, excused or
+cancelled — is never counted here, and an absent day goes on reading as Absent
+in the ordinary attendance history.
 
-An absence is not a day of training, so it never reduces anybody's remaining
-days — imported or not. Only `present` days count towards progress.
+Nothing about it touches training progress: no completed days, no remaining
+days, no percentage, and no lesson, session or evaluation. Only `present` days
+count towards a student's course.
 
-`attendance.instructor_id` is nullable for this. An absence has no teacher to
-name, and a great many students have no permanent instructor at all.
+There is **no nightly job and no cron** behind it. An earlier version wrote
+`absent` rows from a scheduled `attendance:mark-absent` command; that command,
+its service and its schedule are gone, and `attendance.instructor_id` stays
+nullable (harmless, and not worth a migration to undo).
 
-### A student payment *is* the income entry
+### A student payment *is* the income entry### A student payment *is* the income entry
 
 There is no income-transaction table, and deliberately so. **Income & Expenses**,
 the dashboard and the income trend all read company income straight out of
