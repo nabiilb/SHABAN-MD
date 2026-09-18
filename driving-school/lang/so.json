@@ -1,5 +1,6 @@
 {
     ":count completed this month": ":count ayaa bishan dhammaystiray",
+    ":count student(s) owe :amount in total": ":count arday ayaa wadar ahaan ku leh :amount",
     ":name added to the waiting queue.": ":name waxaa lagu daray safka sugitaanka.",
     ":name is not an active student.": ":name ma aha arday firfircoon.",
     ":name left the queue — :reason": ":name wuxuu ka baxay safka — :reason",
@@ -20,6 +21,7 @@
     "Administrator": "Maamule",
     "All": "Dhammaan",
     "All Active Sessions": "Dhammaan Fadhiyada Firfircoon",
+    "All Students": "Dhammaan Ardayda",
     "All categories": "Dhammaan qeybaha",
     "All instructors": "Dhammaan macalimiinta",
     "All methods": "Dhammaan habab bixineed",
@@ -112,6 +114,7 @@
     "Enter your credentials to continue.": "Geli xogtaada si aad u sii wadato.",
     "Evaluation": "Qiimeyn",
     "Evaluation Distribution": "Qeybinta Qiimeynta",
+    "Every student has paid their fees in full.": "Arday walba wuxuu si buuxda u bixiyay lacagtiisa.",
     "Excellent": "Aad u Fiican",
     "Excused": "La cudurdaartay",
     "Expected End": "Dhammaadka la filayo",
@@ -169,6 +172,8 @@
     "Make": "Nooca",
     "Male": "Lab",
     "Manage Queue": "Maaree Safka",
+    "Marked absent automatically — no attendance was recorded for this day.": "Si toos ah ayaa maqan loogu calaamadeeyay — xaadiris maanta lama diiwaan gelin.",
+    "Matching total": "Wadarta la waafaqday",
     "Mileage": "Masaafada",
     "Mobile Money": "Lacag Mobile",
     "Model": "Moodel",
@@ -216,6 +221,7 @@
     "On credit": "Amaah",
     "Once approved this becomes a company debt rather than an expense.": "Marka la ansixiyo waxay noqonaysaa deyn shirkadeed halkii ay kharash ka noqon lahayd.",
     "One shared training queue": "Hal saf oo tababar oo wadaag ah",
+    "Only a day that has finished can be marked absent — :date has not.": "Kaliya maalin dhammaatay ayaa maqnaansho loo calaamadin karaa — :date weli ma dhammaan.",
     "Only a pending fuel record can be approved.": "Kaliya diiwaan shidaal oo sugaya ayaa la ansixin karaa.",
     "Only a pending fuel record can be rejected.": "Kaliya diiwaan shidaal oo sugaya ayaa la diidi karaa.",
     "Only a session that is still open can be cancelled.": "Kaliya fadhi weli furan ayaa la joojin karaa.",
@@ -297,6 +303,7 @@
     "Search Student": "Raadi Arday",
     "Search by name, student ID, phone…": "Ku raadi magac, lambarka ardayga, telefoon…",
     "Search by name, student number or phone…": "Ku raadi magaca, lambarka ardayga ama telefoonka…",
+    "Search name, number or phone": "Ku raadi magaca, lambarka ama telefoonka",
     "Searches every active student in the school. Training a student does not change who they are assigned to.": "Waxay raadisaa dhammaan ardayda firfircoon ee iskuulka. Tababaridda ardayga ma beddesho cidda loo qoondeeyay.",
     "Searching…": "Waa la raadinayaa…",
     "Select": "Dooro",
@@ -359,6 +366,7 @@
     "Total Income": "Wadarta Dakhliga",
     "Total Loan": "Wadarta Deynta",
     "Total Paid": "Wadarta La Bixiyay",
+    "Total owed": "Wadarta la leeyahay",
     "Trained By": "Waxaa tababaray",
     "Training": "Tababar",
     "Training Board": "Shaxda Tababarka",
@@ -417,5 +425,6 @@
     "more waiting": "dheeraad ah oo sugaya",
     "no reason given": "sabab lama sheegin",
     "no timer running": "wakhti socda ma jiro",
-    "waiting": "sugaya"
+    "waiting": "sugaya",
+    "{0}:count days|{1}:count day|[2,*]:count days": "{0}:count maalmood|{1}:count maalin|[2,*]:count maalmood"
 }

@@ -47,6 +47,8 @@ Route::middleware(['auth', 'role:admin'])
     ->group(function () {
         Route::get('dashboard', Admin\DashboardController::class)->name('dashboard');
 
+        // Before the resource route, or {student} would swallow "unpaid".
+        Route::get('students/unpaid', [Admin\StudentController::class, 'unpaid'])->name('students.unpaid');
         Route::resource('students', Admin\StudentController::class);
         Route::resource('instructors', Admin\InstructorController::class);
         Route::resource('vehicles', Admin\VehicleController::class);

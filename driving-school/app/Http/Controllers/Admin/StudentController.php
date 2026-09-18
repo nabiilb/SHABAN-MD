@@ -7,6 +7,7 @@ use App\Http\Requests\StudentRequest;
 use App\Models\Instructor;
 use App\Models\Student;
 use App\Services\AuditLogger;
+use App\Services\DashboardService;
 use App\Services\StudentPaymentService;
 use App\Services\StudentTransferService;
 use App\Support\DocumentNumber;
@@ -22,6 +23,7 @@ class StudentController extends Controller
     public function __construct(
         private readonly StudentTransferService $transfers,
         private readonly StudentPaymentService $payments,
+        private readonly DashboardService $dashboard,
     ) {}
 
     public function index(Request $request): View
@@ -49,6 +51,38 @@ class StudentController extends Controller
         return view('admin.students.index', [
             'students' => $students,
             'instructors' => Instructor::active()->orderBy('full_name')->get(),
+        ]);
+    }
+
+    /**
+     * The students who owe the school money — the page behind the dashboard's
+     * Unpaid Student Fees card.
+     *
+     * The list and the card's total are the same query asked twice, summed on
+     * the dashboard and listed here, so the figure a manager clicks and the
+     * rows they land on cannot disagree. Fully paid students are not rows with
+     * 0.00 in them; they are not here at all.
+     */
+    public function unpaid(Request $request): View
+    {
+        $this->authorize('viewAny', Student::class);
+
+        $query = $this->dashboard->unpaidStudentsQuery()
+            ->with('currentInstructor')
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $term = '%'.$request->string('search')->trim().'%';
+                $q->where(fn ($sub) => $sub
+                    ->where('full_name', 'like', $term)
+                    ->orWhere('student_number', 'like', $term)
+                    ->orWhere('phone', 'like', $term));
+            });
+
+        return view('admin.students.unpaid', [
+            'students' => (clone $query)->orderByDesc('remaining_amount')->paginate(25)->withQueryString(),
+            // The whole arrears figure, not just this page's worth, so it can
+            // be checked against the dashboard card at a glance.
+            'outstanding' => $this->dashboard->outstandingFees(),
+            'filtered' => round((float) (clone $query)->sum(DB::raw('students.total_fee - coalesce(p.paid, 0)')), 2),
         ]);
     }
 

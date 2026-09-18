@@ -18,7 +18,7 @@
          of Outstanding Debt, and where a new student's Total Fee shows up —
          income is the cash they actually hand over. --}}
     <x-stat-card :label="__('Unpaid Student Fees')" :value="$c.number_format($metrics['outstanding_fees'], 2)"
-                 icon="users" tone="violet" :href="route('admin.student-payments.index')" />
+                 icon="users" tone="violet" :href="route('admin.students.unpaid')" />
     <x-stat-card :label="__('Outstanding Debt')" :value="$c.number_format($metrics['outstanding_debt'], 2)"
                  icon="debt" tone="amber" :href="route('admin.debts.index')" />
 </div>

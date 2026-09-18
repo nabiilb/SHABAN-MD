@@ -468,8 +468,10 @@
                                             <span x-show="! student.permanent_instructor" class="text-slate-400">
                                                 {{ __('No instructor assigned') }}
                                             </span>
-                                            <span x-text="`{{ __('Remaining') }}: ${student.remaining_days}`"></span>
-                                            <span x-text="`${student.progress}%`"></span>
+                                            {{-- Both labelled, and neither able to be
+                                                 mistaken for the other when the row wraps. --}}
+                                            <span x-text="`{{ __('Remaining') }}: ${student.remaining_label}`"></span>
+                                            <span x-text="`{{ __('Progress') }}: ${student.progress}%`"></span>
                                             <span class="badge-slate" x-text="student.status_label"></span>
                                         </span>
                                     </button>

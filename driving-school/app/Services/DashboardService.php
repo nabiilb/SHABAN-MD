@@ -10,6 +10,7 @@ use App\Models\Lesson;
 use App\Models\Student;
 use App\Models\StudentPayment;
 use App\Models\Vehicle;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -69,19 +70,60 @@ class DashboardService
      */
     public function outstandingFees(): float
     {
+        $total = $this->owingStudents()
+            ->selectRaw('coalesce(sum(students.total_fee - coalesce(p.paid, 0)), 0) as owed')
+            ->value('owed');
+
+        return round((float) $total, 2);
+    }
+
+    /**
+     * THE definition of a student who owes the school money.
+     *
+     * The dashboard's Unpaid Student Fees figure and the page behind that card
+     * are the same query asked twice — one summed, one listed — so the total
+     * and the rows under it cannot disagree. Fee less payments, per student:
+     *
+     *   - cancelled students are not owing anything; they have left
+     *   - only students actually in arrears, so a fully paid student is not a
+     *     row with 0.00 in it
+     *   - no student's overpayment offsets another's arrears, because each row
+     *     stands on its own rather than being netted into a single sum
+     *
+     * Payments are read from student_payments, which is the income ledger; a
+     * soft-deleted payment is excluded exactly as it is excluded from income.
+     *
+     * Selects `paid` and `remaining_amount` alongside the student, so a listing
+     * needs no second query and no per-row accessor.
+     *
+     * @return Builder<Student>
+     */
+    public function unpaidStudentsQuery(): Builder
+    {
+        return $this->owingStudents()
+            ->select('students.*')
+            ->selectRaw('coalesce(p.paid, 0) as paid')
+            ->selectRaw('students.total_fee - coalesce(p.paid, 0) as remaining_amount');
+    }
+
+    /**
+     * The students in arrears, with nothing selected yet — summed by
+     * outstandingFees() and listed by unpaidStudentsQuery(), which is what
+     * keeps the card's total and the page's rows the same set of people.
+     *
+     * @return Builder<Student>
+     */
+    protected function owingStudents(): Builder
+    {
         $paid = StudentPayment::query()
             ->selectRaw('student_id, sum(amount) as paid')
             ->whereNull('deleted_at')
             ->groupBy('student_id');
 
-        $total = Student::query()
+        return Student::query()
             ->leftJoinSub($paid, 'p', fn ($join) => $join->on('p.student_id', '=', 'students.id'))
             ->where('students.status', '!=', 'cancelled')
-            // A student who has overpaid does not offset one who has not.
-            ->selectRaw('coalesce(sum(greatest(students.total_fee - coalesce(p.paid, 0), 0)), 0) as owed')
-            ->value('owed');
-
-        return round((float) $total, 2);
+            ->whereRaw('students.total_fee - coalesce(p.paid, 0) > 0');
     }
 
     /** Daily attendance counts for the last N days. */

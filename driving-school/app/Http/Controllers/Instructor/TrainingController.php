@@ -80,7 +80,16 @@ class TrainingController extends Controller
                 'phone' => $student->phone,
                 'permanent_instructor' => $student->currentInstructor?->full_name,
                 'status_label' => __(ucfirst($student->status)),
+                // Days, never a percentage — and carrying its own unit, so the
+                // browser cannot put this number next to the progress figure
+                // and have the two read as one. "Remaining: 30" beside "0%" is
+                // what made a row say "Remaining: 300%".
                 'remaining_days' => $student->remaining_days,
+                'remaining_label' => trans_choice(
+                    '{0}:count days|{1}:count day|[2,*]:count days',
+                    $student->remaining_days,
+                    ['count' => $student->remaining_days],
+                ),
                 'progress' => $student->progress_percentage,
                 'eligible' => $student->queue_eligibility?->eligible ?? false,
                 'blocked_by' => $student->queue_eligibility?->eligible === false

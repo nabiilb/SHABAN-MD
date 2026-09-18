@@ -664,6 +664,47 @@ moves the money across:
 floored at zero per student so an overpayment cannot cancel out somebody else's
 arrears, and cancelled students excluded.
 
+### Who owes the school money
+
+The dashboard's **Unpaid Student Fees** card opens
+`/admin/students/unpaid`, which lists every student in arrears with their fee,
+what they have paid, what is left, and links through to their record and to
+recording a payment.
+
+The card's total and the page's rows are the same query asked twice —
+`DashboardService::owingStudents()`, summed by `outstandingFees()` and listed by
+`unpaidStudentsQuery()` — so the figure a manager clicks and the rows they land
+on cannot drift apart. Fee less payments, per student: cancelled students have
+left and are excluded, a fully paid student is not a row with 0.00 in it, and no
+student's overpayment offsets another's arrears.
+
+### Closing off the day's register
+
+The register is kept by check-in, so a student who does not train leaves no row
+at all — and "did not attend" ends up indistinguishable from "nobody wrote
+anything down". Once a day is **over**, every active student with no record for
+it is marked `absent`:
+
+```
+php artisan attendance:mark-absent                      # yesterday
+php artisan attendance:mark-absent --date=2026-09-18    # a day that was missed
+php artisan attendance:mark-absent --dry-run            # count, write nothing
+```
+
+Yesterday means yesterday in the school's own timezone. The day in progress is
+refused outright: a student who has not arrived by lunchtime has not missed the
+day yet. A student who already has **any** record for the date is skipped —
+present, absent, excused and cancelled are all somebody's record of that day and
+none is overwritten — so running it twice writes nothing the second time, and
+each row is written inside a transaction that re-checks under a lock.
+
+A normal run does yesterday alone. It never sweeps back over history: filling in
+months of absences behind the school's back would rewrite what it knows about
+its own students, so an older date has to be asked for by name.
+
+`attendance.instructor_id` is nullable for this. An absence has no teacher to
+name, and a great many students have no permanent instructor at all.
+
 ### A student payment *is* the income entry
 
 There is no income-transaction table, and deliberately so. **Income & Expenses**,
