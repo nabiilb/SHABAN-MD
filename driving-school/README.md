@@ -916,6 +916,40 @@ create/update/delete on the domain models), settings.
 
 ---
 
+## Responsive layout
+
+One application, adapted rather than duplicated: the same Blade renders on a
+320px phone and a 1366px desktop, and there is no separate mobile markup to
+keep in step.
+
+The shared patterns live in `resources/css/app.css` so a page rarely has to
+solve any of this for itself:
+
+| Pattern | What it does |
+|---|---|
+| `[x-cloak]` | stops every dialog and dropdown flashing on page load |
+| `.drawer-open` | locks the page behind the open navigation drawer |
+| `.table-cards` | a table on desktop, one card per row below `md` |
+| `.filter-bar` / `.filter-actions` | filters inline where there is room, stacked and full-width on a phone |
+| `.modal-panel` / `.modal-body` | a dialog capped to the viewport that scrolls inside itself |
+| `max-sm:min-h-11` on buttons | a thumb-sized touch target on phones, desktop sizing above `sm` |
+
+**Navigation.** The sidebar is a column of the page on a large screen and the
+same markup becomes an off-canvas drawer below `lg`. It closes on the backdrop,
+on Escape, on its own close button and on any link inside it, and the page
+behind it does not scroll while it is open.
+
+**Tables.** `table-cards` plus a `data-label` on each cell turns a row into a
+card on a phone, with every column's heading beside its value. Nothing is
+hidden to make a row fit — a phone shows exactly what a desktop does, stacked.
+Wider, less operational tables keep a horizontal scroll container instead.
+
+**Verified in a browser**, not by eye: 320x568, 360x800, 375x812, 390x844,
+412x915, 430x932, 768x1024 and 1366x768 across the dashboard, students, No
+Attendance, unpaid fees, attendance, training and the student form — no page
+scrolls horizontally on any of them. `ResponsiveLayoutTest` pins the markup
+hooks the CSS depends on so a later edit cannot quietly drop them.
+
 ## Testing
 
 ```bash

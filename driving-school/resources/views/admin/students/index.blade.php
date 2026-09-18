@@ -13,7 +13,7 @@
 </x-page-header>
 
 <div class="card mb-4 p-4">
-    <form method="GET" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+    <form method="GET" class="filter-bar sm:grid-cols-2 lg:grid-cols-5">
         <div class="lg:col-span-2">
             <input name="search" value="{{ request('search') }}" class="input"
                    placeholder="{{ __('Search name, number, phone or email') }}">
@@ -30,16 +30,17 @@
                 <option value="{{ $status }}" @selected(request('status') === $status)>{{ __(ucfirst($status)) }}</option>
             @endforeach
         </select>
-        <div class="flex gap-2">
-            <button class="btn-primary flex-1">{{ __('Filter') }}</button>
+        <div class="filter-actions">
+            <button class="btn-primary">{{ __('Filter') }}</button>
             <a href="{{ route('admin.students.index') }}" class="btn-secondary">{{ __('Reset') }}</a>
         </div>
     </form>
 </div>
 
-<div class="card">
-    <div class="table-wrap">
-        <table class="table">
+{{-- Columns on a desktop, a card per student on a phone. --}}
+<div class="card max-md:border-0 max-md:bg-transparent max-md:shadow-none">
+    <div class="table-wrap max-md:overflow-visible">
+        <table class="table table-cards">
             <thead>
                 <tr>
                     <th>{{ __('Student') }}</th>
@@ -56,21 +57,23 @@
             <tbody>
                 @forelse ($students as $student)
                     <tr>
-                        <td>
-                            <a href="{{ route('admin.students.show', $student) }}" class="font-semibold text-brand-700 hover:underline">
+                        <td class="cell-title">
+                            <a href="{{ route('admin.students.show', $student) }}" class="font-semibold text-brand-700 hover:underline max-md:text-base">
                                 {{ $student->full_name }}
                             </a>
                             <p class="text-xs text-slate-400">{{ $student->student_number }}</p>
                         </td>
-                        <td class="whitespace-nowrap text-sm">{{ $student->phone }}</td>
-                        <td class="text-sm">{{ $student->currentInstructor?->full_name ?? '—' }}</td>
-                        <td class="whitespace-nowrap text-sm">{{ $student->start_date?->format('d/m/Y') }}</td>
-                        <td class="text-center font-semibold">{{ $student->effective_completed_days }}</td>
-                        <td class="text-center">{{ $student->remaining_days }}</td>
-                        <td><x-progress-bar :value="$student->progress_percentage" /></td>
-                        <td><x-status-badge :status="$student->status" /></td>
-                        <td class="whitespace-nowrap text-right">
-                            <a href="{{ route('admin.students.edit', $student) }}" class="btn-ghost btn-sm">{{ __('Edit') }}</a>
+                        <td data-label="{{ __('Phone') }}" class="whitespace-nowrap text-sm">{{ $student->phone }}</td>
+                        <td data-label="{{ __('Instructor') }}" class="text-sm">{{ $student->currentInstructor?->full_name ?? '—' }}</td>
+                        <td data-label="{{ __('Start Date') }}" class="whitespace-nowrap text-sm">{{ $student->start_date?->format('d/m/Y') }}</td>
+                        <td data-label="{{ __('Completed') }}" class="text-center font-semibold max-md:text-right">{{ $student->effective_completed_days }}</td>
+                        <td data-label="{{ __('Remaining') }}" class="text-center max-md:text-right">{{ $student->remaining_days }}</td>
+                        <td data-label="{{ __('Progress') }}" class="max-md:block">
+                            <x-progress-bar :value="$student->progress_percentage" class="max-md:mt-1" />
+                        </td>
+                        <td data-label="{{ __('Status') }}"><x-status-badge :status="$student->status" /></td>
+                        <td class="cell-actions whitespace-nowrap text-right">
+                            <a href="{{ route('admin.students.edit', $student) }}" class="btn-secondary btn-sm">{{ __('Edit') }}</a>
                             <x-delete-form :action="route('admin.students.destroy', $student)" />
                         </td>
                     </tr>
@@ -81,7 +84,7 @@
         </table>
     </div>
     @if ($students->hasPages())
-        <div class="border-t border-slate-200 px-5 py-3">{{ $students->links() }}</div>
+        <div class="border-t border-slate-200 px-4 py-3 max-md:rounded-xl max-md:border max-md:border-slate-200 max-md:bg-white sm:px-5">{{ $students->links() }}</div>
     @endif
 </div>
 @endsection

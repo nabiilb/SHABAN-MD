@@ -329,7 +329,9 @@
 
             <ul class="divide-y divide-slate-100">
                 <template x-for="item in (board.queue || [])" :key="item.id">
-                    <li class="flex items-center justify-between gap-3 px-5 py-3">
+                    {{-- Side by side where there is room; stacked on a phone, with
+                         full-width buttons rather than two slivers. --}}
+                    <li class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                         <div class="min-w-0">
                             <p class="truncate text-sm font-semibold text-slate-800">
                                 <span class="text-slate-400" x-text="`#${item.display_position}`"></span>
@@ -351,7 +353,7 @@
                             </p>
                         </div>
 
-                        <div class="flex shrink-0 items-center gap-2">
+                        <div class="flex shrink-0 items-center gap-2 max-sm:w-full max-sm:[&>*]:flex-1 max-sm:[&_button]:w-full">
                             {{-- The ONLY thing that starts a session. Reaching
                                  the front of the line starts nobody, and
                                  finishing the previous student starts nobody:
@@ -406,22 +408,24 @@
          somebody presses Select. The list is the students this teacher may
          take, searched in the browser over data the server already sent. --}}
     <template x-teleport="body">
-        <div x-show="adding" x-cloak class="fixed inset-0 z-50 flex items-start justify-center p-4 sm:items-center">
+        {{-- Full width on a phone, capped on a desktop, and never taller than
+             the viewport: the body scrolls so the buttons stay reachable. --}}
+        <div x-show="adding" x-cloak class="fixed inset-0 z-50 flex items-start justify-center p-3 sm:items-center sm:p-4">
             <div class="absolute inset-0 bg-slate-900/50" @click="adding = false"></div>
 
             <div x-show="adding" x-transition
-                 class="relative w-full max-w-md rounded-xl bg-white shadow-xl"
+                 class="modal-panel relative max-w-md"
                  @keydown.escape.window="adding = false">
 
                 <form method="POST" action="{{ route('instructor.training.queue.store') }}">
                     @csrf
 
-                    <div class="border-b border-slate-200 px-5 py-4">
+                    <div class="shrink-0 border-b border-slate-200 px-4 py-4 sm:px-5">
                         <h3 class="text-base font-bold text-slate-900">{{ __('Add Student to Queue') }}</h3>
                         <p class="mt-0.5 text-sm text-slate-500">{{ now()->format('d/m/Y') }}</p>
                     </div>
 
-                    <div class="space-y-4 px-5 py-4">
+                    <div class="modal-body space-y-4 px-4 py-4 sm:px-5">
                         <div>
                             <label for="student-search" class="label">{{ __('Search Student') }}</label>
                             <input id="student-search" type="search" x-model="search" @input="searchStudents()"
@@ -436,7 +440,7 @@
                             <template x-for="student in results" :key="student.id">
                                 <li>
                                     <button type="button" @click="picked = student.id" :disabled="! student.eligible"
-                                            class="w-full px-3 py-2 text-left"
+                                            class="w-full px-3 py-3 text-left"
                                             :class="! student.eligible
                                                 ? 'cursor-not-allowed opacity-50'
                                                 : (picked === student.id ? 'bg-brand-50' : 'hover:bg-slate-50')">
@@ -512,7 +516,7 @@
                         </div>
                     </div>
 
-                    <div class="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+                    <div class="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 px-4 py-4 sm:px-5 max-sm:[&>*]:flex-1">
                         <button type="button" class="btn-ghost" @click="adding = false">{{ __('Cancel') }}</button>
                         <button class="btn-primary" :disabled="! picked"
                                 :class="picked ? '' : 'cursor-not-allowed opacity-40'">

@@ -20,21 +20,23 @@
 </x-page-header>
 
 <div class="card mb-4 p-4">
-    <form method="GET" class="grid gap-3 sm:grid-cols-3">
+    <form method="GET" class="filter-bar sm:grid-cols-3">
         <div class="sm:col-span-2">
-            <input name="search" value="{{ request('search') }}" class="input"
+            <label for="f-search" class="label">{{ __('Search') }}</label>
+            <input id="f-search" name="search" value="{{ request('search') }}" class="input"
                    placeholder="{{ __('Search name, number or phone') }}">
         </div>
-        <div class="flex gap-2">
-            <button class="btn-primary flex-1">{{ __('Filter') }}</button>
+        <div class="filter-actions sm:items-end">
+            <button class="btn-primary">{{ __('Filter') }}</button>
             <a href="{{ route('admin.students.unpaid') }}" class="btn-secondary">{{ __('Reset') }}</a>
         </div>
     </form>
 </div>
 
-<div class="card">
-    <div class="table-wrap">
-        <table class="table">
+{{-- Columns on a desktop, a card per student on a phone. --}}
+<div class="card max-md:border-0 max-md:bg-transparent max-md:shadow-none">
+    <div class="table-wrap max-md:overflow-visible">
+        <table class="table table-cards">
             <thead>
                 <tr>
                     <th>{{ __('Student') }}</th>
@@ -49,9 +51,9 @@
             <tbody>
                 @forelse ($students as $student)
                     <tr>
-                        <td>
+                        <td class="cell-title">
                             <a href="{{ route('admin.students.show', $student) }}"
-                               class="font-medium text-brand-700 hover:underline">{{ $student->full_name }}</a>
+                               class="font-medium text-brand-700 hover:underline max-md:text-base">{{ $student->full_name }}</a>
                             <span class="block text-xs text-slate-400">
                                 {{ $student->student_number }}
                                 @if ($student->currentInstructor)
@@ -59,19 +61,18 @@
                                 @endif
                             </span>
                         </td>
-                        <td class="whitespace-nowrap text-sm">{{ $student->phone }}</td>
-                        <td class="text-right text-sm">{{ $c }}{{ number_format((float) $student->total_fee, 2) }}</td>
-                        <td class="text-right text-sm">{{ $c }}{{ number_format((float) $student->paid, 2) }}</td>
-                        <td class="text-right font-semibold text-amber-600">
+                        <td data-label="{{ __('Phone') }}" class="whitespace-nowrap text-sm">{{ $student->phone }}</td>
+                        <td data-label="{{ __('Total Fee') }}" class="text-right text-sm">{{ $c }}{{ number_format((float) $student->total_fee, 2) }}</td>
+                        <td data-label="{{ __('Paid') }}" class="text-right text-sm">{{ $c }}{{ number_format((float) $student->paid, 2) }}</td>
+                        <td data-label="{{ __('Remaining') }}" class="text-right font-semibold text-amber-600">
                             {{ $c }}{{ number_format((float) $student->remaining_amount, 2) }}
                         </td>
-                        <td><x-status-badge :status="$student->status" /></td>
-                        <td class="whitespace-nowrap text-right text-sm">
+                        <td data-label="{{ __('Status') }}"><x-status-badge :status="$student->status" /></td>
+                        <td class="cell-actions whitespace-nowrap text-right text-sm">
                             <a href="{{ route('admin.student-payments.create', ['student_id' => $student->id]) }}"
-                               class="font-medium text-brand-700 hover:underline">{{ __('Record Payment') }}</a>
-                            <span class="text-slate-300">·</span>
+                               class="btn-secondary btn-sm">{{ __('Record Payment') }}</a>
                             <a href="{{ route('admin.student-payments.index', ['student_id' => $student->id]) }}"
-                               class="text-slate-500 hover:underline">{{ __('Payments') }}</a>
+                               class="btn-secondary btn-sm">{{ __('Payments') }}</a>
                         </td>
                     </tr>
                 @empty
@@ -83,13 +84,15 @@
                 @endforelse
             </tbody>
             @if ($students->isNotEmpty())
-                <tfoot>
-                    <tr class="bg-slate-50 font-semibold">
-                        <td colspan="4" class="text-right text-sm text-slate-500">
+                {{-- The running total, which on a phone becomes its own card
+                     rather than a row of empty cells. --}}
+                <tfoot class="max-md:block">
+                    <tr class="bg-slate-50 font-semibold max-md:mt-3 max-md:flex max-md:items-center max-md:justify-between max-md:rounded-xl max-md:border max-md:border-slate-200 max-md:bg-white max-md:p-4">
+                        <td colspan="4" class="text-right text-sm text-slate-500 max-md:px-0 max-md:text-left">
                             {{ request('search') ? __('Matching total') : __('Total owed') }}
                         </td>
-                        <td class="text-right text-amber-700">{{ $c }}{{ number_format($filtered, 2) }}</td>
-                        <td colspan="2"></td>
+                        <td class="text-right text-amber-700 max-md:px-0">{{ $c }}{{ number_format($filtered, 2) }}</td>
+                        <td colspan="2" class="max-md:hidden"></td>
                     </tr>
                 </tfoot>
             @endif
@@ -97,7 +100,7 @@
     </div>
 
     @if ($students->hasPages())
-        <div class="border-t border-slate-100 px-5 py-3">{{ $students->links() }}</div>
+        <div class="border-t border-slate-100 px-4 py-3 max-md:rounded-xl max-md:border max-md:border-slate-200 max-md:bg-white sm:px-5">{{ $students->links() }}</div>
     @endif
 </div>
 @endsection

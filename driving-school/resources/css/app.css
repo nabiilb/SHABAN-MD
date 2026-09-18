@@ -35,6 +35,24 @@ body {
     @apply bg-slate-100 text-slate-800 antialiased;
 }
 
+/* Alpine hides these on init; without this they flash on every page load —
+   the backdrop, the user menu, every dialog. */
+[x-cloak] {
+    display: none !important;
+}
+
+/* Nothing may push the page wider than the phone it is on. A table or a
+   chart that needs more room scrolls inside its own container instead. */
+html,
+body {
+    overflow-x: hidden;
+}
+
+/* While the navigation drawer is open, the page behind it stays put. */
+body.drawer-open {
+    overflow: hidden;
+}
+
 /* ------------------------------------------------------------------
    Reusable UI primitives — the shared vocabulary of every screen
    ------------------------------------------------------------------ */
@@ -81,6 +99,21 @@ body {
         @apply px-3 py-1.5 text-xs;
     }
 
+    /* Touch targets. A thumb is about 44px across, so every button clears
+       that on a phone and relaxes back to the tighter desktop sizing above
+       the `sm` breakpoint. */
+    .btn,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger,
+    .btn-ghost {
+        @apply max-sm:min-h-11;
+    }
+
+    .btn-sm {
+        @apply max-sm:min-h-10 max-sm:px-3 max-sm:text-xs;
+    }
+
     .label {
         @apply mb-1.5 block text-sm font-medium text-slate-700;
     }
@@ -100,12 +133,98 @@ body {
         @apply mt-1 text-xs font-medium text-rose-600;
     }
 
+    /* A table too wide for the screen scrolls inside its card rather than
+       stretching the page. Momentum scrolling on iOS, and the scroll area
+       bleeds to the card's edge on phones so the first column is not
+       needlessly cramped. */
     .table-wrap {
-        @apply overflow-x-auto;
+        @apply -mx-px overflow-x-auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /*
+     * Table on desktop, cards on a phone — the same markup, read two ways.
+     *
+     * Add `table-cards` to a table and `data-label` to each cell, and below
+     * the `md` breakpoint every row becomes a card with its column headings
+     * repeated down the left. Nothing is hidden: a phone shows exactly the
+     * columns a desktop does, stacked instead of side by side.
+     *
+     *     <table class="table table-cards">
+     *         <td data-label="{{ __('Phone') }}">…</td>
+     */
+    .table-cards thead {
+        @apply max-md:hidden;
+    }
+
+    .table-cards tbody {
+        @apply max-md:block;
+    }
+
+    .table-cards tbody tr {
+        @apply max-md:mb-3 max-md:block max-md:rounded-xl max-md:border max-md:border-slate-200
+               max-md:bg-white max-md:p-4 max-md:shadow-sm max-md:last:mb-0 max-md:hover:bg-white;
+    }
+
+    .table-cards tbody td {
+        @apply max-md:flex max-md:items-start max-md:justify-between max-md:gap-4
+               max-md:border-0 max-md:px-0 max-md:py-1.5 max-md:text-right;
+    }
+
+    /* The column heading, repeated beside the value on a phone. */
+    .table-cards tbody td[data-label]::before {
+        content: attr(data-label);
+        @apply hidden max-md:block max-md:shrink-0 max-md:text-left max-md:text-xs
+               max-md:font-semibold max-md:uppercase max-md:tracking-wide max-md:text-slate-400;
+    }
+
+    /* The row's headline — a name, usually — spans the card on its own. */
+    .table-cards tbody td.cell-title {
+        @apply max-md:mb-2 max-md:block max-md:border-b max-md:border-slate-100 max-md:pb-2 max-md:text-left;
+    }
+
+    /* Actions sit together at the foot of the card, big enough to tap. */
+    .table-cards tbody td.cell-actions {
+        @apply max-md:mt-2 max-md:flex-wrap max-md:justify-start max-md:gap-2
+               max-md:border-t max-md:border-slate-100 max-md:pt-3 max-md:text-left;
+    }
+
+    /* A card that carries no table at all — used where a page builds its own
+       mobile representation rather than reusing the table markup. */
+    .stack-card {
+        @apply rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+    }
+
+    /*
+     * Filters: inline where there is room, stacked and full-width on a phone,
+     * with the buttons on their own row so neither is ever half a thumb wide.
+     */
+    .filter-bar {
+        @apply grid gap-3;
+    }
+
+    .filter-actions {
+        @apply flex flex-wrap gap-2 max-sm:[&>*]:flex-1;
+    }
+
+    /* A dialog that fits the phone it opens on, and scrolls inside itself
+       rather than pushing its own buttons off the bottom of the screen. */
+    .modal-panel {
+        @apply flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl bg-white shadow-xl;
+    }
+
+    .modal-body {
+        @apply min-h-0 flex-1 overflow-y-auto;
     }
 
     .table {
         @apply min-w-full divide-y divide-slate-200 text-sm;
+    }
+
+    /* Long words — an email, a reference, a run-together name — wrap rather
+       than widening the table past the screen. */
+    .table tbody td {
+        @apply break-words;
     }
 
     .table thead th {

@@ -19,14 +19,19 @@
     $tag = $href ? 'a' : 'div';
 @endphp
 
+{{-- A clickable card is a link, so the whole card is the touch target rather
+     than a word inside it. `min-h-20` keeps that target comfortably past a
+     thumb's width even when the card holds one short number. --}}
 <{{ $tag }} @if ($href) href="{{ $href }}" @endif
-    class="card flex items-start gap-4 p-5 {{ $href ? 'transition hover:border-brand-300 hover:shadow-md' : '' }}">
-    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg {{ $tones[$tone] ?? $tones['brand'] }}">
-        <x-icon :name="$icon" class="h-6 w-6" />
+    class="card flex min-h-20 items-start gap-3 p-4 sm:gap-4 sm:p-5 {{ $href ? 'transition hover:border-brand-300 hover:shadow-md' : '' }}">
+    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg sm:h-11 sm:w-11 {{ $tones[$tone] ?? $tones['brand'] }}">
+        <x-icon :name="$icon" class="h-5 w-5 sm:h-6 sm:w-6" />
     </span>
-    <div class="min-w-0">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">{{ $label }}</p>
-        <p class="mt-1 truncate text-2xl font-bold text-slate-900">{{ $value }}</p>
+    <div class="min-w-0 flex-1">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:text-xs">{{ $label }}</p>
+        {{-- Wraps rather than truncating: a currency figure with its label cut
+             off is worse than a figure on two lines. --}}
+        <p class="mt-1 break-words text-xl font-bold leading-tight text-slate-900 sm:text-2xl">{{ $value }}</p>
         @if ($hint)
             <p class="mt-0.5 text-xs text-slate-400">{{ $hint }}</p>
         @endif
