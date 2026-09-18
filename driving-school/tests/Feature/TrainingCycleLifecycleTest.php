@@ -423,6 +423,62 @@ class TrainingCycleLifecycleTest extends TestCase
         $this->assertNull($this->sessions()->activeForInstructor($this->teacher->id), 'The teacher is free again.');
     }
 
+    /**
+     * There is no overnight exception.
+     *
+     * A session started in the evening and left running is shown on the console
+     * while it is under twelve hours — that is what the carried-over display is
+     * for — and is closed the moment it passes them, exactly like any other
+     * unresolved state. Nothing gets to stay open because it happens to have
+     * crossed midnight.
+     */
+    public function test_a_session_left_overnight_gets_no_exception(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-09-18 20:10:00'));
+
+        $this->addAs($this->teacherUser, $this->student);
+        $this->startAs($this->teacherUser, $this->entryFor($this->student));
+        $session = TrainingSession::firstOrFail();
+
+        // 00:37, across midnight. Reading the board ends the session whose
+        // half hour ran out long ago, so it is now awaiting its evaluation —
+        // still open, still the teacher's, and still shown as carried over.
+        Carbon::setTestNow(Carbon::parse('2026-09-19 00:37:00'));
+
+        $board = app(TrainingBoardService::class)->board($this->teacherUser);
+        $this->assertNotNull($board['current'], 'Still open, and still shown.');
+        $this->assertTrue($board['current']['carried_over']);
+        $this->assertSame(TrainingSession::ATTENDANCE_PENDING, $session->fresh()->status);
+        $this->assertSame(0, $this->stale()->expireStale(), 'Nothing is stale yet.');
+
+        // Eleven hours later it is still the teacher's to finish.
+        Carbon::setTestNow(Carbon::parse('2026-09-19 11:37:00'));
+        $this->assertSame(0, $this->stale()->expireStale());
+
+        // Twelve hours after the training ENDED — not after it started, and not
+        // after the student joined the queue the evening before. It goes.
+        Carbon::setTestNow(Carbon::parse('2026-09-19 12:37:00'));
+        $this->assertSame(1, $this->stale()->expireStale());
+
+        $session->refresh();
+        $this->assertSame(TrainingSession::CANCELLED, $session->status);
+        $this->assertSame(TrainingQueueEntry::CANCELLED, TrainingQueueEntry::firstOrFail()->status);
+        $this->assertNull($this->sessions()->activeForInstructor($this->teacher->id), 'The teacher is released.');
+
+        // History intact, nothing invented, and the student free again.
+        $this->assertNotNull($session->started_at);
+        $this->assertNotNull($session->ended_at);
+        $this->assertSame('2026-09-18 20:10:00', $session->started_at->toDateTimeString());
+        $this->assertSame(
+            'Auto-expired: evaluation/attendance not completed within 12 hours',
+            TrainingQueueEntry::firstOrFail()->close_reason,
+        );
+        $this->assertSame(1, TrainingSession::count());
+        $this->assertSame(1, TrainingQueueEntry::count());
+        $this->assertNothingWasFabricated();
+        $this->addAs($this->otherUser, $this->student)->assertSessionHasNoErrors();
+    }
+
     /** 63 + 64 — the two twelve-hour rules are different rules. */
     public function test_an_expired_wait_starts_no_cooldown_but_a_real_session_does(): void
     {

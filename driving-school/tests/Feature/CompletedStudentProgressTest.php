@@ -146,6 +146,101 @@ class CompletedStudentProgressTest extends TestCase
     }
 
     /* ================================================================
+     | The Completed figure is capped for everybody
+     | ================================================================ */
+
+    /**
+     * Nine days of a five-day course reads as 5 of 5, not 9 of 5.
+     *
+     * The progress bar already said 100%; the number beside it now agrees. The
+     * nine real attendance days are untouched — this is a display cap, not a
+     * rewrite, and the register still shows every one of them.
+     */
+    public function test_a_short_course_over_attended_reads_as_fully_completed(): void
+    {
+        $student = $this->makeStudent('Over Attender', $this->instructor, ['required_training_days' => 5]);
+        $this->attend($student, 9);
+        $student->refresh();
+
+        $this->assertSame(5, $student->effective_completed_days, 'Capped at the course length.');
+        $this->assertSame(0, $student->remaining_days);
+        $this->assertSame(100.0, $student->progress_percentage);
+
+        // The real history is all still there.
+        $this->assertSame(9, $student->completed_days, 'The real attendance count is untouched.');
+        $this->assertSame(9, Attendance::where('student_id', $student->id)->count());
+        $this->assertSame(9, $student->attendance()->where('status', 'present')->count());
+    }
+
+    /** Under the course length, Completed is simply the days attended. */
+    public function test_a_part_finished_student_reads_as_the_days_they_attended(): void
+    {
+        $student = $this->makeStudent('Part Way', $this->instructor, ['required_training_days' => 30]);
+        $this->attend($student, 12);
+        $student->refresh();
+
+        $this->assertSame(12, $student->effective_completed_days);
+        $this->assertSame(12, $student->completed_days, 'Which is the real count, unchanged.');
+        $this->assertSame(18, $student->remaining_days);
+        $this->assertSame(40.0, $student->progress_percentage);
+    }
+
+    /** A finished student reads as having done the whole course. */
+    public function test_a_completed_student_reads_as_the_whole_course(): void
+    {
+        $student = $this->makeStudent('Finished', $this->instructor, ['required_training_days' => 30]);
+        $this->attend($student, 3);
+        $student->refresh()->update(['status' => 'completed']);
+        $student->refresh();
+
+        $this->assertSame(30, $student->effective_completed_days);
+        $this->assertSame(0, $student->remaining_days);
+        $this->assertSame(100.0, $student->progress_percentage);
+        $this->assertSame(3, $student->completed_days, 'Three days really happened; thirty is the display.');
+        $this->assertSame(3, Attendance::where('student_id', $student->id)->count());
+    }
+
+    /** A course with no length divides by nothing and reports nothing. */
+    public function test_a_course_with_no_length_is_handled_safely(): void
+    {
+        $student = $this->makeStudent('No Course', $this->instructor, ['required_training_days' => 1]);
+        $this->attend($student, 2);
+        $student->refresh()->forceFill(['required_training_days' => 0])->save();
+        $student->refresh();
+
+        $this->assertSame(0, $student->effective_completed_days);
+        $this->assertSame(0, $student->remaining_days);
+        $this->assertSame(0.0, $student->progress_percentage);
+        $this->assertSame(2, $student->completed_days, 'The attendance is still on file.');
+    }
+
+    /** And every screen shows the capped figure, not one of them the raw count. */
+    public function test_every_screen_shows_the_capped_completed_figure(): void
+    {
+        $student = $this->makeStudent('Over Attender Screens', $this->instructor, ['required_training_days' => 5]);
+        $this->attend($student, 9);
+
+        $row = $this->rowFor($student->fresh());
+        $this->assertSame(5, $row->effective_completed_days);
+
+        $detail = $this->actingAs($this->admin)
+            ->get(route('admin.students.show', $student))
+            ->assertOk()
+            ->viewData('student');
+        $this->assertSame(5, $detail->effective_completed_days);
+
+        $this->assertSame(5, app(StudentProgressService::class)->summarise($student->fresh())['completed_days']);
+        $this->assertSame(5, app(DashboardService::class)->studentMetrics($student->fresh())['completed_days']);
+
+        foreach (['students', 'student-progress'] as $report) {
+            $reported = collect(app(ReportService::class)->build($report, [], $this->admin)['rows'])
+                ->first(fn ($r) => ($r[__('Student')] ?? null) === 'Over Attender Screens');
+
+            $this->assertSame(5, $reported[__('Completed')], "The {$report} report should show the capped figure.");
+        }
+    }
+
+    /* ================================================================
      | 4 + 5 + 6 — everybody else is unchanged
      | ================================================================ */
 

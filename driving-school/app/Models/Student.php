@@ -384,24 +384,31 @@ class Student extends Model
     }
 
     /**
-     * The "Completed" figure the screens show.
+     * The "Completed" figure the screens show — one rule for every student.
      *
-     * For a student with an opening balance — or one the school has marked
-     * finished — it is the course length less what is left, which is what the
-     * register says is behind them. It is a DISPLAY figure derived from the
-     * remaining count, not a claim that this many attendance rows exist; the
-     * real attendance count is `completed_days` and is never overwritten.
+     * The course length, less the days still to run, and never more than the
+     * course itself. A five-day course cannot be nine days completed: somebody
+     * who attended nine reads 5 of 5 and 100%, which is what the progress bar
+     * beside it already said. Where the days still to run come from is the
+     * student's own business — real attendance for an ordinary student, the
+     * register's opening balance for an imported one, nothing at all for one
+     * the school has marked finished — and all three arrive here the same way.
      *
-     * For an ordinary student the two are the same number anyway, so they keep
-     * their real attendance count with no capping applied.
+     * A DISPLAY figure, derived from the remaining count. It is not a claim
+     * about how many attendance rows exist: `completed_days` still holds the
+     * real count, every attendance row is still on file, and the register and
+     * the training history go on showing what actually happened.
      */
     public function getEffectiveCompletedDaysAttribute(): int
     {
-        if ($this->hasCompletedTraining() || $this->hasOpeningBalance()) {
-            return max($this->required_training_days - $this->remaining_days, 0);
+        $required = (int) $this->required_training_days;
+
+        // No course length to be a proportion of — and nothing to divide by.
+        if ($required <= 0) {
+            return 0;
         }
 
-        return $this->completed_days;
+        return min(max($required - $this->remaining_days, 0), $required);
     }
 
     /**

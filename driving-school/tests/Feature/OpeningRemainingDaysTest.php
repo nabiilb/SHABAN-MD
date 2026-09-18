@@ -191,7 +191,12 @@ class OpeningRemainingDaysTest extends TestCase
         $student = $this->imported(required: 30, openingRemaining: 15);
 
         $this->assertSame(15, $student->remaining_days);
+        $this->assertSame(15, $student->effective_completed_days, 'Fifteen days are behind them.');
         $this->assertSame(50.0, $student->progress_percentage);
+
+        // And not one of those fifteen is an attendance row.
+        $this->assertSame(0, $student->completed_days);
+        $this->assertSame(0, Attendance::where('student_id', $student->id)->count());
     }
 
     /** 4 — required 15, remaining 4. */
@@ -200,6 +205,7 @@ class OpeningRemainingDaysTest extends TestCase
         $student = $this->imported(required: 15, openingRemaining: 4);
 
         $this->assertSame(4, $student->remaining_days);
+        $this->assertSame(11, $student->effective_completed_days);
         $this->assertEqualsWithDelta(73.3, $student->progress_percentage, 0.05);
     }
 
@@ -209,6 +215,7 @@ class OpeningRemainingDaysTest extends TestCase
         $student = $this->imported(required: 15, openingRemaining: 20);
 
         $this->assertSame(20, $student->remaining_days);
+        $this->assertSame(0, $student->effective_completed_days, 'Never below zero either.');
         $this->assertSame(0.0, $student->progress_percentage, 'Never below zero.');
     }
 

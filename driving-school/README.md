@@ -316,6 +316,22 @@ this is the old calculation unchanged; for an imported one it is the days the
 register says are behind them. Clamped to 0–100, so an opening balance longer
 than the course reads 0% rather than a negative.
 
+The **Completed** figure the screens show follows the same rule, for every
+student:
+
+```
+effective_completed_days = min(max(required_training_days - remaining_days, 0), required_training_days)
+```
+
+Capped at the course, so nine days of a five-day course reads **5 of 5, 100%** —
+the number now agrees with the progress bar beside it. A finished student reads
+as the whole course. A course with no length reports 0 and divides by nothing.
+
+It is a display figure derived from the remaining count, never a claim about
+how many attendance rows exist: `completed_days` still holds the real count,
+all nine days are still on file, and the register and the training history go
+on showing exactly what happened.
+
 ### Completed overrides the count
 
 A student whose status is **Completed** always reads as finished:
@@ -480,6 +496,11 @@ began, the cycle closes:
 | `waiting` | `joined_at` |
 | `training_in_progress` | the session's `started_at` |
 | `attendance_pending` | the session's `ended_at` — the evaluation has been due since training ended, not since the student joined the queue |
+
+There is no exception for a session left running overnight. Crossing midnight
+is not a reason to stay open: such a session is shown on the console as carried
+over while it is under its twelve hours, and closed the moment it passes them
+like any other unresolved state.
 
 `TrainingStaleCycleService::expireStale()` does it, and runs **at request time**
 before any Training Console decision — the board, the search, Add to Queue and
