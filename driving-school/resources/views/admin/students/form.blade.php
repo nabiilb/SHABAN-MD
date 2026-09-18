@@ -1,0 +1,192 @@
+@extends('layouts.app')
+
+@section('title', $student->exists ? __('Edit Student') : __('New Student'))
+@section('heading', $student->exists ? __('Edit Student') : __('New Student'))
+
+@section('content')
+{{-- The remaining balance shown while registering is only a preview of the
+     arithmetic; the authoritative balance is always Total Fee minus the sum of
+     recorded payments, computed server-side. --}}
+<form method="POST" enctype="multipart/form-data"
+      action="{{ $student->exists ? route('admin.students.update', $student) : route('admin.students.store') }}"
+      x-data="{
+          totalFee: {{ (float) old('total_fee', $student->total_fee ?: 0) }},
+          amountPaid: {{ (float) old('amount_paid', 0) }},
+          submitting: false,
+          get remaining() {
+              return (Number(this.totalFee) || 0) - (Number(this.amountPaid) || 0);
+          },
+          /*
+           * Submit once. A second click, or Enter held down, is swallowed
+           * rather than sent — the back end refuses a duplicate registration
+           * either way, but the admin should not have to read an error to
+           * find that out. This is comfort, not the protection.
+           */
+          submitOnce(event) {
+              if (this.submitting) {
+                  event.preventDefault();
+                  return;
+              }
+              this.submitting = true;
+          },
+      }"
+      @submit="submitOnce($event)">
+    @csrf
+    @if ($student->exists) @method('PUT') @endif
+
+    <div class="grid gap-6 lg:grid-cols-3">
+        <div class="card lg:col-span-2">
+            <div class="card-header"><h3 class="card-title">{{ __('Personal Details') }}</h3></div>
+            <div class="grid gap-4 p-5 sm:grid-cols-2">
+                <x-field name="full_name" :label="__('Full Name')" required class="sm:col-span-2">
+                    <input id="full_name" name="full_name" value="{{ old('full_name', $student->full_name) }}" required class="input @error('full_name') input-error @enderror">
+                </x-field>
+
+                <x-field name="phone" :label="__('Phone')" required>
+                    <input id="phone" name="phone" value="{{ old('phone', $student->phone) }}" required class="input @error('phone') input-error @enderror">
+                </x-field>
+
+                <x-field name="email" :label="__('Email')">
+                    <input id="email" name="email" type="email" value="{{ old('email', $student->email) }}" class="input @error('email') input-error @enderror">
+                </x-field>
+
+                <x-field name="address" :label="__('Address')" class="sm:col-span-2">
+                    <input id="address" name="address" value="{{ old('address', $student->address) }}" class="input">
+                </x-field>
+
+                <x-field name="date_of_birth" :label="__('Date of Birth')">
+                    <input id="date_of_birth" name="date_of_birth" type="date"
+                           value="{{ old('date_of_birth', $student->date_of_birth?->format('Y-m-d')) }}" class="input">
+                </x-field>
+
+                <x-field name="gender" :label="__('Gender')">
+                    <select id="gender" name="gender" class="input">
+                        <option value="">{{ __('Not specified') }}</option>
+                        @foreach (['male', 'female', 'other'] as $gender)
+                            <option value="{{ $gender }}" @selected(old('gender', $student->gender) === $gender)>{{ __(ucfirst($gender)) }}</option>
+                        @endforeach
+                    </select>
+                </x-field>
+
+                <x-field name="profile_photo" :label="__('Profile Photo')" class="sm:col-span-2">
+                    <input id="profile_photo" name="profile_photo" type="file" accept="image/*" class="input">
+                </x-field>
+            </div>
+        </div>
+
+        <div class="space-y-6">
+            <div class="card">
+                <div class="card-header"><h3 class="card-title">{{ __('Training') }}</h3></div>
+                <div class="space-y-4 p-5">
+                    <x-field name="license_type" :label="__('License Type')">
+                        <input id="license_type" name="license_type" value="{{ old('license_type', $student->license_type) }}" class="input" placeholder="B">
+                    </x-field>
+
+                    <x-field name="start_date" :label="__('Start Date')" required>
+                        <input id="start_date" name="start_date" type="date" required
+                               value="{{ old('start_date', $student->start_date?->format('Y-m-d')) }}" class="input @error('start_date') input-error @enderror">
+                    </x-field>
+
+                    <x-field name="required_training_days" :label="__('Required Training Days')" required>
+                        <input id="required_training_days" name="required_training_days" type="number" min="1" max="365" required
+                               value="{{ old('required_training_days', $student->required_training_days ?: 24) }}" class="input">
+                    </x-field>
+
+                    <x-field name="current_instructor_id" :label="__('Current Instructor')">
+                        <select id="current_instructor_id" name="current_instructor_id" class="input">
+                            <option value="">{{ __('Unassigned') }}</option>
+                            @foreach ($instructors as $instructor)
+                                <option value="{{ $instructor->id }}" @selected(old('current_instructor_id', $student->current_instructor_id) == $instructor->id)>
+                                    {{ $instructor->full_name }}
+                                </option>
+                            @endforeach
+                        </select>
+                    </x-field>
+
+                    <x-field name="status" :label="__('Status')" required>
+                        <select id="status" name="status" class="input">
+                            @foreach (\App\Models\Student::STATUSES as $status)
+                                <option value="{{ $status }}" @selected(old('status', $student->status) === $status)>{{ __(ucfirst($status)) }}</option>
+                            @endforeach
+                        </select>
+                    </x-field>
+
+                    <x-field name="total_fee" :label="__('Total Fee')">
+                        <input id="total_fee" name="total_fee" type="number" step="0.01" min="0"
+                               x-model.number="totalFee"
+                               value="{{ old('total_fee', $student->total_fee ?: '0.00') }}" class="input">
+                    </x-field>
+
+                    @if (! $student->exists)
+                        {{-- Money handed over at the counter. Recorded as a
+                             student payment, which is the company's income
+                             entry — leave it at 0 and the student simply owes
+                             the whole fee. --}}
+                        <x-field name="amount_paid" :label="__('Amount Paid')">
+                            <input id="amount_paid" name="amount_paid" type="number" step="0.01" min="0"
+                                   x-model.number="amountPaid"
+                                   value="{{ old('amount_paid', '0.00') }}" class="input">
+                            <p class="mt-1 text-xs text-slate-400">
+                                {{ __('Recorded as a student payment and counted as company income. Leave at 0 if nothing was paid today.') }}
+                            </p>
+                        </x-field>
+
+                        <x-field name="payment_method" :label="__('Payment Method')">
+                            <select id="payment_method" name="payment_method" class="input"
+                                    :disabled="! (amountPaid > 0)">
+                                @foreach (\App\Models\StudentPayment::METHODS as $method)
+                                    <option value="{{ $method }}" @selected(old('payment_method', 'cash') === $method)>
+                                        {{ __(ucwords(str_replace('_', ' ', $method))) }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        </x-field>
+
+                        <x-field name="payment_reference" :label="__('Payment Reference')">
+                            <input id="payment_reference" name="payment_reference" type="text" maxlength="100"
+                                   value="{{ old('payment_reference') }}" class="input"
+                                   placeholder="{{ __('Receipt or transfer number (optional)') }}">
+                        </x-field>
+
+                        <div class="rounded-lg bg-slate-50 px-4 py-3 sm:col-span-2">
+                            <div class="flex items-center justify-between text-sm">
+                                <span class="text-slate-500">{{ __('Remaining Balance') }}</span>
+                                <span class="text-base font-bold"
+                                      :class="remaining > 0 ? 'text-amber-600' : 'text-emerald-600'"
+                                      x-text="remaining.toFixed(2)"></span>
+                            </div>
+                            <p class="mt-1 text-xs text-slate-400">
+                                {{ __('Total Fee minus Amount Paid. The balance is always recalculated from recorded payments.') }}
+                            </p>
+                        </div>
+                    @endif
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3 class="card-title">{{ __('Notes') }}</h3></div>
+                <div class="p-5">
+                    <x-field name="notes">
+                        <textarea id="notes" name="notes" rows="4" class="input">{{ old('notes', $student->notes) }}</textarea>
+                    </x-field>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-6 flex gap-2">
+        <button class="btn-primary" :disabled="submitting"
+                :class="submitting ? 'cursor-not-allowed opacity-60' : ''">
+            <span x-show="! submitting">{{ $student->exists ? __('Save Changes') : __('Register Student') }}</span>
+            {{-- Hidden inline rather than with x-cloak: this page has no
+                 [x-cloak] rule, and x-show writes style.display anyway, so the
+                 label cannot flash before Alpine boots. --}}
+            <span x-show="submitting" style="display: none">
+                {{ $student->exists ? __('Saving…') : __('Registering…') }}
+            </span>
+        </button>
+        <a href="{{ route('admin.students.index') }}" class="btn-secondary"
+           :class="submitting ? 'pointer-events-none opacity-60' : ''">{{ __('Cancel') }}</a>
+    </div>
+</form>
+@endsection
