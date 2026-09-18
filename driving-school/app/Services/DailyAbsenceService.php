@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Attendance;
 use App\Models\Student;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -45,14 +46,7 @@ class DailyAbsenceService
         }
 
         $day = $date->toDateString();
-
-        // Students who joined after the day in question were not absent from
-        // it; they were not students yet.
-        $students = Student::query()
-            ->where('status', 'active')
-            ->whereDate('start_date', '<=', $day)
-            ->orderBy('id')
-            ->get(['id', 'current_instructor_id']);
+        $students = $this->studentsForDay($day);
 
         // withTrashed: a soft-deleted row is still somebody's decision about
         // that day, and writing over it would resurrect the day as a new one.
@@ -78,6 +72,64 @@ class DailyAbsenceService
             'skipped' => $students->count() - $created,
             'students' => $students->count(),
         ];
+    }
+
+    /**
+     * The students whose register this day belongs to.
+     *
+     * Active, and enrolled by then — somebody who joined afterwards was not
+     * absent from a day they were not yet a student for.
+     *
+     * A student carrying an imported opening balance is held back until they
+     * have actually turned up. The register import brings in people the school
+     * was teaching months ago, with no attendance in this system and a
+     * remaining-days figure that already accounts for everything they did
+     * before; marking them absent every night would fill the register with days
+     * they were never expected at, for students who may never come back. Once
+     * one real attendance record exists from the opening date onwards, they are
+     * being taught here and join the ordinary rule.
+     *
+     * (An absence written by this command cannot be what opens that gate: none
+     * can exist before the gate opens. A soft-deleted record does not open it
+     * either — somebody removed it.)
+     *
+     * @return Collection<int, Student>
+     */
+    protected function studentsForDay(string $day)
+    {
+        $students = Student::query()
+            ->where('status', 'active')
+            ->whereDate('start_date', '<=', $day)
+            ->orderBy('id')
+            ->get(['id', 'current_instructor_id', 'opening_remaining_days', 'opening_remaining_from']);
+
+        $waiting = $students->filter(
+            fn (Student $student) => $student->opening_remaining_days !== null
+                && $student->opening_remaining_from !== null,
+        );
+
+        if ($waiting->isEmpty()) {
+            return $students;
+        }
+
+        // The latest day each of them has any record for. One query, then the
+        // comparison per student, because the threshold is each student's own.
+        $latest = Attendance::query()
+            ->whereIn('student_id', $waiting->pluck('id'))
+            ->selectRaw('student_id, max(attendance_date) as last_date')
+            ->groupBy('student_id')
+            ->pluck('last_date', 'student_id');
+
+        return $students->reject(function (Student $student) use ($waiting, $latest) {
+            if (! $waiting->contains('id', $student->id)) {
+                return false;
+            }
+
+            $last = $latest->get($student->id);
+
+            return $last === null
+                || Carbon::parse($last)->lt($student->opening_remaining_from);
+        })->values();
     }
 
     /**
@@ -133,10 +185,9 @@ class DailyAbsenceService
 
         $day = $date->toDateString();
 
-        $students = Student::query()
-            ->where('status', 'active')
-            ->whereDate('start_date', '<=', $day)
-            ->pluck('id');
+        // The same eligibility a real run uses, so the dry run cannot promise
+        // a different number from the one that would actually be written.
+        $students = $this->studentsForDay($day)->pluck('id');
 
         $recorded = Attendance::withTrashed()
             ->whereDate('attendance_date', $day)

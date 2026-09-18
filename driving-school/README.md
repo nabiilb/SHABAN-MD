@@ -702,6 +702,21 @@ A normal run does yesterday alone. It never sweeps back over history: filling in
 months of absences behind the school's back would rewrite what it knows about
 its own students, so an older date has to be asked for by name.
 
+**A student carrying an imported opening balance is held back** until they have
+actually turned up. The register import brings in people the school was teaching
+months ago, with no attendance here and a remaining-days figure that already
+accounts for everything they did before; marking them absent every night would
+fill the register with days they were never expected at, for students who may
+never come back. Once one real attendance record exists **on or after
+`opening_remaining_from`**, they are being taught here and join the ordinary
+rule from that point on — the days before it are never filled in. An absence
+written by the command cannot open that gate (none can exist before it opens),
+a record dated before the opening balance does not either, and neither does one
+that has since been removed.
+
+An absence is not a day of training, so it never reduces anybody's remaining
+days — imported or not. Only `present` days count towards progress.
+
 `attendance.instructor_id` is nullable for this. An absence has no teacher to
 name, and a great many students have no permanent instructor at all.
 

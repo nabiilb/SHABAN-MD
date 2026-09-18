@@ -288,6 +288,170 @@ class DailyAbsenceTest extends TestCase
         $this->assertSame(1, Attendance::withTrashed()->count());
     }
 
+    /* ================================================================
+     | Imported students wait for their first real check-in
+     | ================================================================ */
+
+    /** A student carrying an imported opening balance and no real attendance. */
+    private function imported(string $name, int $remaining, string $from): Student
+    {
+        $student = $this->makeStudent($name, $this->instructor, ['start_date' => '2026-08-01']);
+
+        $student->forceFill([
+            'required_training_days' => 30,
+            'opening_remaining_days' => $remaining,
+            'opening_remaining_from' => $from,
+        ])->save();
+
+        return $student->refresh();
+    }
+
+    /** 1 — no real attendance yet, so no absence is written for them. */
+    public function test_an_imported_student_with_no_real_attendance_is_skipped(): void
+    {
+        $imported = $this->imported('Imported One', 15, '2026-09-18');
+
+        $result = $this->absences()->markAbsent('2026-09-18');
+
+        // Only the ordinary student.
+        $this->assertSame(1, $result['created']);
+        $this->assertSame(1, $result['students'], 'The imported student is not even considered.');
+        $this->assertSame(0, Attendance::where('student_id', $imported->id)->count());
+        $this->assertSame($this->active->id, Attendance::firstOrFail()->student_id);
+    }
+
+    /** 2 — and days may pass without any of them being filled in behind them. */
+    public function test_days_before_the_first_real_attendance_stay_empty(): void
+    {
+        $imported = $this->imported('Imported One', 15, '2026-09-14');
+
+        foreach (['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18'] as $day) {
+            $this->absences()->markAbsent($day);
+        }
+
+        $this->assertSame(
+            0,
+            Attendance::where('student_id', $imported->id)->count(),
+            'Five nights of the scheduler must leave an untouched student untouched.',
+        );
+
+        // The ordinary student got every one of those days.
+        $this->assertSame(5, Attendance::where('student_id', $this->active->id)->count());
+    }
+
+    /** 3 — the first real check-in lets them into the ordinary rule. */
+    public function test_a_real_check_in_starts_the_ordinary_absence_rule(): void
+    {
+        $imported = $this->imported('Imported One', 15, '2026-09-14');
+
+        // Nothing on the 16th: still waiting.
+        $this->absences()->markAbsent('2026-09-16');
+        $this->assertSame(0, Attendance::where('student_id', $imported->id)->count());
+
+        // They turn up on the 17th, for the first time in this system.
+        $this->attend($imported, '2026-09-17');
+
+        // The 18th finishes with nothing recorded, and now it counts.
+        $result = $this->absences()->markAbsent('2026-09-18');
+
+        $absence = Attendance::where('student_id', $imported->id)
+            ->whereDate('attendance_date', '2026-09-18')
+            ->firstOrFail();
+
+        $this->assertSame('absent', $absence->status);
+        $this->assertSame(2, $result['students'], 'Both students are considered now.');
+
+        // The 17th is still their own present record, and the days before it
+        // were never filled in.
+        $this->assertSame(
+            ['2026-09-17' => 'present', '2026-09-18' => 'absent'],
+            Attendance::where('student_id', $imported->id)
+                ->orderBy('attendance_date')
+                ->get()
+                ->mapWithKeys(fn ($a) => [$a->attendance_date->toDateString() => $a->status])
+                ->all(),
+        );
+    }
+
+    /** A check-in dated BEFORE the opening balance does not let them in. */
+    public function test_attendance_before_the_opening_date_does_not_open_the_gate(): void
+    {
+        $imported = $this->imported('Imported One', 15, '2026-09-14');
+
+        // A day from before the opening balance was taken — already inside the
+        // number the register gave, and no evidence they are training now.
+        $this->attend($imported, '2026-09-10');
+
+        $this->absences()->markAbsent('2026-09-18');
+
+        $this->assertSame(
+            0,
+            Attendance::where('student_id', $imported->id)->whereDate('attendance_date', '2026-09-18')->count(),
+        );
+    }
+
+    /** A removed check-in does not hold the gate open either. */
+    public function test_a_deleted_check_in_closes_the_gate_again(): void
+    {
+        $imported = $this->imported('Imported One', 15, '2026-09-14');
+
+        $this->attend($imported, '2026-09-17')->delete();
+
+        $this->absences()->markAbsent('2026-09-18');
+
+        $this->assertSame(0, Attendance::where('student_id', $imported->id)->count());
+    }
+
+    /** 4 — an absence never eats into the register's remaining days. */
+    public function test_an_absence_does_not_reduce_the_imported_remaining_days(): void
+    {
+        $imported = $this->imported('Imported One', 15, '2026-09-14');
+
+        $this->attend($imported, '2026-09-17');
+        $imported->refresh();
+
+        // One real day trained: fourteen left, and the register's figure moved
+        // by exactly that one day.
+        $this->assertSame(14, $imported->remaining_days);
+        $this->assertEqualsWithDelta(53.3, $imported->progress_percentage, 0.05);
+
+        $this->absences()->markAbsent('2026-09-18');
+        $imported->refresh();
+
+        // The absence changed nothing: it is not a day of training.
+        $this->assertSame(14, $imported->remaining_days, 'An absence is not progress.');
+        $this->assertEqualsWithDelta(53.3, $imported->progress_percentage, 0.05);
+        $this->assertSame(1, $imported->training_days_since_opening);
+        $this->assertSame(15, $imported->opening_remaining_days, 'The opening balance itself is untouched.');
+        $this->assertSame('2026-09-14', $imported->opening_remaining_from->toDateString());
+    }
+
+    /** 5 — and the ordinary student is entirely unaffected by any of this. */
+    public function test_a_normal_student_is_unaffected_by_the_imported_rule(): void
+    {
+        $this->imported('Imported One', 15, '2026-09-14');
+
+        $this->assertSame(1, $this->absences()->markAbsent('2026-09-18')['created']);
+
+        $row = Attendance::where('student_id', $this->active->id)->firstOrFail();
+
+        $this->assertSame('absent', $row->status);
+        $this->assertNull($this->active->fresh()->opening_remaining_days, 'No opening balance, no gate.');
+    }
+
+    /** The dry run counts the same students a real run would write. */
+    public function test_the_dry_run_applies_the_same_eligibility(): void
+    {
+        $this->imported('Imported One', 15, '2026-09-18');
+
+        $this->artisan('attendance:mark-absent', ['--date' => '2026-09-18', '--dry-run' => true])
+            ->expectsOutputToContain('1 student(s) would be marked absent')
+            ->expectsOutputToContain('1 active student(s) considered')
+            ->assertSuccessful();
+
+        $this->assertSame(1, $this->absences()->markAbsent('2026-09-18')['created']);
+    }
+
     /** The absence counts towards progress like any other non-present day: not at all. */
     public function test_an_absence_does_not_advance_the_students_progress(): void
     {
