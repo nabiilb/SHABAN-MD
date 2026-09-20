@@ -178,6 +178,19 @@ class AlphaSchoolImporter
                 'action' => $existing ? 'update' : 'create',
                 'reason' => null,
                 'existing_id' => $existing?->id,
+                // The two register columns as the parser understood them,
+                // kept apart from the student they were folded into. A
+                // student's status is 'active' both when the register says so
+                // and when it says nothing, and only this can tell the two
+                // apart — which is what stops a repair reading a silent column
+                // as an instruction to un-complete somebody.
+                'source' => [
+                    'duration_raw' => $durationText,
+                    'duration_days' => $days,
+                    'column_one_raw' => $columnOneText,
+                    'column_one_status' => $status,
+                    'column_one_remaining' => $openingRemaining,
+                ],
                 'student' => [
                     'full_name' => $name,
                     'phone' => $phone,

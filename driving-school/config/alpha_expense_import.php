@@ -120,14 +120,16 @@ return [
             'home_support' => ['Home & General Support', 'Taageero Guri'],
         ],
 
-        // Where an entry lands when no rule below matches it. These are listed
-        // in the dry run under their own heading so they can be ruled on
-        // rather than quietly filed away.
+        // Where an entry lands when no rule below matches it. They are listed
+        // in the dry run under their own heading so the wording can be read,
+        // but the school has confirmed they are its spending: an informal
+        // description is not a reason to hold an expense back.
         'fallback' => 'other',
+        'fallback_review' => false,
 
         'rules' => [
             // --- Buying a vehicle outright -------------------------------
-            ['code' => 'vehicle_purchase', 'review' => true, 'words' => ['gaari iib', 'gari iib', 'iib ah', 'gaari iibsi']],
+            ['code' => 'vehicle_purchase', 'words' => ['gaari iib', 'gari iib', 'iib ah', 'gaari iibsi']],
 
             // --- Oil, before washing: "olyo dhaqis" is an oil change -----
             ['code' => 'oil_change', 'words' => ['olyo', 'oleyo', 'oyl', 'oil']],

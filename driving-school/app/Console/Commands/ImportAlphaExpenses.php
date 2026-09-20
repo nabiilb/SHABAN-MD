@@ -129,6 +129,7 @@ class ImportAlphaExpenses extends Command
         $already = $this->decided($plan, AlphaExpenseImporter::ALREADY_IMPORTED);
         $totals = $this->decided($plan, AlphaExpenseImporter::EXCLUDE_TOTAL);
         $incoming = $this->decided($plan, AlphaExpenseImporter::EXCLUDE_INCOMING_MONEY);
+        $missing = $this->decided($plan, AlphaExpenseImporter::SKIPPED_MISSING_AMOUNT);
         $review = $this->decided($plan, AlphaExpenseImporter::NEEDS_REVIEW);
 
         $dated = array_filter($import, fn ($e) => $e['date_source'] === 'line');
@@ -150,7 +151,8 @@ class ImportAlphaExpenses extends Command
         $this->newLine();
         $this->line(sprintf('Excluded as totals/subtotals:  %d  (%s)', count($totals), $this->money($this->sum($totals))));
         $this->line(sprintf('Excluded as incoming money:    %d  (%s)', count($incoming), $this->money($this->sum($incoming))));
-        $this->line(sprintf('Ambiguous, needing review:     %d', count($review)));
+        $this->line(sprintf('Skipped, MISSING_AMOUNT:       %d', count($missing)));
+        $this->line(sprintf('Still NEEDS_REVIEW:            %d', count($review)));
         $this->newLine();
         $this->line(sprintf('Dated by the document:         %d', count($dated)));
         $this->line(sprintf('Undated, given %s:     %d', $plan['undated_date']->toDateString(), count($import) - count($dated)));
@@ -160,8 +162,9 @@ class ImportAlphaExpenses extends Command
         $this->missingCategories($plan);
         $this->exclusions('EXCLUDED — SUMMARY/TOTAL LINES', $totals);
         $this->exclusions('EXCLUDED — MONEY COMING IN', $incoming);
+        $this->exclusions('SKIPPED — MISSING_AMOUNT (the document never wrote a figure)', $missing);
         $this->exclusions('AMBIGUOUS — NOT IMPORTED, PLEASE RULE ON THESE', $review);
-        $this->exclusions('IMPORTED BUT FLAGGED — CATEGORY INFERRED FROM CONTEXT', $flagged);
+        $this->exclusions('IMPORTED — CATEGORY INFERRED FROM CONTEXT, LISTED FOR THE RECORD', $flagged);
         $this->dateNote($plan, $dated);
         $this->preview($plan);
     }
@@ -223,7 +226,7 @@ class ImportAlphaExpenses extends Command
             sprintf('R%d C%d', $e['row'], $e['column']),
             $e['original'],
             $e['amount'] === null ? '—' : $this->money($e['amount']),
-            $e['reason'] ?? ($e['category_rule']
+            ($e['reason_code'] ? $e['reason_code'].' — ' : '').$e['reason'] ?: ($e['category_rule']
                 ? __('Category :code chosen from ":word"', ['code' => $e['category_code'], 'word' => $e['category_rule']])
                 : __('No rule matched — filed under :code', ['code' => $e['category_code']])),
         ], $entries));

@@ -27,6 +27,22 @@ return [
 
     /*
     |----------------------------------------------------------------------
+    | The date an opening balance is true as of
+    |----------------------------------------------------------------------
+    |
+    | A number in the register's remaining column is a balance as at the day
+    | the register was read, so only training on or after that day counts
+    | against it. Null means the day the import or repair is run, which is the
+    | right answer when the register is being read today.
+    |
+    | Set a date here to read a register that was written earlier, and the
+    | repair will leave it where it is on every later run rather than quietly
+    | moving the line that decides which attendance counts.
+    */
+    'opening_remaining_from' => null,
+
+    /*
+    |----------------------------------------------------------------------
     | Dates Excel stored as real dates
     |----------------------------------------------------------------------
     |

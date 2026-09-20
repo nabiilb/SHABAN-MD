@@ -36,6 +36,8 @@ class AlphaExpenseImporter
 
     public const EXCLUDE_INCOMING_MONEY = 'EXCLUDE_INCOMING_MONEY';
 
+    public const SKIPPED_MISSING_AMOUNT = 'SKIPPED_MISSING_AMOUNT';
+
     public const NEEDS_REVIEW = 'NEEDS_REVIEW';
 
     public const ALREADY_IMPORTED = 'ALREADY_IMPORTED';
@@ -242,6 +244,7 @@ class AlphaExpenseImporter
             'category_rule' => null,
             'review' => false,
             'decision' => self::IMPORT,
+            'reason_code' => null,
             'reason' => null,
         ];
 
@@ -262,6 +265,7 @@ class AlphaExpenseImporter
         foreach ((array) config('alpha_expense_import.total_words') as $word) {
             if ($this->mentions($haystack, $word)) {
                 $entry['decision'] = self::EXCLUDE_TOTAL;
+                $entry['reason_code'] = 'SUMMARY_TOTAL';
                 $entry['reason'] = __('Summary line (":word") — its amount is already counted in the lines above it', ['word' => $word]);
 
                 return $entry;
@@ -271,14 +275,19 @@ class AlphaExpenseImporter
         foreach ((array) config('alpha_expense_import.incoming_words') as $word) {
             if ($this->mentions($haystack, $word)) {
                 $entry['decision'] = self::EXCLUDE_INCOMING_MONEY;
+                $entry['reason_code'] = 'INCOMING_MONEY';
                 $entry['reason'] = __('Money received (":word"), not money spent', ['word' => $word]);
 
                 return $entry;
             }
         }
 
+        // A line with no figure is not an expense that needs a ruling; it is a
+        // line the document never finished. It is reported and left alone,
+        // because the only way to import it would be to invent its amount.
         if ($entry['amount'] === null) {
-            $entry['decision'] = self::NEEDS_REVIEW;
+            $entry['decision'] = self::SKIPPED_MISSING_AMOUNT;
+            $entry['reason_code'] = 'MISSING_AMOUNT';
             $entry['reason'] = __('No amount is written beside this line');
 
             return $entry;
@@ -286,6 +295,7 @@ class AlphaExpenseImporter
 
         if ($entry['amount'] <= 0) {
             $entry['decision'] = self::NEEDS_REVIEW;
+            $entry['reason_code'] = 'NOT_A_POSITIVE_AMOUNT';
             $entry['reason'] = __('The amount is not a positive figure');
 
             return $entry;
@@ -293,6 +303,7 @@ class AlphaExpenseImporter
 
         if ($entry['description'] === '') {
             $entry['decision'] = self::NEEDS_REVIEW;
+            $entry['reason_code'] = 'NO_DESCRIPTION';
             $entry['reason'] = __('An amount with nothing written against it');
 
             return $entry;
@@ -319,7 +330,11 @@ class AlphaExpenseImporter
             }
         }
 
-        return [config('alpha_expense_import.categories.fallback', 'other'), null, true];
+        return [
+            config('alpha_expense_import.categories.fallback', 'other'),
+            null,
+            (bool) config('alpha_expense_import.categories.fallback_review', false),
+        ];
     }
 
     /* ------------------------------------------------------------------

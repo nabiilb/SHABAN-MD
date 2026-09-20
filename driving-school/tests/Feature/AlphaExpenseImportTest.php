@@ -158,7 +158,7 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame('50.00', (string) CompanyExpense::sum('amount'));
     }
 
-    public function test_it_rules_on_nothing_it_cannot_read(): void
+    public function test_a_line_with_no_figure_is_skipped_rather_than_guessed_at(): void
     {
         $plan = $this->parse([
             ['Xiisbtii bisha hore taalay', ''],
@@ -166,7 +166,8 @@ class AlphaExpenseImportTest extends TestCase
         ]);
 
         foreach ($plan['entries'] as $entry) {
-            $this->assertSame(AlphaExpenseImporter::NEEDS_REVIEW, $entry['decision']);
+            $this->assertSame(AlphaExpenseImporter::SKIPPED_MISSING_AMOUNT, $entry['decision']);
+            $this->assertSame('MISSING_AMOUNT', $entry['reason_code']);
             $this->assertNotNull($entry['reason']);
         }
 
@@ -259,16 +260,21 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame('certificates', $plan['entries'][0]['category_code']);
     }
 
-    public function test_a_line_no_rule_matches_is_filed_under_other_and_flagged(): void
+    public function test_a_line_no_rule_matches_is_filed_under_other_and_imported_anyway(): void
     {
-        $plan = $this->parse([['dilaal', '50'], ['Qasaalad', '135']]);
+        $plan = $this->parse([['dilaal', '50'], ['Qasaalad', '135'], ['ADEEG', '30']]);
 
         foreach ($plan['entries'] as $entry) {
             $this->assertSame(AlphaExpenseImporter::IMPORT, $entry['decision']);
             $this->assertSame('other', $entry['category_code']);
             $this->assertNull($entry['category_rule']);
-            $this->assertTrue($entry['review']);
+            // Informal wording is not a reason to hold an expense back.
+            $this->assertFalse($entry['review']);
         }
+
+        $this->apply($plan);
+
+        $this->assertSame(3, CompanyExpense::count());
     }
 
     /* ------------------------------------------------------------------
@@ -286,7 +292,6 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame(1500.0, $entry['amount']);
         $this->assertSame('Gaari iib ah', $entry['description']);
         $this->assertSame('vehicle_purchase', $entry['category_code']);
-        $this->assertTrue($entry['review'], 'a purchase this size is shown before it is taken');
         $this->assertSame('1500 | Gaari iib ah', $entry['original']);
     }
 
@@ -485,7 +490,9 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame(128, $plan['rows_read']);
         $this->assertCount(3, $by(AlphaExpenseImporter::EXCLUDE_TOTAL));
         $this->assertCount(1, $by(AlphaExpenseImporter::EXCLUDE_INCOMING_MONEY));
-        $this->assertCount(2, $by(AlphaExpenseImporter::NEEDS_REVIEW));
+        $this->assertCount(2, $by(AlphaExpenseImporter::SKIPPED_MISSING_AMOUNT));
+        // Everything else the school has ruled on.
+        $this->assertCount(0, $by(AlphaExpenseImporter::NEEDS_REVIEW));
 
         $import = $by(AlphaExpenseImporter::IMPORT);
         $this->assertCount(140, $import);
