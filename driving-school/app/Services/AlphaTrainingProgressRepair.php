@@ -12,7 +12,7 @@ use Throwable;
  *
  * The register keeps the length of the course and the days still to run in two
  * different columns — "Mudadda" (Bil, 15Maalin) and the one Excel named
- * "Column1" (a completion word, or a number). Reading the first as the second,
+ * column I (a completion word, or a number). Reading the first as the second,
  * or the second as the first, leaves a student showing a full course still
  * ahead of them when most of it is behind.
  *
@@ -154,7 +154,7 @@ class AlphaTrainingProgressRepair
             'name' => $record['student']['full_name'],
             'phone' => $record['student']['phone'],
             'duration_raw' => $source['duration_raw'] ?? null,
-            'remaining_raw' => $source['column_one_raw'] ?? null,
+            'remaining_raw' => $source['remaining_raw'] ?? null,
             'student_id' => $record['existing_id'],
             'before' => null,
             'after' => null,
@@ -205,24 +205,46 @@ class AlphaTrainingProgressRepair
         // The register finished with this student. Nothing else about the row
         // matters: the model reads a completed student as nought remaining and
         // the whole course behind them.
-        if (($source['column_one_status'] ?? null) === Student::COMPLETED) {
-            if ($student->status !== Student::COMPLETED) {
-                $changes['status'] = Student::COMPLETED;
+        if (($source['remaining_status'] ?? null) === Student::COMPLETED) {
+            $finishing = $student->status !== Student::COMPLETED;
 
+            if ($finishing) {
+                $changes['status'] = Student::COMPLETED;
+            }
+
+            // Nothing left to run, said in the balance as well as in the
+            // status, so the two cannot come to disagree later.
+            if ($student->opening_remaining_days !== 0) {
+                $changes['opening_remaining_days'] = 0;
+            }
+
+            if (isset($changes['opening_remaining_days']) || $student->opening_remaining_from === null) {
+                $changes['opening_remaining_from'] = $this->baseline();
+            }
+
+            if ($changes === []) {
+                return [$changes, self::NO_CHANGE, null];
+            }
+
+            if ($finishing) {
                 return [$changes, self::MARK_COMPLETED, null];
             }
 
-            return [$changes, $changes === [] ? self::NO_CHANGE : self::UPDATE_REQUIRED, null];
+            return [
+                $changes,
+                isset($changes['required_training_days']) ? self::UPDATE_BOTH : self::UPDATE_REMAINING,
+                null,
+            ];
         }
 
-        $remaining = $source['column_one_remaining'] ?? null;
+        $remaining = $source['remaining_days'] ?? null;
 
         // A column that was written in but not understood — "5/" — is reported
         // and left alone. Reading it as five would be a guess at somebody's
         // course, and the wrong guess is invisible once it is saved.
-        if ($remaining === null && ($source['column_one_raw'] ?? null) !== null && ($source['column_one_status'] ?? null) === null) {
-            return [[], self::NEEDS_REVIEW, __('The remaining column reads ":value", which is neither a completion word nor a whole number', [
-                'value' => $source['column_one_raw'],
+        if ($remaining === null && ($source['remaining_raw'] ?? null) !== null && ($source['remaining_status'] ?? null) === null) {
+            return [[], self::NEEDS_REVIEW, __('Column I reads ":value", which is neither a completion word nor a whole number', [
+                'value' => $source['remaining_raw'],
             ])];
         }
 

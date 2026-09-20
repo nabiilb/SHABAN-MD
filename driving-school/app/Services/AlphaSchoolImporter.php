@@ -33,17 +33,25 @@ class AlphaSchoolImporter
     /** Rows that total a section rather than describe a student. */
     private const SUMMARY_NAMES = ['wadarta', 'wadarta guud', 'total'];
 
-    /** Excel column => what it holds. */
+    /**
+     * Excel column => the heading it carries, and what that heading means.
+     *
+     * The two that matter to a student's progress sit next to each other and
+     * say different things. H is how long the course is. I is how much of it
+     * is left, or that it is finished. Nothing else on the row is training
+     * days at all — G is money the student still owes, and has no business
+     * anywhere near this calculation.
+     */
     public const COLUMNS = [
-        'A' => 'TAARIIKHDA',
-        'B' => 'T/T/',
-        'C' => 'MAGACA SEDDEXEN',
-        'D' => 'LAMBARKA',
-        'E' => 'DEGMADA',
-        'F' => 'LACAGTA BAXSHEY',
-        'G' => 'LACAGTA HARAA',
-        'H' => 'Mudadda',
-        'I' => 'Column1',
+        'A' => 'TAARIIKHDA — start date',
+        'B' => 'T/T/ — register number',
+        'C' => 'MAGACA SEDDEXEN — full name',
+        'D' => 'LAMBARKA — phone',
+        'E' => 'DEGMADA — address',
+        'F' => 'LACAGTA BAXSHEY — money paid',
+        'G' => 'LACAGTA HARAA — money still owed (NOT training days)',
+        'H' => 'Mudadda — training duration, the required training days',
+        'I' => 'Column1 — remaining training days, or a completion word',
     ];
 
     /**
@@ -62,7 +70,7 @@ class AlphaSchoolImporter
             'dates_carried_forward' => [],
             'amounts_not_numeric' => [],
             'durations_not_understood' => [],
-            'column_one_not_understood' => [],
+            'remaining_not_understood' => [],
             'duplicates_in_file' => [],
             'years_out_of_step' => [],
             'dates_corrected_by_config' => [],
@@ -163,12 +171,13 @@ class AlphaSchoolImporter
                 $notices['durations_not_understood'][] = ['row' => $number, 'name' => $name, 'value' => $durationText];
             }
 
-            // Column1 says one of two things: that the student finished, or how
-            // many training days they have left. Anything else is reported.
-            [$status, $openingRemaining, $columnOneText] = $this->cleanColumnOne($cells['I'] ?? null);
+            // Column I says one of two things: that the student finished, or
+            // how many training days they have left. It is read on its own,
+            // never from column H — the length of a course is not a balance.
+            [$status, $openingRemaining, $remainingText] = $this->cleanRemaining($cells['I'] ?? null);
 
-            if ($columnOneText !== null && $status === null && $openingRemaining === null) {
-                $notices['column_one_not_understood'][] = ['row' => $number, 'name' => $name, 'value' => $columnOneText];
+            if ($remainingText !== null && $status === null && $openingRemaining === null) {
+                $notices['remaining_not_understood'][] = ['row' => $number, 'name' => $name, 'value' => $remainingText];
             }
 
             $existing = Student::withTrashed()->where('phone', $phone)->first();
@@ -187,9 +196,9 @@ class AlphaSchoolImporter
                 'source' => [
                     'duration_raw' => $durationText,
                     'duration_days' => $days,
-                    'column_one_raw' => $columnOneText,
-                    'column_one_status' => $status,
-                    'column_one_remaining' => $openingRemaining,
+                    'remaining_raw' => $remainingText,
+                    'remaining_status' => $status,
+                    'remaining_days' => $openingRemaining,
                 ],
                 'student' => [
                     'full_name' => $name,
@@ -205,7 +214,7 @@ class AlphaSchoolImporter
                     'opening_remaining_days' => $openingRemaining,
                     'opening_remaining_from' => $openingRemaining === null ? null : $this->openingDate(),
                     'total_fee' => round($paid + $remaining, 2),
-                    'notes' => $this->notes($number, $durationText, $paidNote, $columnOneText),
+                    'notes' => $this->notes($number, $durationText, $paidNote, $remainingText),
                     'email' => null,
                     'date_of_birth' => null,
                     'current_instructor_id' => null,
@@ -552,7 +561,7 @@ class AlphaSchoolImporter
      *
      * @return array{0: ?string, 1: ?int, 2: ?string} status, opening days, raw text
      */
-    protected function cleanColumnOne(mixed $value): array
+    protected function cleanRemaining(mixed $value): array
     {
         $text = $this->cleanText($value);
 
@@ -570,8 +579,10 @@ class AlphaSchoolImporter
             default => null,
         };
 
+        // A finished student has nothing left to run, and saying so in the
+        // balance as well as the status keeps the two from disagreeing.
         if ($status !== null) {
-            return [$status, null, $text];
+            return [$status, $status === Student::COMPLETED ? 0 : null, $text];
         }
 
         // A whole number of days, and nothing else in the cell. "5/" has a

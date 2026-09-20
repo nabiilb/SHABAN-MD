@@ -21,7 +21,7 @@ use Tests\TestCase;
  * attendance ledger is empty, so the arithmetic says the whole course is still
  * to run.
  *
- * The register's own Column1 answers it. A word — the school writes "complate"
+ * The register's own column I answers it. A word — the school writes "complate"
  * — means finished. A number means that many days are still to run, and it is
  * kept as an opening balance that new training counts down from. Nothing
  * historical is invented: the days before the import are represented by the
@@ -78,14 +78,14 @@ class OpeningRemainingDaysTest extends TestCase
         ]);
     }
 
-    /** Reads Column1 the way the importer does. */
-    private function columnOne(mixed $value): array
+    /** Reads column I the way the importer does. */
+    private function remainingColumn(mixed $value): array
     {
         $importer = new class extends AlphaSchoolImporter
         {
             public function read(mixed $value): array
             {
-                return $this->cleanColumnOne($value);
+                return $this->cleanRemaining($value);
             }
         };
 
@@ -93,31 +93,31 @@ class OpeningRemainingDaysTest extends TestCase
     }
 
     /* ================================================================
-     | 1 + 8 — reading Column1
+     | 1 + 8 — reading column I
      | ================================================================ */
 
     /** 1 — "complate", and the four other ways the school spells it. */
-    public function test_a_completed_word_in_column_one_finishes_the_student(): void
+    public function test_a_completed_word_in_column_i_finishes_the_student(): void
     {
         foreach (['complate', 'Complate', 'COMPLETE', 'completed', ' compleated ', 'dhameystiray'] as $written) {
-            [$status, $opening, $text] = $this->columnOne($written);
+            [$status, $opening, $text] = $this->remainingColumn($written);
 
             $this->assertSame('completed', $status, "Failed on: {$written}");
-            $this->assertNull($opening, 'A finished student has no opening balance to count down.');
+            $this->assertSame(0, $opening, 'A finished student has no days left to run.');
             $this->assertSame(trim($written), $text);
         }
 
-        $student = $this->imported(required: 30, openingRemaining: null, status: 'completed');
+        $student = $this->imported(required: 30, openingRemaining: 0, status: 'completed');
 
         $this->assertSame(0, $student->remaining_days);
         $this->assertSame(100.0, $student->progress_percentage);
     }
 
     /** 2 — a number is that many days still to run. */
-    public function test_a_number_in_column_one_is_the_remaining_days(): void
+    public function test_a_number_in_column_i_is_the_remaining_days(): void
     {
         foreach ([15, 14, 10, 5, 1, 0] as $days) {
-            [$status, $opening] = $this->columnOne((string) $days);
+            [$status, $opening] = $this->remainingColumn((string) $days);
 
             $this->assertNull($status, 'A number says nothing about status.');
             $this->assertSame($days, $opening);
@@ -133,10 +133,10 @@ class OpeningRemainingDaysTest extends TestCase
      * 8 — and anything else is reported rather than guessed. "5/" is in the
      * register once; reading it as five would invent a number out of a typo.
      */
-    public function test_an_unreadable_column_one_is_reported_not_guessed(): void
+    public function test_an_unreadable_column_i_is_reported_not_guessed(): void
     {
         foreach (['5/', '1 5', 'wili meydirin', '-3', '4.5'] as $written) {
-            [$status, $opening, $text] = $this->columnOne($written);
+            [$status, $opening, $text] = $this->remainingColumn($written);
 
             $this->assertNull($status, "Failed on: {$written}");
             $this->assertNull($opening, "{$written} must not be read as a number of days.");
@@ -145,7 +145,7 @@ class OpeningRemainingDaysTest extends TestCase
 
         // The real workbook, which holds exactly one such row.
         $plan = app(AlphaSchoolImporter::class)->parse(config('alpha_school_import.file'), 'Sheet1');
-        $reported = collect($plan['notices']['column_one_not_understood']);
+        $reported = collect($plan['notices']['remaining_not_understood']);
 
         $this->assertCount(1, $reported);
         $this->assertSame('5/', $reported->first()['value']);
@@ -164,20 +164,34 @@ class OpeningRemainingDaysTest extends TestCase
         $valid = collect($plan['records'])->where('action', '!=', 'skip');
 
         $completed = $valid->filter(fn ($r) => $r['student']['status'] === 'completed');
-        $withOpening = $valid->filter(fn ($r) => $r['student']['opening_remaining_days'] !== null);
+        $fromANumber = $valid->filter(fn ($r) => ($r['source']['remaining_days'] ?? null) !== null
+            && $r['source']['remaining_status'] === null);
 
         $this->assertSame(136, $valid->count(), 'The valid-row count must not move.');
         $this->assertSame(40, $completed->count(), 'Every "complate" row that survives becomes completed.');
 
-        // This workbook carries no numeric Column1 at all — 98 blank, 42
-        // "complate", one "5/" — so no opening balance is set from it. The rule
-        // is built and proved above; this row records what the file holds.
-        $this->assertSame(0, $withOpening->count());
+        // This workbook carries no number in column I at all — 98 blank, 42
+        // "complate", one "5/" — so not one balance in it was read from a
+        // figure. The rule is built and proved above; this records what the
+        // file actually holds, and is the line that would move the day the
+        // school fills the column in.
+        $this->assertSame(0, $fromANumber->count());
 
-        // A completed row carries no opening balance, and keeps its duration.
+        // Column H is never the source of a balance: every required day count
+        // read from the register is a course length and nothing else.
+        foreach ($valid as $record) {
+            if (($record['source']['remaining_status'] ?? null) === null) {
+                continue;
+            }
+
+            $this->assertSame(0, $record['student']['opening_remaining_days'],
+                'A finished student has nought left to run, not their course length.');
+        }
+
+        // A completed row is finished, not part way through, and keeps the
+        // course length column H gave it.
         $sample = $completed->first()['student'];
-        $this->assertNull($sample['opening_remaining_days']);
-        $this->assertNull($sample['opening_remaining_from']);
+        $this->assertSame(0, $sample['opening_remaining_days']);
         $this->assertGreaterThan(0, $sample['required_training_days']);
     }
 

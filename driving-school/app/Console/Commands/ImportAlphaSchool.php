@@ -136,7 +136,7 @@ class ImportAlphaSchool extends Command
             'dates_carried_forward' => 'Rows with no date, given the date of the row above',
             'amounts_not_numeric' => 'Amounts that were not plain numbers (the figure was taken, the words kept in notes)',
             'durations_not_understood' => 'Durations left at the school default (the words are kept in notes)',
-            'column_one_not_understood' => 'Column1 was neither "complate" nor a number of days (left active, no opening balance)',
+            'remaining_not_understood' => 'Column I was neither "complate" nor a number of days (left active, no opening balance)',
             'duplicates_in_file' => 'Rows sharing a phone number with an earlier row',
             'years_out_of_step' => 'Dates whose year is not the register\'s year — check these for a slip of the pen',
             'dates_corrected_by_config' => 'Dates corrected by config/alpha_school_import.php',

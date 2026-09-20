@@ -17,7 +17,7 @@ use ZipArchive;
  * Repairing the two training columns on students already imported.
  *
  * The register keeps the length of the course and the days still to run apart,
- * in "Mudadda" and in the column Excel named "Column1", and the whole point of
+ * in column H ("Mudadda") and column I, and the whole point of
  * these is that one is never read as the other: a blank remaining column must
  * not hand a student their own course length back as a balance, and a course
  * length must never be mistaken for days left.
@@ -100,6 +100,64 @@ class AlphaTrainingProgressRepairTest extends TestCase
         $this->assertSame(15, $student->effective_completed_days);
         $this->assertSame(100.0, $student->progress_percentage);
         $this->assertSame(0, Attendance::count());
+    }
+
+    /**
+     * The shape of the production mismatch, stated on its own.
+     *
+     * Column H and column I are both present and say different things. The
+     * balance has to come from I. If it ever comes from H the student shows a
+     * whole course still ahead of them, which is the symptom that started
+     * this.
+     */
+    public function test_column_h_is_never_written_into_the_remaining_balance(): void
+    {
+        $pairs = [
+            // [duration in H, remaining in I, required, remaining, completed, progress]
+            ['15Maalin', '10', 15, 10, 5, 33.3],
+            ['15 Maalin', '9', 15, 9, 6, 40.0],
+            ['Bil', '13', 30, 13, 17, 56.7],
+            ['Bil', '4', 30, 4, 26, 86.7],
+            ['10Maalin', '7', 10, 7, 3, 30.0],
+            ['20 maalin', '5', 20, 5, 15, 75.0],
+        ];
+
+        foreach ($pairs as $index => [$h, $i, $required, $remaining, $completed, $progress]) {
+            $phone = '61400000'.$index;
+            $student = $this->student('Student '.$index, $phone, ['required_training_days' => 24]);
+
+            $this->repair([['Student '.$index, $phone, $h, $i]]);
+
+            $student->refresh();
+            $where = "H={$h} I={$i}";
+
+            $this->assertSame($required, $student->required_training_days, "{$where}: H is the course length");
+            $this->assertSame($remaining, $student->opening_remaining_days, "{$where}: I is the balance");
+            $this->assertSame($remaining, $student->remaining_days, $where);
+            $this->assertSame($completed, $student->effective_completed_days, $where);
+            $this->assertSame($progress, $student->progress_percentage, $where);
+            $this->assertNotSame(
+                $student->required_training_days,
+                $student->remaining_days,
+                "{$where}: the course length has been handed back as the balance",
+            );
+        }
+    }
+
+    public function test_the_completion_word_leaves_nothing_left_to_run(): void
+    {
+        $student = $this->student('Sumayo Sharif Maxamed', '615111333');
+
+        $this->repair([['Sumayo Sharif Maxamed', '615111333', 'Bil', 'complate']]);
+
+        $student->refresh();
+
+        $this->assertSame('completed', $student->status);
+        $this->assertSame(0, $student->opening_remaining_days, 'not the course length, and not null');
+        $this->assertSame(30, $student->required_training_days);
+        $this->assertSame(0, $student->remaining_days);
+        $this->assertSame(30, $student->effective_completed_days);
+        $this->assertSame(100.0, $student->progress_percentage);
     }
 
     public function test_a_blank_remaining_column_never_becomes_the_course_length(): void
