@@ -49,6 +49,9 @@ const ALLOWED = [
     'cache-clear' => ['optimize:clear', [], 'Clear every cache (config, route, view, events)', false],
     'config-cache' => ['config:cache', [], 'Rebuild the config cache', false],
 
+    'workbook-diagnostic' => ['alpha-school:diagnose-workbook', [],
+        'Which workbook is being read, and what is in column I — reads only', false],
+
     'student-import-dry-run' => ['alpha-school:import', ['--dry-run' => true],
         'Register import — report only, writes nothing', false],
 

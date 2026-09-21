@@ -632,6 +632,12 @@ class AlphaSchoolImporter
             'action' => 'skip',
             'reason' => $reason,
             'existing_id' => null,
+            // The same shape an accepted row has, so anything reading a plan
+            // does not have to know which kind of record it is holding.
+            'source' => [
+                'duration_raw' => null, 'duration_days' => null,
+                'remaining_raw' => null, 'remaining_status' => null, 'remaining_days' => null,
+            ],
             'student' => ['full_name' => $name, 'phone' => $phone],
             'payment' => null,
         ];

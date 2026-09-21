@@ -74,6 +74,7 @@ class AlphaTrainingProgressRepair
 
         return [
             'source' => $path,
+            'sheet' => $sheet ?: config('alpha_school_import.sheet', 'Sheet1'),
             'rows_read' => $parsed['rows_read'],
             'blank' => $parsed['blank'],
             'rows' => $rows,

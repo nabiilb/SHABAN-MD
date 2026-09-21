@@ -144,6 +144,18 @@ class RepairAlphaTrainingProgress extends Command
         $this->newLine();
         $this->heading($dryRun ? 'ALPHA REQUIRED vs REMAINING REPAIR — DRY RUN' : 'ALPHA REQUIRED vs REMAINING REPAIR');
 
+        // Which file this actually was. A report that does not say cannot
+        // be told apart from the same report over yesterday's copy.
+        $this->line(sprintf('Workbook:                           %s', $plan['source'] ?? '(unknown)'));
+
+        if (isset($plan['source']) && is_readable($plan['source'])) {
+            $this->line(sprintf('  size / modified:                  %s bytes, %s',
+                number_format(filesize($plan['source'])), date('Y-m-d H:i:s', filemtime($plan['source']))));
+            $this->line(sprintf('  SHA-256:                          %s', hash_file('sha256', $plan['source'])));
+        }
+
+        $this->line(sprintf('Sheet:                              %s', $plan['sheet'] ?? '(default)'));
+        $this->newLine();
         $this->line(sprintf('Rows read from the register:        %d', $plan['rows_read']));
         $this->line(sprintf('Blank rows:                         %d', $plan['blank']));
         $this->line(sprintf('Valid source students:              %d', count($rows)));

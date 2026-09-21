@@ -50,15 +50,41 @@ class XlsxReader
             }
 
             $rows = [];
+            $previous = 0;
 
             foreach ($xml->sheetData->row as $row) {
+                // Excel numbers every row and references every cell, but it is
+                // not the only thing that writes these files. Export a sheet
+                // from Google Sheets, save it headless through LibreOffice, or
+                // write it with a script, and the r attributes can be left off
+                // entirely, because position alone is unambiguous. Reading
+                // those as row nought, column "", loses the whole row.
                 $number = (int) $row['r'];
                 $cells = [];
+                $index = 0;
 
                 foreach ($row->c as $cell) {
-                    [$column] = self::splitReference((string) $cell['r']);
+                    [$column, $cellRow] = self::splitReference((string) $cell['r']);
+
+                    // An unnumbered row still knows where it is if any of its
+                    // cells were referenced; only when nothing says otherwise
+                    // does it fall back to following the row above.
+                    if ($number === 0 && $cellRow > 0) {
+                        $number = $cellRow;
+                    }
+
+                    if ($column === '') {
+                        $column = self::columnName($index + 1);
+                    } else {
+                        $index = self::columnIndex($column) - 1;
+                    }
+
                     $cells[$column] = self::value($cell, $strings, $dateStyles);
+                    $index++;
                 }
+
+                $number = $number ?: $previous + 1;
+                $previous = $number;
 
                 $rows[$number] = $cells;
             }
@@ -85,6 +111,86 @@ class XlsxReader
         }
     }
 
+    /**
+     * One cell exactly as the file has it, beside what rows() makes of it.
+     *
+     * For when a column reads as empty and the person looking at the same
+     * spreadsheet can plainly see a number in it. The two answers usually
+     * differ for a reason the file will admit to: a formula with no cached
+     * result, a number wearing a date format, a value that is really text.
+     *
+     * @return array{found: bool, reference: string, type: string, style: string, formula: string|null, raw: string|null, value: string|float|null, is_date_style: bool}
+     */
+    public static function describeCell(string $path, ?string $sheetName, string $reference): array
+    {
+        [$wantColumn, $wantRow] = self::splitReference($reference);
+
+        $absent = [
+            'found' => false, 'reference' => $reference, 'type' => '', 'style' => '',
+            'formula' => null, 'raw' => null, 'value' => null, 'is_date_style' => false,
+        ];
+
+        $zip = new ZipArchive;
+
+        if ($zip->open($path) !== true) {
+            throw new RuntimeException("{$path} is not a readable .xlsx file.");
+        }
+
+        try {
+            $strings = self::sharedStrings($zip);
+            $dateStyles = self::dateStyles($zip);
+            $xml = self::xml($zip, self::sheetPath($zip, $sheetName));
+
+            if (! $xml) {
+                return $absent;
+            }
+
+            $previous = 0;
+
+            foreach ($xml->sheetData->row as $row) {
+                $number = (int) $row['r'];
+                $index = 0;
+
+                foreach ($row->c as $cell) {
+                    [$column, $cellRow] = self::splitReference((string) $cell['r']);
+
+                    if ($number === 0 && $cellRow > 0) {
+                        $number = $cellRow;
+                    }
+
+                    if ($column === '') {
+                        $column = self::columnName($index + 1);
+                    } else {
+                        $index = self::columnIndex($column) - 1;
+                    }
+
+                    $index++;
+
+                    if (($number ?: $previous + 1) !== $wantRow || $column !== $wantColumn) {
+                        continue;
+                    }
+
+                    return [
+                        'found' => true,
+                        'reference' => $column.$wantRow,
+                        'type' => (string) $cell['t'] ?: 'n (number, implied)',
+                        'style' => (string) $cell['s'],
+                        'formula' => isset($cell->f) ? (string) $cell->f : null,
+                        'raw' => isset($cell->v) ? (string) $cell->v : null,
+                        'value' => self::value($cell, $strings, $dateStyles),
+                        'is_date_style' => in_array((int) $cell['s'], $dateStyles, true),
+                    ];
+                }
+
+                $previous = $number ?: $previous + 1;
+            }
+
+            return $absent;
+        } finally {
+            $zip->close();
+        }
+    }
+
     protected static function value(SimpleXMLElement $cell, array $strings, array $dateStyles): string|float|null
     {
         $type = (string) $cell['t'];
@@ -100,6 +206,17 @@ class XlsxReader
         $raw = (string) $cell->v;
 
         if ($raw === '') {
+            // A formula whose result was never cached. Excel always writes the
+            // last calculated value beside the formula, but a writer that does
+            // not calculate — a script, or a sheet exported from elsewhere —
+            // writes the formula alone. Returning null there would report a
+            // cell somebody filled in as empty, which is the one answer that
+            // is certainly wrong, so the formula comes back as written and is
+            // reported as unreadable further up.
+            if (isset($cell->f)) {
+                return '='.trim((string) $cell->f);
+            }
+
             return null;
         }
 
@@ -247,12 +364,38 @@ class XlsxReader
         return $text;
     }
 
-    /** "B12" => ["B", 12] */
+    /** "B12" => ["B", 12]. Lower case is legal in the file, if unusual. */
     protected static function splitReference(string $reference): array
     {
-        preg_match('/^([A-Z]+)(\d+)$/', $reference, $matches);
+        preg_match('/^([A-Za-z]+)(\d+)$/', trim($reference), $matches);
 
-        return [$matches[1] ?? '', (int) ($matches[2] ?? 0)];
+        return [strtoupper($matches[1] ?? ''), (int) ($matches[2] ?? 0)];
+    }
+
+    /** 1 => "A", 27 => "AA". */
+    protected static function columnName(int $index): string
+    {
+        $name = '';
+
+        while ($index > 0) {
+            $index--;
+            $name = chr(65 + $index % 26).$name;
+            $index = intdiv($index, 26);
+        }
+
+        return $name;
+    }
+
+    /** "A" => 1, "AA" => 27. */
+    protected static function columnIndex(string $name): int
+    {
+        $index = 0;
+
+        foreach (str_split(strtoupper($name)) as $letter) {
+            $index = $index * 26 + (ord($letter) - 64);
+        }
+
+        return $index;
     }
 
     protected static function xml(ZipArchive $zip, string $path): ?SimpleXMLElement
