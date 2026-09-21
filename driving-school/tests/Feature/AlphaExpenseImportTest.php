@@ -49,7 +49,7 @@ class AlphaExpenseImportTest extends TestCase
 
         $entry = $plan['entries'][0];
 
-        $this->assertSame(AlphaExpenseImporter::IMPORT, $entry['decision']);
+        $this->assertSame(AlphaExpenseImporter::IMPORT_EXPENSE, $entry['decision']);
         $this->assertSame('shidaal geyr', $entry['description']);
         $this->assertSame(52.0, $entry['amount']);
         $this->assertSame('fuel', $entry['category_code']);
@@ -90,26 +90,13 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame('2026-08-12', $plan['entries'][0]['date']);
     }
 
-    public function test_it_keeps_the_words_written_beside_an_amount(): void
-    {
-        $plan = $this->parse([['Sakariye', '4.5 bajaj']]);
-
-        $entry = $plan['entries'][0];
-
-        $this->assertSame(4.5, $entry['amount']);
-        $this->assertSame('Sakariye', $entry['description']);
-        $this->assertSame('Sakariye | 4.5 bajaj', $entry['original']);
-        // The words say what the money was for, so they choose the category.
-        $this->assertSame('transport', $entry['category_code']);
-    }
-
     public function test_the_same_expense_written_twice_is_imported_twice(): void
     {
         $plan = $this->parse([['Shidaal', '50'], ['Shidaal', '50']]);
 
         $this->assertCount(2, $plan['entries']);
-        $this->assertSame(AlphaExpenseImporter::IMPORT, $plan['entries'][0]['decision']);
-        $this->assertSame(AlphaExpenseImporter::IMPORT, $plan['entries'][1]['decision']);
+        $this->assertSame(AlphaExpenseImporter::IMPORT_EXPENSE, $plan['entries'][0]['decision']);
+        $this->assertSame(AlphaExpenseImporter::IMPORT_EXPENSE, $plan['entries'][1]['decision']);
         $this->assertNotSame($plan['entries'][0]['reference'], $plan['entries'][1]['reference']);
 
         $this->apply($plan);
@@ -134,10 +121,10 @@ class AlphaExpenseImportTest extends TestCase
         $decisions = array_column($plan['entries'], 'decision');
 
         $this->assertSame([
-            AlphaExpenseImporter::IMPORT,
-            AlphaExpenseImporter::EXCLUDE_TOTAL,
-            AlphaExpenseImporter::EXCLUDE_TOTAL,
-            AlphaExpenseImporter::EXCLUDE_TOTAL,
+            AlphaExpenseImporter::IMPORT_EXPENSE,
+            AlphaExpenseImporter::SKIP_TOTAL,
+            AlphaExpenseImporter::SKIP_TOTAL,
+            AlphaExpenseImporter::SKIP_TOTAL,
         ], $decisions);
 
         $this->apply($plan);
@@ -151,7 +138,7 @@ class AlphaExpenseImportTest extends TestCase
     {
         $plan = $this->parse([['Deyn soo xarootay', '220'], ['Shidaal', '50']]);
 
-        $this->assertSame(AlphaExpenseImporter::EXCLUDE_INCOMING_MONEY, $plan['entries'][0]['decision']);
+        $this->assertSame(AlphaExpenseImporter::NEEDS_REVIEW, $plan['entries'][0]['decision']);
 
         $this->apply($plan);
 
@@ -166,11 +153,11 @@ class AlphaExpenseImportTest extends TestCase
             ['Geyr 10/8', ''],
         ]);
 
-        foreach ($plan['entries'] as $entry) {
-            $this->assertSame(AlphaExpenseImporter::SKIPPED_MISSING_AMOUNT, $entry['decision']);
-            $this->assertSame('MISSING_AMOUNT', $entry['reason_code']);
-            $this->assertNotNull($entry['reason']);
-        }
+        // A heading and a line whose figure was never written are different
+        // problems and are reported as different problems.
+        $this->assertSame(AlphaExpenseImporter::SKIP_HEADING, $plan['entries'][0]['decision']);
+        $this->assertSame(AlphaExpenseImporter::INVALID, $plan['entries'][1]['decision']);
+        $this->assertSame('MISSING_AMOUNT', $plan['entries'][1]['reason_code']);
 
         $this->apply($plan);
 
@@ -180,31 +167,6 @@ class AlphaExpenseImportTest extends TestCase
     /* ------------------------------------------------------------------
        Categories
        ------------------------------------------------------------------ */
-
-    public function test_informal_and_personal_looking_lines_are_expenses_like_any_other(): void
-    {
-        $lines = [
-            ['Aabbe', '15'], ['Ayeeyo', '50'], ['Kaafiya', '16'], ['nuuro', '50'],
-            ['Abdullahi', '2'], ['Sakariye', '13'], ['Siciid', '50'], ['yaxye', '10'],
-            ['Liibaan', '45'], ['Macalinka quranka', '25'], ['Kabo abdalle', '10'],
-            ['qado', '1.31'], ['Abdullhi', '2.5 qurac'], ['Marti', '12'],
-            ['Adeeg guri', '55'], ['Internet guri', '23'],
-        ];
-
-        $plan = $this->parse($lines);
-
-        foreach ($plan['entries'] as $entry) {
-            $this->assertSame(
-                AlphaExpenseImporter::IMPORT,
-                $entry['decision'],
-                "{$entry['original']} should be imported as an expense",
-            );
-        }
-
-        $this->apply($plan);
-
-        $this->assertSame(count($lines), CompanyExpense::count());
-    }
 
     public function test_it_files_fuel_as_fuel_however_it_is_spelled(): void
     {
@@ -216,16 +178,6 @@ class AlphaExpenseImportTest extends TestCase
         foreach ($plan['entries'] as $entry) {
             $this->assertSame('fuel', $entry['category_code'], $entry['original']);
             $this->assertFalse($entry['review'], $entry['original'].' names the fuel outright');
-        }
-    }
-
-    public function test_a_line_that_only_names_a_vehicle_is_filed_as_fuel_but_flagged(): void
-    {
-        $plan = $this->parse([['Otomatic hore', '25'], ['geyr', '25']]);
-
-        foreach ($plan['entries'] as $entry) {
-            $this->assertSame('fuel', $entry['category_code']);
-            $this->assertTrue($entry['review'], 'the column it sits in is the only thing saying fuel');
         }
     }
 
@@ -247,7 +199,9 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame([
             'vehicle_repair', 'vehicle_repair', 'vehicle_repair', 'vehicle_repair',
             'garage_service',
-            'car_wash', 'car_wash',
+            'car_wash',
+            // "Dhaqid 7.5" names no vehicle, so it is a question, not a wash.
+            null,
             'oil_change', 'oil_change',
             'spare_parts',
         ], array_column($plan['entries'], 'category_code'));
@@ -261,54 +215,9 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame('certificates', $plan['entries'][0]['category_code']);
     }
 
-    public function test_a_line_no_rule_matches_is_filed_under_other_and_imported_anyway(): void
-    {
-        $plan = $this->parse([['dilaal', '50'], ['Qasaalad', '135'], ['ADEEG', '30']]);
-
-        foreach ($plan['entries'] as $entry) {
-            $this->assertSame(AlphaExpenseImporter::IMPORT, $entry['decision']);
-            $this->assertSame('other', $entry['category_code']);
-            $this->assertNull($entry['category_rule']);
-            // Informal wording is not a reason to hold an expense back.
-            $this->assertFalse($entry['review']);
-        }
-
-        $this->apply($plan);
-
-        $this->assertSame(3, CompanyExpense::count());
-    }
-
     /* ------------------------------------------------------------------
        Buying a vehicle
        ------------------------------------------------------------------ */
-
-    public function test_it_imports_the_vehicle_purchase_written_the_other_way_round(): void
-    {
-        // The ledger has the amount in the description column for this one.
-        $plan = $this->parse([['1500', 'Gaari iib ah']]);
-
-        $entry = $plan['entries'][0];
-
-        $this->assertSame(AlphaExpenseImporter::IMPORT, $entry['decision']);
-        $this->assertSame(1500.0, $entry['amount']);
-        $this->assertSame('Gaari iib ah', $entry['description']);
-        $this->assertSame('vehicle_purchase', $entry['category_code']);
-        $this->assertSame('1500 | Gaari iib ah', $entry['original']);
-    }
-
-    public function test_buying_a_vehicle_creates_an_expense_and_touches_no_vehicle_record(): void
-    {
-        $before = Vehicle::withTrashed()->count();
-
-        $this->apply($this->parse([['1500', 'Gaari iib ah']]));
-
-        $expense = CompanyExpense::sole();
-
-        $this->assertSame('1500.00', $expense->amount);
-        $this->assertSame('vehicle_purchase', $expense->category->code);
-        $this->assertNull($expense->vehicle_id);
-        $this->assertSame($before, Vehicle::withTrashed()->count());
-    }
 
     /* ------------------------------------------------------------------
        Dates and wording
@@ -393,7 +302,7 @@ class AlphaExpenseImportTest extends TestCase
 
         $this->assertSame(0, $exitCode);
         $this->assertStringContainsString('IMPORT COMPLETE', Artisan::output());
-        $this->assertSame(140, CompanyExpense::count());
+        $this->assertSame(47, CompanyExpense::count());
     }
 
     public function test_the_real_import_refuses_to_run_without_being_asked(): void
@@ -422,8 +331,8 @@ class AlphaExpenseImportTest extends TestCase
         $first = CompanyExpense::count();
         $total = (string) CompanyExpense::sum('amount');
 
-        $this->assertSame(140, $first);
-        $this->assertSame('5965.64', $total);
+        $this->assertSame(47, $first);
+        $this->assertSame('1838.03', $total);
 
         $this->artisan('alpha:import-expenses', [
             'file' => $this->document, '--confirm' => true, '--preview' => 1,
@@ -453,28 +362,14 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame(2, CompanyExpense::count());
     }
 
-    public function test_it_reuses_the_categories_the_school_already_has(): void
-    {
-        $fuel = ExpenseCategory::where('code', 'fuel')->sole();
-
-        $this->apply($this->parse([['Shidaal', '50'], ['Aabbe', '15']]));
-
-        // No second "Fuel", "fuel" or "Shidaal" category beside the first.
-        $this->assertSame(1, ExpenseCategory::where('code', 'fuel')->count());
-        $this->assertSame($fuel->id, CompanyExpense::where('description', 'Shidaal')->value('expense_category_id'));
-        $this->assertSame('Fuel', $fuel->fresh()->name);
-
-        // The one the school did not have is created through the same model.
-        $this->assertSame('Home & General Support', ExpenseCategory::where('code', 'home_support')->value('name'));
-    }
-
     public function test_imported_expenses_count_towards_the_dashboard_totals(): void
     {
         $this->apply($this->parse([['Shidaal', '50'], ['Aabbe', '15']]));
 
         $metrics = app(DashboardService::class)->adminMetrics();
 
-        $this->assertSame(65.0, $metrics['total_expenses']);
+        // Only the fuel line is a safe business expense; "Aabbe 15" is held.
+        $this->assertSame(50.0, $metrics['total_expenses']);
     }
 
     /* ------------------------------------------------------------------
@@ -492,15 +387,14 @@ class AlphaExpenseImportTest extends TestCase
         ));
 
         $this->assertSame(128, $plan['rows_read']);
-        $this->assertCount(3, $by(AlphaExpenseImporter::EXCLUDE_TOTAL));
-        $this->assertCount(1, $by(AlphaExpenseImporter::EXCLUDE_INCOMING_MONEY));
-        $this->assertCount(2, $by(AlphaExpenseImporter::SKIPPED_MISSING_AMOUNT));
-        // Everything else the school has ruled on.
-        $this->assertCount(0, $by(AlphaExpenseImporter::NEEDS_REVIEW));
+        $this->assertCount(3, $by(AlphaExpenseImporter::SKIP_TOTAL));
+        $this->assertCount(1, $by(AlphaExpenseImporter::INVALID));
+        $this->assertCount(1, $by(AlphaExpenseImporter::SKIP_HEADING));
+        $this->assertCount(94, $by(AlphaExpenseImporter::NEEDS_REVIEW));
 
-        $import = $by(AlphaExpenseImporter::IMPORT);
-        $this->assertCount(140, $import);
-        $this->assertSame(5965.64, round(array_sum(array_column($import, 'amount')), 2));
+        $import = $by(AlphaExpenseImporter::IMPORT_EXPENSE);
+        $this->assertCount(47, $import);
+        $this->assertSame(1838.03, round(array_sum(array_column($import, 'amount')), 2));
 
         // Nothing is imported without an amount, a description or a category.
         foreach ($import as $entry) {

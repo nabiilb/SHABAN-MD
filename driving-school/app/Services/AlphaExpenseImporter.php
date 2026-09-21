@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\ImportNotPersisted;
 use App\Models\CompanyExpense;
 use App\Models\ExpenseCategory;
 use App\Models\User;
@@ -30,17 +31,30 @@ use Throwable;
  */
 class AlphaExpenseImporter
 {
-    public const IMPORT = 'IMPORT';
+    public const IMPORT_EXPENSE = 'IMPORT_EXPENSE';
 
-    public const EXCLUDE_TOTAL = 'EXCLUDE_TOTAL';
+    /**
+     * Never used, and kept so the report can say why.
+     *
+     * A fuel record needs a vehicle, a number of litres and a price per litre,
+     * none of which is nullable and none of which the ledger writes down. It
+     * also carries company_expense_id, because FuelService posts the expense
+     * when a record is approved and the dashboard counts fuel through that
+     * expense — so a fuel line imported here belongs in company_expenses under
+     * the fuel category, exactly where it is put. Creating both would count
+     * the same tank twice.
+     */
+    public const IMPORT_FUEL = 'IMPORT_FUEL';
 
-    public const EXCLUDE_INCOMING_MONEY = 'EXCLUDE_INCOMING_MONEY';
-
-    public const SKIPPED_MISSING_AMOUNT = 'SKIPPED_MISSING_AMOUNT';
+    public const DUPLICATE = 'DUPLICATE';
 
     public const NEEDS_REVIEW = 'NEEDS_REVIEW';
 
-    public const ALREADY_IMPORTED = 'ALREADY_IMPORTED';
+    public const SKIP_TOTAL = 'SKIP_TOTAL';
+
+    public const SKIP_HEADING = 'SKIP_HEADING';
+
+    public const INVALID = 'INVALID';
 
     /**
      * Reads the document and decides what would happen to every line of it.
@@ -106,8 +120,8 @@ class AlphaExpenseImporter
         $imported = $this->importedReferences();
 
         $plan['entries'] = array_map(function (array $entry) use ($imported) {
-            if ($entry['decision'] === self::IMPORT && isset($imported[$entry['reference']])) {
-                $entry['decision'] = self::ALREADY_IMPORTED;
+            if ($entry['decision'] === self::IMPORT_EXPENSE && isset($imported[$entry['reference']])) {
+                $entry['decision'] = self::DUPLICATE;
                 $entry['reason'] = __('Already on file as :number', ['number' => $imported[$entry['reference']]]);
             }
 
@@ -130,58 +144,131 @@ class AlphaExpenseImporter
      */
     public function apply(array $plan, ?User $actor = null): array
     {
-        return DB::transaction(function () use ($plan, $actor) {
-            $result = [
-                'created' => 0,
-                'already' => 0,
-                'skipped' => 0,
-                'categories_created' => [],
-                'failures' => [],
-                'total' => 0.0,
-            ];
+        [$result, $written] = DB::transaction(fn () => $this->write($plan, $actor));
 
-            $categories = $this->resolveCategories($plan, $result);
-            $imported = $this->importedReferences();
+        // Committed by here, and read back through the query builder rather
+        // than through the models that were just told. A count of create()
+        // calls is not a count of rows on file.
+        $missed = $this->unpersisted($written);
 
-            foreach ($plan['entries'] as $entry) {
-                if (! in_array($entry['decision'], [self::IMPORT, self::ALREADY_IMPORTED], true)) {
-                    $result['skipped']++;
+        if ($missed !== []) {
+            throw new ImportNotPersisted($missed);
+        }
 
-                    continue;
-                }
+        $result['created'] = count($written);
+        $result['verified'] = count($written);
+        $result['total'] = round(array_sum(array_column($written, 'amount')), 2);
 
-                if (isset($imported[$entry['reference']])) {
-                    $result['already']++;
+        return $result;
+    }
 
-                    continue;
-                }
+    /**
+     * The writing half, inside the transaction.
+     *
+     * @param  array<string, mixed>  $plan
+     * @return array{0: array<string, mixed>, 1: array<int, array<string, mixed>>}
+     */
+    protected function write(array $plan, ?User $actor): array
+    {
+        $result = [
+            'created' => 0,
+            'verified' => 0,
+            'already' => 0,
+            'skipped' => 0,
+            'categories_created' => [],
+            'failures' => [],
+            'total' => 0.0,
+        ];
 
-                try {
-                    $expense = CompanyExpense::create([
-                        'expense_number' => DocumentNumber::next(CompanyExpense::class, 'expense_number', 'EXP'),
-                        'expense_category_id' => $categories[$entry['category_code']],
-                        'description' => mb_substr($entry['description'], 0, 200),
-                        'amount' => $entry['amount'],
-                        'expense_date' => $entry['date'],
-                        'payment_method' => config('alpha_expense_import.payment_method', 'cash'),
-                        'notes' => $this->notes($entry, $plan),
-                        'created_by' => $actor?->id,
-                    ]);
+        $categories = $this->resolveCategories($plan, $result);
+        $imported = $this->importedReferences();
+        $written = [];
 
-                    $imported[$entry['reference']] = $expense->expense_number;
-                    $result['created']++;
-                    $result['total'] = round($result['total'] + (float) $entry['amount'], 2);
-                } catch (Throwable $e) {
-                    $result['failures'][] = [
-                        'reference' => $entry['reference'],
-                        'description' => $entry['description'],
-                        'reason' => $e->getMessage(),
-                    ];
-                }
+        foreach ($plan['entries'] as $entry) {
+            if (! in_array($entry['decision'], [self::IMPORT_EXPENSE, self::DUPLICATE], true)) {
+                $result['skipped']++;
+
+                continue;
             }
 
-            return $result;
-        });
+            if (isset($imported[$entry['reference']])) {
+                $result['already']++;
+
+                continue;
+            }
+
+            try {
+                $expense = CompanyExpense::create([
+                    'expense_number' => DocumentNumber::next(CompanyExpense::class, 'expense_number', 'EXP'),
+                    'expense_category_id' => $categories[$entry['category_code']],
+                    'description' => mb_substr($entry['description'], 0, 200),
+                    'amount' => $entry['amount'],
+                    'expense_date' => $entry['date'],
+                    'payment_method' => config('alpha_expense_import.payment_method', 'cash'),
+                    'notes' => $this->notes($entry, $plan),
+                    'created_by' => $actor?->id,
+                ]);
+
+                $imported[$entry['reference']] = $expense->expense_number;
+
+                $written[$expense->getKey()] = [
+                    'reference' => $entry['reference'],
+                    'amount' => (float) $entry['amount'],
+                    'category_code' => $entry['category_code'],
+                ];
+            } catch (Throwable $e) {
+                $result['failures'][] = [
+                    'reference' => $entry['reference'],
+                    'description' => $entry['description'],
+                    'reason' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return [$result, $written];
+    }
+
+    /**
+     * The rows that are not on file with the amount and marker they were
+     * written with.
+     *
+     * @param  array<int, array<string, mixed>>  $written
+     * @return array<int, array<string, mixed>>
+     */
+    protected function unpersisted(array $written): array
+    {
+        if ($written === []) {
+            return [];
+        }
+
+        $missed = [];
+
+        foreach (array_chunk($written, 200, true) as $chunk) {
+            $onFile = DB::table('company_expenses')
+                ->whereIn('id', array_keys($chunk))
+                ->get(['id', 'amount', 'notes'])
+                ->keyBy('id');
+
+            foreach ($chunk as $id => $expected) {
+                $row = $onFile->get($id);
+
+                if ($row === null) {
+                    $missed[] = ['id' => $id, 'field' => 'row', 'expected' => $expected['reference'], 'actual' => '(no such row)'];
+
+                    continue;
+                }
+
+                if (round((float) $row->amount, 2) !== round($expected['amount'], 2)) {
+                    $missed[] = ['id' => $id, 'field' => 'amount', 'expected' => $expected['amount'], 'actual' => $row->amount];
+                }
+
+                if (! str_contains((string) $row->notes, '['.$expected['reference'].']')) {
+                    $missed[] = ['id' => $id, 'field' => 'import reference', 'expected' => $expected['reference'], 'actual' => '(marker not on file)'];
+                }
+            }
+        }
+
+        return $missed;
     }
 
     /* ------------------------------------------------------------------
@@ -243,7 +330,7 @@ class AlphaExpenseImporter
             'category_code' => null,
             'category_rule' => null,
             'review' => false,
-            'decision' => self::IMPORT,
+            'decision' => self::IMPORT_EXPENSE,
             'reason_code' => null,
             'reason' => null,
         ];
@@ -264,77 +351,126 @@ class AlphaExpenseImporter
 
         foreach ((array) config('alpha_expense_import.total_words') as $word) {
             if ($this->mentions($haystack, $word)) {
-                $entry['decision'] = self::EXCLUDE_TOTAL;
-                $entry['reason_code'] = 'SUMMARY_TOTAL';
-                $entry['reason'] = __('Summary line (":word") — its amount is already counted in the lines above it', ['word' => $word]);
-
-                return $entry;
+                return $this->rule($entry, self::SKIP_TOTAL, 'SUMMARY_TOTAL',
+                    __('Summary line (":word") — its amount is already counted in the lines above it', ['word' => $word]));
             }
+        }
+
+        if ($entry['amount'] === null) {
+            foreach ((array) config('alpha_expense_import.heading_words') as $word) {
+                if ($this->mentions($haystack, $word)) {
+                    return $this->rule($entry, self::SKIP_HEADING, 'HEADING',
+                        __('A heading, not an entry, and no amount is written against it'));
+                }
+            }
+
+            return $this->rule($entry, self::INVALID, 'MISSING_AMOUNT',
+                __('No amount is written beside this line'));
+        }
+
+        if ($entry['amount'] <= 0) {
+            return $this->rule($entry, self::INVALID, 'NOT_A_POSITIVE_AMOUNT',
+                __('The amount is not a positive figure'));
+        }
+
+        if ($entry['description'] === '') {
+            return $this->rule($entry, self::INVALID, 'NO_DESCRIPTION',
+                __('An amount with nothing written against it'));
         }
 
         foreach ((array) config('alpha_expense_import.incoming_words') as $word) {
             if ($this->mentions($haystack, $word)) {
-                $entry['decision'] = self::EXCLUDE_INCOMING_MONEY;
-                $entry['reason_code'] = 'INCOMING_MONEY';
-                $entry['reason'] = __('Money received (":word"), not money spent', ['word' => $word]);
-
-                return $entry;
+                return $this->rule($entry, self::NEEDS_REVIEW, 'INCOMING_MONEY',
+                    __('Money received (":word"), not money spent', ['word' => $word]));
             }
         }
 
-        // A line with no figure is not an expense that needs a ruling; it is a
-        // line the document never finished. It is reported and left alone,
-        // because the only way to import it would be to invent its amount.
-        if ($entry['amount'] === null) {
-            $entry['decision'] = self::SKIPPED_MISSING_AMOUNT;
-            $entry['reason_code'] = 'MISSING_AMOUNT';
-            $entry['reason'] = __('No amount is written beside this line');
-
-            return $entry;
+        // Held back before the safe list is tried at all, so a line that names
+        // both a person and a purchase — "Abdullhi 50 lesien" — is a question
+        // about who the licence was for rather than a licence to post.
+        foreach ((array) config('alpha_expense_import.review_words') as $word) {
+            if ($this->mentions($haystack, $word)) {
+                return $this->rule($entry, self::NEEDS_REVIEW, 'NOT_CLEARLY_A_SCHOOL_COST',
+                    __('":word" — the line does not say this was bought for the school', ['word' => $word]));
+            }
         }
 
-        if ($entry['amount'] <= 0) {
-            $entry['decision'] = self::NEEDS_REVIEW;
-            $entry['reason_code'] = 'NOT_A_POSITIVE_AMOUNT';
-            $entry['reason'] = __('The amount is not a positive figure');
+        [$code, $rule] = $this->categorise($haystack);
 
-            return $entry;
+        if ($code === null) {
+            return $this->rule($entry, self::NEEDS_REVIEW, 'NO_RULE_MATCHED',
+                __('Nothing in the wording says what this money bought'));
         }
 
-        if ($entry['description'] === '') {
-            $entry['decision'] = self::NEEDS_REVIEW;
-            $entry['reason_code'] = 'NO_DESCRIPTION';
-            $entry['reason'] = __('An amount with nothing written against it');
-
-            return $entry;
+        if ($entry['date_source'] === 'fallback' && config('alpha_expense_import.undated_policy') === 'review') {
+            return $this->rule($entry, self::NEEDS_REVIEW, 'NO_DATE',
+                __('The document gives no date for this line'));
         }
 
-        [$entry['category_code'], $entry['category_rule'], $entry['review']] = $this->categorise($haystack);
+        $entry['category_code'] = $code;
+        $entry['category_rule'] = $rule;
 
         return $entry;
     }
 
     /**
-     * The category, the word that chose it, and whether that choice is an
-     * inference somebody should look at.
+     * @param  array<string, mixed>  $entry
+     * @return array<string, mixed>
+     */
+    protected function rule(array $entry, string $decision, string $code, string $reason): array
+    {
+        $entry['decision'] = $decision;
+        $entry['reason_code'] = $code;
+        $entry['reason'] = $reason;
+
+        return $entry;
+    }
+
+    /**
+     * The category and the word that chose it, or nothing.
      *
-     * @return array{0: string, 1: string|null, 2: bool}
+     * There is no fallback. A line that matches no rule is a line whose
+     * wording does not say what the money bought, and the answer to that is a
+     * question, not a category.
+     *
+     * @return array{0: string|null, 1: string|null}
      */
     protected function categorise(string $haystack): array
     {
         foreach ((array) config('alpha_expense_import.categories.rules') as $rule) {
             foreach ($rule['words'] as $word) {
-                if ($this->mentions($haystack, $word)) {
-                    return [$rule['code'], $word, (bool) ($rule['review'] ?? false)];
+                if (! $this->mentions($haystack, $word)) {
+                    continue;
                 }
+
+                // Some words only mean what they look like when something else
+                // is beside them: washing is a car wash when a car is named.
+                if (($rule['needs'] ?? null) === 'vehicle' && ! $this->namesAVehicle($haystack)) {
+                    continue;
+                }
+
+                return [$rule['code'], $word];
             }
         }
 
-        return [
-            config('alpha_expense_import.categories.fallback', 'other'),
-            null,
-            (bool) config('alpha_expense_import.categories.fallback_review', false),
-        ];
+        foreach ((array) config('alpha_expense_import.categories.other_business') as $word) {
+            if ($this->mentions($haystack, $word)) {
+                return ['other_business', $word];
+            }
+        }
+
+        return [null, null];
+    }
+
+    protected function namesAVehicle(string $haystack): bool
+    {
+        foreach ((array) config('alpha_expense_import.categories.vehicle_words') as $word) {
+            if ($this->mentions($haystack, $word)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /* ------------------------------------------------------------------
@@ -552,7 +688,7 @@ class AlphaExpenseImporter
     protected function missingCategories(array $plan): array
     {
         $needed = collect($plan['entries'])
-            ->where('decision', self::IMPORT)
+            ->where('decision', self::IMPORT_EXPENSE)
             ->pluck('category_code')
             ->filter()
             ->unique();
@@ -578,7 +714,7 @@ class AlphaExpenseImporter
         $resolved = [];
 
         $codes = collect($plan['entries'])
-            ->where('decision', self::IMPORT)
+            ->where('decision', self::IMPORT_EXPENSE)
             ->pluck('category_code')
             ->filter()
             ->unique();

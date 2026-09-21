@@ -55,15 +55,25 @@ const ALLOWED = [
     'student-import-dry-run' => ['alpha-school:import', ['--dry-run' => true],
         'Register import — report only, writes nothing', false],
 
-    'expense-import-dry-run' => ['alpha:import-expenses', ['--dry-run' => true, '--preview' => 0],
+    'alpha-expenses-import-dry-run' => ['alpha:import-expenses', ['--dry-run' => true, '--preview' => 0],
         'Expense ledger — report only, writes nothing', false],
-    'expense-import' => ['alpha:import-expenses', ['--confirm' => true, '--preview' => 0],
-        'Expense ledger — REAL, creates company expenses', true],
+    'alpha-expenses-import' => ['alpha:import-expenses', ['--confirm' => true, '--preview' => 0],
+        'Expense ledger — REAL. This may write finance expense records only.', 'YES_IMPORT_ALPHA_EXPENSES'],
 
     'progress-repair-dry-run' => ['alpha-school:repair-training-progress', ['--dry-run' => true],
         'Required vs remaining days — report only, writes nothing', false],
     'progress-repair' => ['alpha-school:repair-training-progress', ['--confirm' => true],
         'Required vs remaining days — REAL, corrects four student columns', true],
+];
+
+/** The fixed source each command reads, relative to LARAVEL_PATH. */
+const SOURCE_FILES = [
+    'workbook-diagnostic' => 'storage/app/imports/ALPHA SCHOOL.xlsx',
+    'student-import-dry-run' => 'storage/app/imports/ALPHA SCHOOL.xlsx',
+    'progress-repair-dry-run' => 'storage/app/imports/ALPHA SCHOOL.xlsx',
+    'progress-repair' => 'storage/app/imports/ALPHA SCHOOL.xlsx',
+    'alpha-expenses-import-dry-run' => 'storage/app/imports/DEYNTA BISHI AAN ISTICMAALNAY ALPHA DRIVING SCHOOL.docx',
+    'alpha-expenses-import' => 'storage/app/imports/DEYNTA BISHI AAN ISTICMAALNAY ALPHA DRIVING SCHOOL.docx',
 ];
 
 /** Refused no matter how they arrive. */
@@ -94,15 +104,34 @@ if ($key !== null) {
         }
     }
 
-    // A real run needs the extra word in the URL. One click cannot write.
-    if ($error === null && $writes && ($_GET['i-have-read-the-dry-run'] ?? '') !== 'yes') {
-        $error = 'Refused: read the dry run first, then add &i-have-read-the-dry-run=yes to the link.';
+    // A real run needs its own word in the URL. One click cannot write, and
+    // the word differs per command, so a link cannot be reused by accident on
+    // a different one.
+    if ($error === null && $writes) {
+        $expected = $writes === true ? 'yes' : $writes;
+        $parameter = $writes === true ? 'i-have-read-the-dry-run' : 'confirm';
+
+        if (($_GET[$parameter] ?? '') !== $expected) {
+            $error = sprintf('Refused: read the dry run first, then add &%s=%s to the link.', $parameter, $expected);
+        }
     }
 
     if ($error === null) {
         $log[] = 'Laravel path: '.LARAVEL_PATH;
         $log[] = 'Command:      '.$command.' '.json_encode($options);
         $log[] = 'PHP:          '.PHP_VERSION.' ('.PHP_SAPI.')';
+
+        if (isset(SOURCE_FILES[$key])) {
+            $file = LARAVEL_PATH.'/'.SOURCE_FILES[$key];
+            $log[] = 'Source file:  '.SOURCE_FILES[$key];
+            $log[] = '  present:    '.(is_readable($file)
+                ? 'yes, '.number_format(filesize($file)).' bytes, sha256 '.substr(hash_file('sha256', $file), 0, 16).'…'
+                : 'NO — the command will report this and do nothing');
+        }
+
+        $log[] = $writes
+            ? 'MODE:         REAL. This may write finance expense records only.'
+            : 'MODE:         DRY RUN. Nothing is written.';
         $log[] = '';
 
         // Long enough for a register of a few hundred rows on a slow shared
@@ -170,11 +199,18 @@ $token = htmlspecialchars($_GET['token'], ENT_QUOTES);
 <p class="warn"><strong>Delete this file as soon as you are finished.</strong>
 While it is on the server, anyone with the link can run the commands below.</p>
 
+<p>Laravel path: <code><?= htmlspecialchars(LARAVEL_PATH) ?></code><br>
+Database: <code><?= htmlspecialchars(getenv('DB_DATABASE') ?: 'read from .env when the command boots') ?></code></p>
+
+<p class="warn">Links shown in amber WRITE to the live database. Read the matching
+dry run first — every one of them has one. The expense import writes finance
+expense records only.</p>
+
 <ul>
     <?php foreach (ALLOWED as $name => [$command, $options, $description, $writes]) { ?>
         <li>
             <a class="cmd <?= $writes ? 'real' : '' ?>"
-               href="<?= $self ?>?token=<?= $token ?>&amp;run=<?= urlencode($name) ?><?= $writes ? '&amp;i-have-read-the-dry-run=yes' : '' ?>">
+               href="<?= $self ?>?token=<?= $token ?>&amp;run=<?= urlencode($name) ?><?= $writes === true ? '&amp;i-have-read-the-dry-run=yes' : ($writes ? '&amp;confirm='.$writes : '') ?>">
                 <?= htmlspecialchars($name) ?>
             </a>
             — <?= htmlspecialchars($description) ?>

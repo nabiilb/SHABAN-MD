@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Exceptions\ImportNotPersisted;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\AlphaExpenseImporter;
@@ -71,13 +72,13 @@ class ImportAlphaExpenses extends Command
             return self::SUCCESS;
         }
 
-        $toCreate = $this->decided($plan, AlphaExpenseImporter::IMPORT);
+        $toCreate = $this->decided($plan, AlphaExpenseImporter::IMPORT_EXPENSE);
 
         // A second run has nothing to create, and asking to write nothing only
         // invites a yes that means nothing.
         if ($toCreate === []) {
             $this->newLine();
-            $this->warn($this->decided($plan, AlphaExpenseImporter::ALREADY_IMPORTED) === []
+            $this->warn($this->decided($plan, AlphaExpenseImporter::DUPLICATE) === []
                 ? 'There is nothing in this document to import.'
                 : 'Every expense in this document is already on file. Nothing to do.');
 
@@ -105,27 +106,45 @@ class ImportAlphaExpenses extends Command
             count($toCreate), $this->money($this->sum($toCreate)),
         ));
 
-        $result = $importer->apply($plan, $this->actor());
+        try {
+            $result = $importer->apply($plan, $this->actor());
+        } catch (ImportNotPersisted $e) {
+            $this->newLine();
+            $this->error('THE IMPORT DID NOT PERSIST.');
+            $this->line($e->getMessage());
+            $this->newLine();
+            $this->table(['Expense id', 'Field', 'Written', 'Found on file'], array_map(fn ($r) => [
+                $r['id'], $r['field'], (string) $r['expected'], (string) $r['actual'],
+            ], array_slice($e->rows, 0, 25)));
+            $this->newLine();
+            $this->warn('Nothing here can be treated as imported. Run the dry run again before doing anything else.');
+
+            return self::FAILURE;
+        }
+
+        // Failures before the banner: a run with any of them has not finished.
+        if ($result['failures'] !== []) {
+            $this->newLine();
+            $this->error(sprintf('%d lines could not be written:', count($result['failures'])));
+            $this->table(['Reference', 'Description', 'Reason'], array_map(fn ($f) => [
+                $f['reference'], $f['description'], mb_substr($f['reason'], 0, 70),
+            ], array_slice($result['failures'], 0, 25)));
+            $this->newLine();
+            $this->error('IMPORT FAILED — no part of this run should be assumed applied.');
+
+            return self::FAILURE;
+        }
 
         $this->newLine();
         $this->heading('IMPORT COMPLETE');
         $this->line(sprintf('Expenses created:      %d', $result['created']));
+        $this->line(sprintf('  read back and confirmed on file: %d', $result['verified']));
         $this->line(sprintf('Total written:         %s', $this->money($result['total'])));
         $this->line(sprintf('Already on file:       %d', $result['already']));
         $this->line(sprintf('Lines not imported:    %d', $result['skipped']));
 
         if ($result['categories_created'] !== []) {
             $this->line(sprintf('Categories created:    %s', implode(', ', $result['categories_created'])));
-        }
-
-        if ($result['failures'] !== []) {
-            $this->newLine();
-            $this->error(sprintf('%d lines could not be written:', count($result['failures'])));
-            $this->table(['Reference', 'Description', 'Reason'], array_map(fn ($f) => [
-                $f['reference'], $f['description'], mb_substr($f['reason'], 0, 70),
-            ], $result['failures']));
-
-            return self::FAILURE;
         }
 
         return self::SUCCESS;
@@ -138,48 +157,95 @@ class ImportAlphaExpenses extends Command
     /** @param  array<string, mixed>  $plan */
     protected function report(array $plan, bool $dryRun): void
     {
-        $import = $this->decided($plan, AlphaExpenseImporter::IMPORT);
-        $already = $this->decided($plan, AlphaExpenseImporter::ALREADY_IMPORTED);
-        $totals = $this->decided($plan, AlphaExpenseImporter::EXCLUDE_TOTAL);
-        $incoming = $this->decided($plan, AlphaExpenseImporter::EXCLUDE_INCOMING_MONEY);
-        $missing = $this->decided($plan, AlphaExpenseImporter::SKIPPED_MISSING_AMOUNT);
+        $import = $this->decided($plan, AlphaExpenseImporter::IMPORT_EXPENSE);
+        $fuelRecords = $this->decided($plan, AlphaExpenseImporter::IMPORT_FUEL);
+        $already = $this->decided($plan, AlphaExpenseImporter::DUPLICATE);
+        $totals = $this->decided($plan, AlphaExpenseImporter::SKIP_TOTAL);
+        $headings = $this->decided($plan, AlphaExpenseImporter::SKIP_HEADING);
+        $invalid = $this->decided($plan, AlphaExpenseImporter::INVALID);
         $review = $this->decided($plan, AlphaExpenseImporter::NEEDS_REVIEW);
 
         $dated = array_filter($import, fn ($e) => $e['date_source'] === 'line');
-        $flagged = array_filter($import, fn ($e) => $e['review']);
 
         $this->newLine();
-        $this->heading($dryRun ? 'ALPHA HISTORICAL EXPENSE IMPORT — DRY RUN' : 'ALPHA HISTORICAL EXPENSE IMPORT');
+        $this->heading($dryRun ? 'ALPHA EXPENSE IMPORT — DRY RUN' : 'ALPHA EXPENSE IMPORT');
 
-        $this->line(sprintf('Document:                      %s', $plan['source_label']));
-        $this->line(sprintf('Table rows read:               %d', $plan['rows_read']));
-        $this->line(sprintf('Description/amount pairs:      %d', $plan['pairs_inspected']));
+        $this->line(sprintf('Source file:                   %s', $plan['source']));
+        $this->line(sprintf('  size / modified:             %s bytes, %s',
+            number_format(filesize($plan['source'])), date('Y-m-d H:i:s', filemtime($plan['source']))));
+        $this->line(sprintf('  SHA-256:                     %s', hash_file('sha256', $plan['source'])));
+        $this->line(sprintf('Database:                      %s', config('database.connections.'.config('database.default').'.database')));
+        $this->newLine();
+        $this->line(sprintf('Table rows scanned:            %d', $plan['rows_read']));
+        $this->line(sprintf('Entries scanned:               %d', count($plan['entries'])));
         $this->line(sprintf('Blank pairs:                   %d', $plan['blank']));
-        $this->line(sprintf('Lines inspected:               %d', count($plan['entries'])));
         $this->newLine();
-        $this->line(sprintf('Expenses recognised:           %d', count($import) + count($already)));
-        $this->line(sprintf('Total expense recognised:      %s', $this->money($this->sum($import) + $this->sum($already))));
-        $this->line(sprintf('  New expenses to create:      %d  (%s)', count($import), $this->money($this->sum($import))));
-        $this->line(sprintf('  Already imported:            %d  (%s)', count($already), $this->money($this->sum($already))));
+        $this->line(sprintf('SAFE business expenses:        %d  (%s)', count($import), $this->money($this->sum($import))));
+        $this->line(sprintf('Already imported (duplicates): %d  (%s)', count($already), $this->money($this->sum($already))));
+        $this->line(sprintf('NEEDS REVIEW, not imported:    %d  (%s)', count($review), $this->money($this->sum($review))));
+        $this->line(sprintf('Totals/subtotals skipped:      %d  (%s)', count($totals), $this->money($this->sum($totals))));
+        $this->line(sprintf('Headings skipped:              %d', count($headings)));
+        $this->line(sprintf('Invalid lines:                 %d', count($invalid)));
+
+        if ($fuelRecords !== []) {
+            $this->line(sprintf('Fuel records:                  %d', count($fuelRecords)));
+        }
+
         $this->newLine();
-        $this->line(sprintf('Excluded as totals/subtotals:  %d  (%s)', count($totals), $this->money($this->sum($totals))));
-        $this->line(sprintf('Excluded as incoming money:    %d  (%s)', count($incoming), $this->money($this->sum($incoming))));
-        $this->line(sprintf('Skipped, MISSING_AMOUNT:       %d', count($missing)));
-        $this->line(sprintf('Still NEEDS_REVIEW:            %d', count($review)));
-        $this->newLine();
-        $this->line(sprintf('Dated by the document:         %d', count($dated)));
+        $this->line(sprintf('Dated by the document:         %d of %d safe rows', count($dated), count($import)));
         $this->line(sprintf('Undated, given %s:     %d', $plan['undated_date']->toDateString(), count($import) - count($dated)));
-        $this->line(sprintf('Category inferred, confirm:    %d', count($flagged)));
 
         $this->categoryTotals($import, $already);
         $this->missingCategories($plan);
-        $this->exclusions('EXCLUDED — SUMMARY/TOTAL LINES', $totals);
-        $this->exclusions('EXCLUDED — MONEY COMING IN', $incoming);
-        $this->exclusions('SKIPPED — MISSING_AMOUNT (the document never wrote a figure)', $missing);
-        $this->exclusions('AMBIGUOUS — NOT IMPORTED, PLEASE RULE ON THESE', $review);
-        $this->exclusions('IMPORTED — CATEGORY INFERRED FROM CONTEXT, LISTED FOR THE RECORD', $flagged);
+        $this->fuelNote();
+        $this->reconciliation($import, $review, $totals);
+        $this->exclusions('NEEDS REVIEW — NOT IMPORTED', $review);
+        $this->exclusions('SKIPPED — SUMMARY/TOTAL LINES', $totals);
+        $this->exclusions('SKIPPED — HEADINGS', $headings);
+        $this->exclusions('INVALID', $invalid);
         $this->dateNote($plan, $dated);
         $this->preview($plan);
+    }
+
+    /** Why fuel is a company expense here and not a fuel record. */
+    protected function fuelNote(): void
+    {
+        $this->newLine();
+        $this->heading('FUEL');
+        $this->line('Fuel is imported as a CompanyExpense in the fuel category, not as a FuelRecord.');
+        $this->line('  fuel_records requires a vehicle, a number of litres and a price per litre.');
+        $this->line('  None of the three is nullable, and the ledger writes none of them down.');
+        $this->line('  FuelService posts a CompanyExpense when a fuel record is approved, and the');
+        $this->line('  dashboard totals expenses through company_expenses — so a fuel line belongs');
+        $this->line('  there, and creating both rows would count the same tank twice.');
+    }
+
+    /**
+     * What the document totals say, against what was read.
+     *
+     * @param  array<int, array<string, mixed>>  $import
+     * @param  array<int, array<string, mixed>>  $review
+     * @param  array<int, array<string, mixed>>  $totals
+     */
+    protected function reconciliation(array $import, array $review, array $totals): void
+    {
+        $this->newLine();
+        $this->heading('RECONCILIATION');
+        $this->line(sprintf('Safe business expenses:         %s', $this->money($this->sum($import))));
+        $this->line(sprintf('Held for review:                %s', $this->money($this->sum($review))));
+        $this->line(sprintf('Everything the document spends: %s', $this->money($this->sum($import) + $this->sum($review))));
+        $this->newLine();
+        $this->line('Totals written in the document, for comparison only:');
+
+        foreach ($totals as $total) {
+            $this->line(sprintf('  %-10s %-14s %s', 'R'.$total['row'].' C'.$total['column'],
+                $this->money((float) $total['amount']), '"'.$total['original'].'"'));
+        }
+
+        $this->newLine();
+        $this->warn('No attempt is made to make any of these agree.');
+        $this->line('What each document total covers has not been established, so the difference');
+        $this->line('between them and what is read here is left as a difference, not closed.');
     }
 
     /**
@@ -285,16 +351,16 @@ class ImportAlphaExpenses extends Command
             ['Row', 'Date', 'Original description', 'Category', 'Amount', 'Import reference', 'Decision'],
             array_map(fn ($e) => [
                 sprintf('R%d C%d', $e['row'], $e['column']),
-                $e['decision'] === AlphaExpenseImporter::IMPORT ? $e['date'].($e['date_source'] === 'line' ? '' : ' *') : '—',
+                $e['decision'] === AlphaExpenseImporter::IMPORT_EXPENSE ? $e['date'].($e['date_source'] === 'line' ? '' : ' *') : '—',
                 mb_substr($e['original'], 0, 40),
-                $e['category_code'] ? $e['category_code'].($e['review'] ? ' ?' : '') : '—',
+                $e['category_code'] ?: '—',
                 $e['amount'] === null ? '—' : number_format((float) $e['amount'], 2),
                 str_replace(config('alpha_expense_import.reference_prefix').':', '', $e['reference']),
                 $e['decision'],
             ], $shown),
         );
 
-        $this->line('  * dated by the fallback, not by the document.   ? category inferred, please confirm.');
+        $this->line('  * dated by the fallback, not by the document.');
 
         if (count($shown) < count($entries)) {
             $this->line(sprintf('  … and %d more. Pass --preview=0 to print them all.', count($entries) - count($shown)));

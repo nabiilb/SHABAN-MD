@@ -89,126 +89,139 @@ return [
 
     /*
     |----------------------------------------------------------------------
-    | Categories
+    | Dates
     |----------------------------------------------------------------------
     |
-    | Rules are tried in order and the first match wins, so the specific sit
-    | above the general. Each is matched against the whole line — the
-    | description AND any words written in the amount cell beside it, because
-    | "Abdullhi | 50 lesien" says in the amount cell what the money was for.
+    | 'fallback'  undated lines take the head-of-document date, labelled as a
+    |             placeholder in every expense's notes.
+    | 'review'    undated lines are not imported at all.
     |
-    | The principle: a category describes WHAT WAS BOUGHT, not who it was
-    | bought for. "Shidaal guriga" is fuel that happened to go to the house;
-    | "Adeeg guri" names no purchase at all, so there the household is what is
-    | left to categorise by.
+    | The document is headed with one date and carries eleven days written
+    | into individual lines. It has no dated sections: the days that do appear
+    | run 1/8, 2/8, 5/8, 2/8, 8/8 — out of order, in the middle of a column —
+    | so there is no "active date" for a line to inherit, and nothing is
+    | inherited from the line above. A line either says its own date or has
+    | none.
+    */
+    'undated_policy' => 'fallback',
+
+    /*
+    |----------------------------------------------------------------------
+    | What may be imported
+    |----------------------------------------------------------------------
     |
-    | 'code' must be an expense_categories.code. Codes not already in the
-    | database are listed in the dry run and created on the real import through
-    | the same ExpenseCategory model the admin screens use — never a second,
-    | near-duplicate spelling of a category that already exists.
+    | A safe list, not a filter. A line is imported only when its own wording
+    | says what the money bought and that purchase is the school's; everything
+    | else is held for review. The school confirmed in an earlier round that
+    | the informal-looking lines are its spending, and has since asked for the
+    | stricter reading: informal wording is no longer enough on its own,
+    | because "Aabbe 15" does not say what was bought and the ledger cannot be
+    | asked.
+    |
+    | Rules are tried in order, first match wins, and each is matched against
+    | the description AND any words in the amount cell beside it.
+    |
+    | 'needs' names a second word that must also appear. It is how "dhaqis"
+    | becomes a car wash only when a vehicle is named beside it, and stays a
+    | question when it is not.
     */
     'categories' => [
-        // Categories this import adds, if the database does not have them yet.
-        // Anything already present keeps its existing name and is reused.
         'new' => [
-            'vehicle_purchase' => ['Vehicle Purchase', 'Iibka Gaariga'],
-            'food_refreshments' => ['Food & Refreshments', 'Cunto & Cabitaan'],
             'certificates' => ['Certificates & Printing', 'Shahaadooyin & Daabacaad'],
             'advertising' => ['Advertising', 'Xayeysiin'],
-            'transport' => ['Transport', 'Gaadiid'],
-            'staff_support' => ['Staff & Personal Support', 'Taageero Shaqaale'],
-            'home_support' => ['Home & General Support', 'Taageero Guri'],
+            'other_business' => ['Other Business Expense', 'Kharash Ganacsi Kale'],
         ],
 
-        // Where an entry lands when no rule below matches it. They are listed
-        // in the dry run under their own heading so the wording can be read,
-        // but the school has confirmed they are its spending: an informal
-        // description is not a reason to hold an expense back.
-        'fallback' => 'other',
-        'fallback_review' => false,
+        'vehicle_words' => [
+            'gaari', 'gari', 'gaariga', 'gariga', 'gaarigga', 'baabuur', 'gaadiid',
+            'otomatic', 'otomatik', 'otomotic', 'otamatic', 'atomatic', 'automatic', 'geyr',
+        ],
 
         'rules' => [
-            // --- Buying a vehicle outright -------------------------------
-            ['code' => 'vehicle_purchase', 'words' => ['gaari iib', 'gari iib', 'iib ah', 'gaari iibsi']],
-
-            // --- Oil, before washing: "olyo dhaqis" is an oil change -----
-            ['code' => 'oil_change', 'words' => ['olyo', 'oleyo', 'oyl', 'oil']],
-
-            // --- Washing, before anything that merely names a vehicle ----
-            ['code' => 'car_wash', 'words' => ['dhaqid', 'dhaqis', 'dhaqista', 'dhaqa']],
-
-            // --- Parts, before repair: a battery is a thing, not labour --
-            ['code' => 'spare_parts', 'words' => ['batari', 'bateri', 'qaybo', 'qayb gaari']],
-            ['code' => 'tires', 'words' => ['taayir', 'taayo', 'tayr']],
-
-            // --- Fuel ----------------------------------------------------
+            // --- Fuel -----------------------------------------------------
             ['code' => 'fuel', 'words' => [
                 'shidaal', 'shidal', 'shiddaal', 'shidl', 'shiidl', 'shidag', 'shidak', 'shidaa',
                 'benziin', 'benzin', 'naft', 'fuel', 'petrol', 'diesel',
             ]],
 
-            // --- Repairs and accidents -----------------------------------
-            ['code' => 'vehicle_repair', 'words' => [
-                'samey', 'hagaaji', 'hagajin', 'dayactir', 'shil', 'jabay', 'garaash', 'garage',
-            ]],
+            // --- Oil, before washing: "olyo dhaqis" is an oil change ------
+            ['code' => 'oil_change', 'words' => ['olyo', 'oleyo', 'oyl', 'oil']],
 
-            // --- Servicing the car, as distinct from servicing the house --
-            ['code' => 'garage_service', 'words' => ['adeeg gaari', 'adeeg gari', 'adeegga gaari', 'adeegga gari', 'service gaari']],
+            // --- Washing, but only where a vehicle is named ---------------
+            ['code' => 'car_wash', 'needs' => 'vehicle', 'words' => ['dhaqid', 'dhaqis', 'dhaqista', 'dhaqa']],
 
-            // --- Office ---------------------------------------------------
+            // --- Parts ----------------------------------------------------
+            ['code' => 'spare_parts', 'words' => ['batari', 'bateri', 'qaybo gaari']],
+            ['code' => 'tires', 'words' => ['taayir', 'taayirro']],
+
+            // --- Repairs, which name the vehicle or the damage ------------
+            ['code' => 'vehicle_repair', 'needs' => 'vehicle', 'words' => ['samey', 'hagaaji', 'hagajin', 'dayactir', 'shil', 'jabay']],
+            ['code' => 'vehicle_repair', 'words' => ['garaash', 'garage', 'dayactirka']],
+
+            // --- Servicing the car, as distinct from servicing a house ----
+            ['code' => 'garage_service', 'words' => ['adeeg gaari', 'adeeg gari', 'adeegga gaari', 'adeegga gari', 'adeeg gaarigga']],
+
+            // --- The office -----------------------------------------------
             ['code' => 'office', 'words' => ['xafiis', 'xafis', 'xafiska', 'xafiiska', 'xafoska', 'office']],
 
-            // --- Internet, wherever it was installed ---------------------
-            ['code' => 'internet', 'words' => ['internet', 'wifi', 'intarnet']],
-
-            // --- Utilities: the school has an Electricity category already
-            ['code' => 'electricity', 'words' => ['koronto', 'biyo', 'biil', 'biilka', 'bill', 'laydh']],
-
-            // --- Advertising ---------------------------------------------
+            // --- Advertising ----------------------------------------------
             ['code' => 'advertising', 'words' => ['xayeysin', 'xayeysiin', 'xayaysiin', 'bandhig', 'advert']],
 
-            // --- Papers: certificates, licences, notary, registration ----
+            // --- Papers the school has to hold ----------------------------
             ['code' => 'certificates', 'words' => [
                 'shahaado', 'shahaadooyin', 'notaayo', 'notary', 'lesien', 'laysan', 'license', 'licence',
-                'busniss code', 'business code', 'daabacaad', 'print',
-            ]],
-
-            // --- Food and hospitality ------------------------------------
-            ['code' => 'food_refreshments', 'words' => [
-                'qado', 'casho', 'quraac', 'qurac', 'shah', 'shaah', 'cabitan', 'cabbitaan',
-                'cake', 'cacke', 'keeg', 'koofi', 'coffee', 'cunto', 'marti', 'biscuit',
-            ]],
-
-            // --- Transport paid for, rather than fuel bought -------------
-            ['code' => 'transport', 'words' => ['bajaj', 'taksi', 'taxi', 'baabuur kiro']],
-
-            // --- The household, and the family it supports ---------------
-            ['code' => 'home_support', 'words' => [
-                'guri', 'gurigga', 'guriga', 'aabbe', 'aabe', 'aabo', 'ayeeyo', 'hooyo', 'reer',
-            ]],
-
-            // --- The people the school supports by name ------------------
-            // A roster, not a guess: every name below is written in the
-            // ledger, and the user has confirmed each is a school expense.
-            ['code' => 'staff_support', 'words' => [
-                'abdullahi', 'abdullhi', 'abdulhhi', 'abdalle', 'sakariye', 'siciid', 'yaxye', 'yahye',
-                'liibaan', 'liiban', 'kaafiya', 'kaafiy', 'kaaafiya', 'nuuro', 'axmed', 'ahmed',
-                'sheekha', 'macalin', 'macalinka', 'wiilka', 'wiilasha', 'darawal', 'askarta', 'kabo',
-            ]],
-
-            // --- Vehicles named with no purchase beside them -------------
-            // The right-hand column of the ledger is a running fuel log, and
-            // most of its lines name only which car was filled: "Geyr 12/8",
-            // "Otomatic hore", "Gariga cusub 10/8". Reading them as fuel is an
-            // inference from the column they sit in, not something the line
-            // says, so every one is flagged for review and listed on its own
-            // in the dry run.
-            ['code' => 'fuel', 'review' => true, 'words' => [
-                'geyr', 'geer', 'otomatik', 'otomatic', 'otomotic', 'otamatic', 'atomatic', 'automatic',
-                'gaariga cusub', 'gariga cusub', 'gariga cusb', 'gariga csb', 'gaari cusub', 'gaariga otomatic',
-                'o.hore', 'o hore',
+                'busniss code', 'business code', 'daabacaad',
             ]],
         ],
+
+        /*
+        | Lines that plainly describe a school cost but fit no rule above.
+        | Deliberately short: this is the last door before review, not a
+        | catch-all, and nothing reaches it on the strength of an amount.
+        */
+        'other_business' => ['kiro xafiis', 'kirada xafiiska', 'shaqaale mushahar'],
+    ],
+
+    /*
+    |----------------------------------------------------------------------
+    | Lines that are held back
+    |----------------------------------------------------------------------
+    |
+    | Money that came in rather than went out, and the words that make a line
+    | a question rather than an expense: a person's name, a household, a
+    | vehicle bought outright. None of these is refused as untrue — the school
+    | says they are all its spending — they are refused as unreadable. The
+    | ledger does not say what was bought, and an expense ledger that guesses
+    | is worse than one that asks.
+    */
+    'incoming_words' => [
+        'deyn soo xarootay', 'soo xarootay', 'soo celiyay', 'soo galay', 'lacag soo gashay',
+        'dakhli', 'la soo qaatay', 'income', 'received',
+    ],
+
+    'review_words' => [
+        // Buying a vehicle is capital, not an operating expense, and is not
+        // something to post from a line of a notebook.
+        'gaari iib', 'gari iib', 'iib ah', 'gaari iibsi',
+
+        // A household, and the family it supports.
+        'guri', 'gurigga', 'guriga', 'aabbe', 'aabe', 'aabo', 'ayeeyo', 'hooyo', 'reer', 'ilmaha',
+
+        // People, by name, as the ledger writes them.
+        'abdullahi', 'abdullhi', 'abdulhhi', 'abdalle', 'sakariye', 'siciid', 'yaxye', 'yahye',
+        'liibaan', 'liiban', 'kaafiya', 'kaafiy', 'kaaafiya', 'nuuro', 'axmed', 'ahmed',
+        'sheekha', 'macalin', 'macalinka', 'wiilka', 'wiilasha', 'darawal', 'askarta', 'marti',
+
+        // Things bought for a person rather than the school.
+        'kabo', 'qamiis', 'jamacad', 'qado', 'casho', 'quraac', 'qurac', 'shah', 'shaah',
+        'cabitan', 'cabbitaan', 'cake', 'cacke', 'keeg', 'koofi', 'coffee', 'cunto', 'bajaj',
+    ],
+
+    /*
+    | Lines with no amount that read as a heading rather than a lost figure.
+    */
+    'heading_words' => [
+        'xiisbtii', 'xisaabtii', 'bisha hore', 'bishii hore', 'wadarta guud',
     ],
 
     /*
