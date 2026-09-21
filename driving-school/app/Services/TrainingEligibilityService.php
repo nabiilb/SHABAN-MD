@@ -1,0 +1,260 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Instructor;
+use App\Models\Setting;
+use App\Models\Student;
+use App\Models\TrainingEvaluation;
+use App\Models\TrainingQueueEntry;
+use App\Models\TrainingSession;
+use App\Support\QueueEligibility;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+
+/**
+ * THE one place that decides whether a student may be put in the waiting line.
+ *
+ * The Add Student dialog, the POST that acts on it and the queue service that
+ * writes the row all ask this same object, so what the teacher is offered, what
+ * the server accepts and what the database ends up holding cannot drift apart.
+ *
+ * Four questions, in the order a teacher would ask them:
+ *
+ *   1. Is the student still an active student at all?
+ *   2. Are they already in this date's line?
+ *   3. Are they in a live session somewhere — any teacher, any day?
+ *   4. Has it been long enough since they last finished?
+ *
+ * Ownership is deliberately NOT among them. Any instructor may train any
+ * eligible student in the school: the floor runs on whoever is free, and a
+ * student whose own teacher is out should not have to wait for them. Training
+ * somebody is not taking them — the permanent assignment is untouched by any of
+ * this, and the session records who actually did the training. The rules that
+ * remain are about the student: whether they are still training here, whether
+ * somebody already has them, and whether they have rested long enough.
+ *
+ * Deliberately depends on no other training service: TrainingQueueService and
+ * TrainingSessionService both depend on this, and a cycle between them would be
+ * a container error rather than a design.
+ */
+class TrainingEligibilityService
+{
+    /**
+     * The rolling gap between one finished session and the next time a student
+     * may be queued. Rolling, not once-per-day: midnight is not a reset.
+     */
+    public const COOLDOWN_HOURS = 12;
+
+    public function cooldownHours(): int
+    {
+        return max(0, (int) Setting::get('training_requeue_cooldown_hours', self::COOLDOWN_HOURS));
+    }
+
+    /**
+     * "May this teacher train this student?" — which, since any instructor may
+     * train anyone, is the same question as `check()`. Kept because it reads
+     * the way the rule is spoken, and because the instructor is what the caller
+     * has in hand.
+     */
+    public function canQueueStudent(Instructor $instructor, Student $student, $date = null): QueueEligibility
+    {
+        return $this->check($student, $date);
+    }
+
+    /** Whether this student may be put in the line for this date, by anybody. */
+    public function check(Student $student, $date = null): QueueEligibility
+    {
+        $date = Carbon::parse($date ?? today())->toDateString();
+
+        return $this->decide(
+            student: $student,
+            // School-wide, and deliberately not filtered by date: a cycle left
+            // open yesterday is still open today, and the day boundary must not
+            // hide it from whoever searches this student tomorrow.
+            openEntry: TrainingQueueEntry::query()
+                ->where('student_id', $student->id)
+                ->open()
+                ->orderByDesc('queue_date')
+                ->first(),
+            live: TrainingSession::query()->live()->where('student_id', $student->id)->exists(),
+            lastFinishedAt: $this->lastFinishedAt($student->id),
+        );
+    }
+
+    /**
+     * The same answer for a whole list, in a fixed number of queries rather
+     * than five per student — what the Add Student dialog needs to render.
+     *
+     * @param  Collection<int, Student>  $students
+     * @return Collection<int, QueueEligibility> keyed by student id
+     */
+    public function checkMany(Collection $students, $date = null): Collection
+    {
+        $date = Carbon::parse($date ?? today())->toDateString();
+        $ids = $students->pluck('id')->all();
+
+        if ($ids === []) {
+            return collect();
+        }
+
+        $openEntries = TrainingQueueEntry::query()
+            ->whereIn('student_id', $ids)
+            ->open()
+            ->orderByDesc('queue_date')
+            ->get()
+            ->keyBy('student_id');
+
+        $live = TrainingSession::query()
+            ->live()
+            ->whereIn('student_id', $ids)
+            ->pluck('student_id')
+            ->flip();
+
+        $finished = $this->lastFinishedFor($ids);
+
+        return $students->mapWithKeys(fn (Student $student) => [$student->id => $this->decide(
+            student: $student,
+            openEntry: $openEntries->get($student->id),
+            live: $live->has($student->id),
+            lastFinishedAt: $finished[$student->id] ?? null,
+        )]);
+    }
+
+    /**
+     * Whether this student already has an unfinished cycle anywhere in the
+     * school. One definition, asked by every Training Console path.
+     */
+    public function hasOpenCycle(Student|int $student): bool
+    {
+        return $this->openCycle($student) !== null;
+    }
+
+    /** That student's open cycle, if they have one. */
+    public function openCycle(Student|int $student): ?TrainingQueueEntry
+    {
+        return TrainingQueueEntry::query()
+            ->where('student_id', $student instanceof Student ? $student->id : $student)
+            ->open()
+            ->orderByDesc('queue_date')
+            ->first();
+    }
+
+    /**
+     * When a student may next be queued, or null when nothing is holding them.
+     *
+     * Public because the console and the reports both want to show it without
+     * re-deriving the rule.
+     */
+    public function eligibleAt(int $studentId): ?Carbon
+    {
+        $finished = $this->lastFinishedAt($studentId);
+
+        return $finished?->copy()->addHours($this->cooldownHours());
+    }
+
+    /* ----------------------------------------------------------------
+     | Internals
+     | ---------------------------------------------------------------- */
+
+    /**
+     * The whole decision, given facts already gathered. One code path for the
+     * single check and the bulk one, so the dialog cannot be kinder than the
+     * POST that follows it.
+     */
+    private function decide(
+        Student $student,
+        ?TrainingQueueEntry $openEntry,
+        bool $live,
+        ?Carbon $lastFinishedAt,
+    ): QueueEligibility {
+        // Covers a student who has completed, been suspended or cancelled. A
+        // completed student is not quietly reopened by being queued: an admin
+        // sets them back to active first, on the student's own record.
+        if ($student->status !== 'active') {
+            return QueueEligibility::blocked(
+                QueueEligibility::NOT_ACTIVE,
+                __(':name is not an active student.', ['name' => $student->full_name]),
+            );
+        }
+
+        if ($openEntry) {
+            return match ($openEntry->status) {
+                TrainingQueueEntry::TRAINING_IN_PROGRESS => QueueEligibility::blocked(
+                    QueueEligibility::IN_TRAINING,
+                    __('This student is currently in training.'),
+                ),
+                TrainingQueueEntry::ATTENDANCE_PENDING => QueueEligibility::blocked(
+                    QueueEligibility::ATTENDANCE_PENDING,
+                    __("This student's attendance/evaluation is pending."),
+                ),
+                default => QueueEligibility::blocked(
+                    QueueEligibility::ALREADY_WAITING,
+                    __('This student is already in the waiting queue.'),
+                ),
+            };
+        }
+
+        // A live session with no open queue row behind it — started from
+        // another day's line, or by an admin — still means they are training.
+        if ($live) {
+            return QueueEligibility::blocked(
+                QueueEligibility::IN_TRAINING,
+                __('This student is currently in training.'),
+            );
+        }
+
+        $eligibleAt = $lastFinishedAt?->copy()->addHours($this->cooldownHours());
+
+        // Rolling, to the second: 11h59m is refused and 12h00m is not. now()
+        // is never "past" its equal, so gte is the boundary the brief asks for.
+        if ($eligibleAt && now()->lt($eligibleAt)) {
+            return QueueEligibility::blocked(
+                QueueEligibility::COOLING_DOWN,
+                __('This student can be added again at :time.', [
+                    'time' => $eligibleAt->copy()->timezone(config('app.timezone'))->format('H:i'),
+                ]),
+                $eligibleAt,
+            );
+        }
+
+        return QueueEligibility::allowed();
+    }
+
+    /**
+     * THE authoritative "this student has finished their previous training".
+     *
+     * training_evaluations.evaluated_at, and only where the student was marked
+     * present. See the class docblock on why this timestamp and not another:
+     * the evaluation is the single moment the application declares a student
+     * completed, it is written in the same transaction as that day's attendance
+     * row, it exists exactly once per completed session and never for a
+     * cancelled one, and it is a real datetime — attendance_date is a DATE with
+     * no time in it at all, so a rolling twelve-hour rule cannot be built on it.
+     */
+    private function lastFinishedAt(int $studentId): ?Carbon
+    {
+        $at = TrainingEvaluation::query()
+            ->where('student_id', $studentId)
+            ->where('attendance_status', 'present')
+            ->max('evaluated_at');
+
+        return $at ? Carbon::parse($at) : null;
+    }
+
+    /**
+     * @param  array<int, int>  $studentIds
+     * @return array<int, Carbon>
+     */
+    private function lastFinishedFor(array $studentIds): array
+    {
+        return TrainingEvaluation::query()
+            ->whereIn('student_id', $studentIds)
+            ->where('attendance_status', 'present')
+            ->selectRaw('student_id, max(evaluated_at) as finished_at')
+            ->groupBy('student_id')
+            ->pluck('finished_at', 'student_id')
+            ->map(fn ($at) => Carbon::parse($at))
+            ->all();
+    }
+}
