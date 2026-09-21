@@ -74,6 +74,25 @@ class AlphaSchoolImportTest extends TestCase
         $this->assertSame(0, StudentPayment::count());
     }
 
+    /**
+     * Where the question cannot be put, the import is refused.
+     *
+     * This one creates students and payments, so it keeps asking before it
+     * does — but a web deploy page has no STDIN to be asked down, and reaching
+     * for one there is a fatal, not a prompt. So it stops and says what to
+     * pass instead, rather than dying part way or taking a default answer
+     * nobody gave.
+     */
+    public function test_the_real_import_refuses_where_there_is_nobody_to_ask(): void
+    {
+        $this->artisan('alpha-school:import', ['--no-interaction' => true])
+            ->expectsOutputToContain('no terminal here to confirm at')
+            ->assertFailed();
+
+        $this->assertSame(0, Student::count());
+        $this->assertSame(0, StudentPayment::count());
+    }
+
     /** The counts the dry run prints are the counts the file actually holds. */
     public function test_the_reported_totals_add_up(): void
     {

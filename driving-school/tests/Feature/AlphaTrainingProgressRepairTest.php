@@ -9,6 +9,7 @@ use App\Models\StudentPayment;
 use App\Services\AlphaTrainingProgressRepair;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 use ZipArchive;
@@ -451,20 +452,59 @@ class AlphaTrainingProgressRepairTest extends TestCase
         $this->assertSame(24, $student->fresh()->required_training_days);
     }
 
-    public function test_declining_the_prompt_writes_nothing(): void
+    /**
+     * --confirm asks nothing, because there is nowhere to ask from.
+     *
+     * A deploy page in public_html reaches this through $kernel->call(), where
+     * PHP defines no STDIN: a question there is not a prompt nobody answers,
+     * it is a fatal that stops the request with nothing written and no exit
+     * code. This test passes no expectsConfirmation, so it fails outright if
+     * the command asks anything at all.
+     */
+    public function test_confirm_writes_without_asking_anything(): void
     {
         $student = $this->student('Nasteexo Sadak', '614503030', ['required_training_days' => 24]);
         $path = $this->register([['Nasteexo Sadak', '614503030', '15Maalin', '10']]);
 
         $this->artisan('alpha-school:repair-training-progress', ['--file' => $path, '--confirm' => true])
-            ->expectsConfirmation(
-                'Correct 1 students? Only required_training_days, opening_remaining_days, opening_remaining_from, status are written.',
-                'no',
-            )
-            ->expectsOutputToContain('Nothing was changed')
+            ->expectsOutputToContain('Students corrected:   1')
             ->assertSuccessful();
 
-        $this->assertSame(24, $student->fresh()->required_training_days);
+        $student->refresh();
+
+        $this->assertSame(15, $student->required_training_days);
+        $this->assertSame(10, $student->opening_remaining_days);
+    }
+
+    /**
+     * The same call the deploy page makes, options and all.
+     *
+     * Artisan::call is $kernel->call: an ArrayInput that is still marked
+     * interactive, with no terminal behind it.
+     */
+    public function test_it_runs_through_the_console_kernel_with_no_terminal(): void
+    {
+        $student = $this->student('Nasteexo Sadak', '614503030', ['required_training_days' => 24]);
+        $path = $this->register([['Nasteexo Sadak', '614503030', '15Maalin', '10']]);
+
+        $exitCode = Artisan::call('alpha-school:repair-training-progress', [
+            '--file' => $path,
+            '--confirm' => true,
+        ]);
+
+        $output = Artisan::output();
+
+        $this->assertSame(0, $exitCode);
+        $this->assertStringContainsString('REPAIR COMPLETE', $output);
+        $this->assertStringContainsString('Students corrected:   1', $output);
+        $this->assertSame(10, $student->fresh()->opening_remaining_days);
+
+        // And again, with nothing left to do.
+        $this->assertSame(0, Artisan::call('alpha-school:repair-training-progress', [
+            '--file' => $path, '--confirm' => true,
+        ]));
+        $this->assertStringContainsString('already matches the register', Artisan::output());
+        $this->assertSame(10, $student->fresh()->opening_remaining_days);
     }
 
     /* ------------------------------------------------------------------

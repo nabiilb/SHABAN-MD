@@ -10,6 +10,7 @@ use App\Services\AlphaExpenseImporter;
 use App\Services\DashboardService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Tests\TestCase;
 use ZipArchive;
 
@@ -376,18 +377,23 @@ class AlphaExpenseImportTest extends TestCase
         $this->assertSame($before['categories'], ExpenseCategory::count());
     }
 
-    public function test_answering_no_at_the_prompt_writes_nothing(): void
+    /**
+     * --confirm asks nothing: a deploy page calling this through
+     * $kernel->call() has no STDIN for a question to be read from, and asking
+     * there kills the request outright. No expectsConfirmation here, so this
+     * fails if the command asks anything.
+     */
+    public function test_confirm_imports_without_asking_anything(): void
     {
         $this->realLedger();
 
-        $this->artisan('alpha:import-expenses', [
+        $exitCode = Artisan::call('alpha:import-expenses', [
             'file' => $this->document, '--confirm' => true, '--preview' => 1,
-        ])
-            ->expectsConfirmation('Create 140 expenses totalling $5,965.64?', 'no')
-            ->expectsOutputToContain('Nothing was imported')
-            ->assertSuccessful();
+        ]);
 
-        $this->assertSame(0, CompanyExpense::count());
+        $this->assertSame(0, $exitCode);
+        $this->assertStringContainsString('IMPORT COMPLETE', Artisan::output());
+        $this->assertSame(140, CompanyExpense::count());
     }
 
     public function test_the_real_import_refuses_to_run_without_being_asked(): void
@@ -411,9 +417,7 @@ class AlphaExpenseImportTest extends TestCase
 
         $this->artisan('alpha:import-expenses', [
             'file' => $this->document, '--confirm' => true, '--preview' => 1,
-        ])
-            ->expectsConfirmation('Create 140 expenses totalling $5,965.64?', 'yes')
-            ->assertSuccessful();
+        ])->assertSuccessful();
 
         $first = CompanyExpense::count();
         $total = (string) CompanyExpense::sum('amount');

@@ -21,6 +21,7 @@ class ImportAlphaSchool extends Command
         {--file= : Path to the .xlsx, default storage/app/imports/ALPHA SCHOOL.xlsx}
         {--sheet= : Which sheet holds the register, default from config}
         {--dry-run : Report what would happen and change nothing}
+        {--confirm : Import without being asked, where there is nobody to ask}
         {--details=15 : How many rows to list under each heading}';
 
     protected $description = 'Import students and payments from the Alpha School Excel register';
@@ -69,12 +70,32 @@ class ImportAlphaSchool extends Command
             return self::SUCCESS;
         }
 
-        if (! $this->option('no-interaction') && ! $this->confirm(sprintf(
-            'Create %d students and %d payments?', count($create), count($payments),
-        ), true)) {
-            $this->warn('Nothing was imported.');
+        // This one creates students and payments, so it keeps its question —
+        // but only where there is somebody to answer it.
+        //
+        // Under php-fpm, mod_php or the built-in server there is no STDIN for
+        // Symfony's question helper to read, and asking there is not a prompt
+        // that goes unanswered: it is `Undefined constant "STDIN"`, which
+        // stops the request part way with no output and no exit code. Asking
+        // with --no-interaction is no better, because the answer then falls
+        // back to a default nobody chose. So where the question cannot be put,
+        // it is not put: the run is refused, and --confirm is how somebody
+        // says yes in advance.
+        if (! $this->option('confirm')) {
+            if (! $this->canAskAQuestion()) {
+                $this->error('There is no terminal here to confirm at.');
+                $this->line('Pass --confirm to import without being asked, or --dry-run to see the plan first.');
 
-            return self::SUCCESS;
+                return self::FAILURE;
+            }
+
+            if (! $this->confirm(sprintf(
+                'Create %d students and %d payments?', count($create), count($payments),
+            ), true)) {
+                $this->warn('Nothing was imported.');
+
+                return self::SUCCESS;
+            }
         }
 
         $result = $importer->apply($plan, $this->actor());
@@ -99,6 +120,22 @@ class ImportAlphaSchool extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Whether there is anybody at the other end to answer a question.
+     *
+     * Four things have to hold: a command line rather than a web request, an
+     * input that has not been told it is non-interactive, no --no-interaction,
+     * and a STDIN that actually exists. PHP only defines STDIN under the CLI
+     * SAPI, and the question helper reaches for it without checking.
+     */
+    protected function canAskAQuestion(): bool
+    {
+        return PHP_SAPI === 'cli'
+            && defined('STDIN')
+            && $this->input->isInteractive()
+            && ! $this->option('no-interaction');
     }
 
     /** The admin the imported records are attributed to, when there is one. */

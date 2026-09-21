@@ -84,13 +84,26 @@ class ImportAlphaExpenses extends Command
             return self::SUCCESS;
         }
 
-        if (! $this->option('no-interaction') && ! $this->confirm(
-            sprintf('Create %d expenses totalling %s?', count($toCreate), $this->money($this->sum($toCreate))), false,
-        )) {
-            $this->warn('Nothing was imported.');
-
-            return self::SUCCESS;
-        }
+        // --confirm is the confirmation. Nothing is asked out loud.
+        //
+        // There was a second question here. It cost nothing at a terminal and
+        // everything anywhere else: under php-fpm, mod_php or the built-in
+        // server — a deploy page in public_html reaching this through
+        // $kernel->call() — PHP defines no STDIN, Symfony's question helper
+        // reaches for it regardless, and the request dies on
+        // `Undefined constant "STDIN"` part way through, with no output, no
+        // exit code and nothing written. Passing --no-interaction only traded
+        // that for a quieter wrong answer: an unanswerable question falls back
+        // to its default, which was "no", so the run reported success and
+        // changed nothing at all.
+        //
+        // A flag nobody types by accident is confirmation enough, and it means
+        // the same thing from a terminal, a cron line and a web page.
+        $this->newLine();
+        $this->line(sprintf(
+            'Creating %d expenses totalling %s.',
+            count($toCreate), $this->money($this->sum($toCreate)),
+        ));
 
         $result = $importer->apply($plan, $this->actor());
 
