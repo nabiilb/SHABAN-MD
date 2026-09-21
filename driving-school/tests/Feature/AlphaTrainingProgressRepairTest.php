@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Exceptions\RepairNotPersisted;
 use App\Models\Attendance;
 use App\Models\Role;
 use App\Models\Student;
@@ -305,6 +306,180 @@ class AlphaTrainingProgressRepairTest extends TestCase
         $this->assertSame(['opening_remaining_days', 'opening_remaining_from', 'required_training_days'], $changed);
         $this->assertSame($instructor->id, $student->fresh()->current_instructor_id);
         $this->assertSame('Do not lose this', $student->fresh()->notes);
+    }
+
+    /* ------------------------------------------------------------------
+       That the writes are really on file
+       ------------------------------------------------------------------ */
+
+    /**
+     * The balance is in the database, not just in the model that was saved.
+     *
+     * Read back through the query builder, which has to go and ask, rather
+     * than through the model that was just told.
+     */
+    public function test_the_new_balance_is_really_in_the_database(): void
+    {
+        $student = $this->student('Nasteexo Sadak', '614503030', [
+            'required_training_days' => 15,
+        ]);
+
+        $student->forceFill(['opening_remaining_days' => 15, 'status' => 'active'])->save();
+
+        $register = [['Nasteexo Sadak', '614503030', '15Maalin', '10']];
+
+        $result = $this->repair($register);
+
+        $this->assertSame(1, $result['updated']);
+        $this->assertSame(1, $result['verified']);
+        $this->assertSame([], $result['failures']);
+
+        // Straight out of the table.
+        $onFile = DB::table('students')->where('id', $student->id)->first();
+
+        $this->assertSame(10, (int) $onFile->opening_remaining_days);
+        $this->assertSame(15, (int) $onFile->required_training_days);
+        $this->assertNotNull($onFile->opening_remaining_from);
+
+        // And through a model that was never told anything.
+        $reloaded = Student::findOrFail($student->id);
+
+        $this->assertSame(10, $reloaded->opening_remaining_days);
+        $this->assertSame(10, $reloaded->remaining_days);
+        $this->assertSame(5, $reloaded->effective_completed_days);
+        $this->assertSame(33.3, $reloaded->progress_percentage);
+
+        // A fresh plan has nothing left to say about them.
+        $row = $this->plan($register)['rows'][0];
+
+        $this->assertSame(AlphaTrainingProgressRepair::NO_CHANGE, $row['decision']);
+        $this->assertSame([], $row['changes']);
+    }
+
+    public function test_the_completion_is_really_in_the_database(): void
+    {
+        $student = $this->student('Mahad Hussein Raage', '618629168', [
+            'required_training_days' => 15,
+        ]);
+
+        $student->forceFill(['opening_remaining_days' => 12, 'status' => 'active'])->save();
+
+        $register = [['Mahad Hussein Raage', '618629168', '15Maalin', 'complate']];
+
+        $result = $this->repair($register);
+
+        $this->assertSame(1, $result['verified']);
+
+        $onFile = DB::table('students')->where('id', $student->id)->first();
+
+        $this->assertSame('completed', $onFile->status);
+        $this->assertSame(0, (int) $onFile->opening_remaining_days);
+
+        $reloaded = Student::findOrFail($student->id);
+
+        $this->assertSame(0, $reloaded->remaining_days);
+        $this->assertSame(15, $reloaded->effective_completed_days);
+        $this->assertSame(100.0, $reloaded->progress_percentage);
+
+        $row = $this->plan($register)['rows'][0];
+
+        $this->assertSame(AlphaTrainingProgressRepair::NO_CHANGE, $row['decision']);
+        $this->assertNotSame(AlphaTrainingProgressRepair::MARK_COMPLETED, $row['decision']);
+    }
+
+    /**
+     * A save that is refused is a failure, not a correction.
+     *
+     * save() returns false rather than raising when a model event refuses the
+     * write. Counting that as a corrected student is how a run comes to report
+     * a hundred and thirty and leave none.
+     */
+    public function test_a_refused_save_is_counted_as_a_failure(): void
+    {
+        $this->student('Nasteexo Sadak', '614503030', ['required_training_days' => 15]);
+
+        Student::saving(fn () => false);
+
+        $result = $this->repair([['Nasteexo Sadak', '614503030', '15Maalin', '10']]);
+
+        $this->assertSame(0, $result['updated']);
+        $this->assertSame(0, $result['verified']);
+        $this->assertCount(1, $result['failures']);
+        $this->assertStringContainsString('refused to save', $result['failures'][0]['reason']);
+
+        $this->assertNull(DB::table('students')->where('phone', '+252614503030')->value('opening_remaining_days'));
+    }
+
+    /**
+     * A write that reports success and does not stick is raised, not counted.
+     *
+     * The listener here puts the balance back as it saves, so save() succeeds,
+     * a row is updated, and the column still holds what it held before —
+     * exactly what a rolled-back transaction or a connection reading from
+     * somewhere other than it writes would leave behind.
+     */
+    public function test_a_write_that_does_not_stick_is_raised_not_celebrated(): void
+    {
+        $student = $this->student('Nasteexo Sadak', '614503030', ['required_training_days' => 15]);
+
+        Student::saving(function (Student $saving) {
+            $saving->opening_remaining_days = $saving->getOriginal('opening_remaining_days');
+        });
+
+        $plan = $this->plan([['Nasteexo Sadak', '614503030', '15Maalin', '10']]);
+
+        try {
+            $this->apply($plan);
+            $this->fail('The repair reported success for a write the database did not keep.');
+        } catch (RepairNotPersisted $e) {
+            $this->assertCount(1, $e->rows);
+            $this->assertSame('opening_remaining_days', $e->rows[0]['column']);
+            $this->assertSame(10, $e->rows[0]['expected']);
+            $this->assertNull($e->rows[0]['actual']);
+        }
+
+        $this->assertNull($student->fresh()->opening_remaining_days);
+    }
+
+    public function test_the_command_refuses_to_say_complete_when_a_write_did_not_stick(): void
+    {
+        $this->student('Nasteexo Sadak', '614503030', ['required_training_days' => 15]);
+
+        Student::saving(function (Student $saving) {
+            $saving->opening_remaining_days = $saving->getOriginal('opening_remaining_days');
+        });
+
+        $path = $this->register([['Nasteexo Sadak', '614503030', '15Maalin', '10']]);
+
+        $exitCode = Artisan::call('alpha-school:repair-training-progress', [
+            '--file' => $path, '--confirm' => true,
+        ]);
+
+        $output = Artisan::output();
+
+        $this->assertSame(1, $exitCode);
+        $this->assertStringContainsString('THE REPAIR DID NOT PERSIST', $output);
+        $this->assertStringNotContainsString('REPAIR COMPLETE', $output);
+    }
+
+    public function test_the_command_refuses_to_say_complete_when_a_write_failed(): void
+    {
+        $this->student('Nasteexo Sadak', '614503030', ['required_training_days' => 15]);
+
+        Student::saving(fn () => false);
+
+        $path = $this->register([['Nasteexo Sadak', '614503030', '15Maalin', '10']]);
+
+        $exitCode = Artisan::call('alpha-school:repair-training-progress', [
+            '--file' => $path, '--confirm' => true,
+        ]);
+
+        $output = Artisan::output();
+
+        $this->assertSame(1, $exitCode);
+        $this->assertStringContainsString('could not be written', $output);
+        $this->assertStringContainsString('REPAIR FAILED', $output);
+        $this->assertStringNotContainsString('REPAIR COMPLETE', $output);
     }
 
     /* ------------------------------------------------------------------

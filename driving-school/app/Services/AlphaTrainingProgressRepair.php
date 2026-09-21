@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\RepairNotPersisted;
 use App\Models\Student;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -83,59 +84,167 @@ class AlphaTrainingProgressRepair
     }
 
     /**
-     * Writes the plan.
+     * Writes the plan, then goes back to the database and checks it took.
      *
      * One transaction, four columns, and only the rows the register actually
      * changes. Everything else about the student is left exactly as it is.
      *
+     * A count of save() calls is not a count of rows written. save() returns
+     * false rather than throwing when an event refuses it, a transaction can
+     * be rolled back under a process that is killed part way, and a connection
+     * that reads somewhere other than it writes answers from the wrong place.
+     * Every one of those looks, from inside the loop, exactly like success. So
+     * the rows are read back fresh once the transaction has committed, and
+     * only the ones the database really holds are counted as corrected.
+     *
      * @param  array<string, mixed>  $plan
-     * @return array{updated:int, unchanged:int, skipped:int, failures:array<int, array<string, string>>, fields:array<string, int>}
+     * @return array{updated:int, verified:int, unchanged:int, skipped:int, failures:array<int, array<string, string>>, fields:array<string, int>}
+     *
+     * @throws RepairNotPersisted when the database does not hold what was written
      */
     public function apply(array $plan): array
     {
-        return DB::transaction(function () use ($plan) {
-            $result = ['updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failures' => [], 'fields' => []];
+        [$result, $written] = DB::transaction(fn () => $this->write($plan));
 
-            foreach ($plan['rows'] as $row) {
-                if ($row['changes'] === []) {
-                    $row['decision'] === self::NO_CHANGE ? $result['unchanged']++ : $result['skipped']++;
+        // Committed by here. Anything that would quietly undo the write shows
+        // up as a row whose value on file is not the value that was sent.
+        $missed = $this->unpersisted($written);
+
+        if ($missed !== []) {
+            throw new RepairNotPersisted($missed);
+        }
+
+        $result['updated'] = count($written);
+        $result['verified'] = count($written);
+
+        foreach ($written as $changes) {
+            foreach (array_keys($changes) as $field) {
+                $result['fields'][$field] = ($result['fields'][$field] ?? 0) + 1;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * The writing half, inside the transaction.
+     *
+     * @param  array<string, mixed>  $plan
+     * @return array{0: array<string, mixed>, 1: array<int, array<string, mixed>>}
+     */
+    protected function write(array $plan): array
+    {
+        $result = ['updated' => 0, 'verified' => 0, 'unchanged' => 0, 'skipped' => 0, 'failures' => [], 'fields' => []];
+        $written = [];
+
+        foreach ($plan['rows'] as $row) {
+            if ($row['changes'] === []) {
+                $row['decision'] === self::NO_CHANGE ? $result['unchanged']++ : $result['skipped']++;
+
+                continue;
+            }
+
+            try {
+                $student = Student::withTrashed()->find($row['student_id']);
+
+                if (! $student) {
+                    $result['skipped']++;
 
                     continue;
                 }
 
-                try {
-                    $student = Student::withTrashed()->find($row['student_id']);
+                // forceFill over a whitelist: the register cannot reach a
+                // column this repair was not asked to correct, whatever
+                // else a record happens to carry.
+                $changes = array_intersect_key($row['changes'], array_flip(self::WRITES));
 
-                    if (! $student) {
-                        $result['skipped']++;
-
-                        continue;
-                    }
-
-                    // forceFill over a whitelist: the register cannot reach a
-                    // column this repair was not asked to correct, whatever
-                    // else a record happens to carry.
-                    $student->forceFill(array_intersect_key(
-                        $row['changes'],
-                        array_flip(self::WRITES),
-                    ))->save();
-
-                    foreach (array_keys($row['changes']) as $field) {
-                        $result['fields'][$field] = ($result['fields'][$field] ?? 0) + 1;
-                    }
-
-                    $result['updated']++;
-                } catch (Throwable $e) {
+                // save() returns false, without raising anything, when a model
+                // event refuses the write. Taking that for success is how a run
+                // comes to report a hundred corrections and leave none.
+                if ($student->forceFill($changes)->save() !== true) {
                     $result['failures'][] = [
                         'row' => (string) $row['row'],
                         'name' => $row['name'],
-                        'reason' => $e->getMessage(),
+                        'reason' => __('The model refused to save and raised nothing.'),
+                    ];
+
+                    continue;
+                }
+
+                $written[$student->getKey()] = $changes;
+            } catch (Throwable $e) {
+                $result['failures'][] = [
+                    'row' => (string) $row['row'],
+                    'name' => $row['name'],
+                    'reason' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return [$result, $written];
+    }
+
+    /**
+     * The rows whose values on file are not the values that were written.
+     *
+     * Read through the query builder rather than the models that were just
+     * saved: a model remembers what it was told, which is the one thing not
+     * worth asking about here.
+     *
+     * @param  array<int, array<string, mixed>>  $written
+     * @return array<int, array<string, mixed>>
+     */
+    protected function unpersisted(array $written): array
+    {
+        if ($written === []) {
+            return [];
+        }
+
+        $missed = [];
+
+        foreach (array_chunk($written, 200, true) as $chunk) {
+            $onFile = DB::table('students')
+                ->whereIn('id', array_keys($chunk))
+                ->get(['id', ...self::WRITES])
+                ->keyBy('id');
+
+            foreach ($chunk as $id => $changes) {
+                $row = $onFile->get($id);
+
+                foreach ($changes as $column => $expected) {
+                    $actual = $row?->{$column};
+
+                    if ($this->same($expected, $actual)) {
+                        continue;
+                    }
+
+                    $missed[] = [
+                        'id' => $id,
+                        'column' => $column,
+                        'expected' => $expected,
+                        'actual' => $row === null ? '(no such row)' : $actual,
                     ];
                 }
             }
+        }
 
-            return $result;
-        });
+        return $missed;
+    }
+
+    /** Compares what was written with what came back, across type and format. */
+    protected function same(mixed $expected, mixed $actual): bool
+    {
+        if ($expected === null || $actual === null) {
+            return $expected === $actual;
+        }
+
+        // A date column comes back as a timestamp string; the day is the part
+        // that was written and the part that matters.
+        if (preg_match('/^\d{4}-\d{2}-\d{2}/', (string) $expected) && preg_match('/^\d{4}-\d{2}-\d{2}/', (string) $actual)) {
+            return substr((string) $expected, 0, 10) === substr((string) $actual, 0, 10);
+        }
+
+        return (string) $expected === (string) $actual;
     }
 
     /* ------------------------------------------------------------------

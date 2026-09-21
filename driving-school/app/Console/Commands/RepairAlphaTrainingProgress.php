@@ -2,8 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Exceptions\RepairNotPersisted;
 use App\Services\AlphaTrainingProgressRepair;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Corrects the course length and the days still to run on students the Alpha
@@ -95,26 +97,72 @@ class RepairAlphaTrainingProgress extends Command
             count($writes), implode(', ', AlphaTrainingProgressRepair::WRITES),
         ));
 
-        $result = $repair->apply($plan);
+        try {
+            $result = $repair->apply($plan);
+        } catch (RepairNotPersisted $e) {
+            // The writes reported no error and the database does not hold
+            // them. Saying so is the whole job here: a run that cannot prove
+            // it applied must never read as one that did.
+            $this->newLine();
+            $this->error('THE REPAIR DID NOT PERSIST.');
+            $this->line($e->getMessage());
+            $this->newLine();
+            $this->table(['Student id', 'Column', 'Written', 'Found on file'], array_map(fn ($r) => [
+                $r['id'], $r['column'],
+                var_export($r['expected'], true),
+                var_export($r['actual'], true),
+            ], array_slice($e->rows, 0, max(1, (int) $this->option('details') ?: 25))));
 
-        $this->newLine();
-        $this->heading('REPAIR COMPLETE');
-        $this->line(sprintf('Students corrected:   %d', $result['updated']));
-        $this->line(sprintf('Already correct:      %d', $result['unchanged']));
-        $this->line(sprintf('Left alone:           %d', $result['skipped']));
+            if (count($e->rows) > 25) {
+                $this->line(sprintf('  … and %d more.', count($e->rows) - 25));
+            }
 
-        foreach ($result['fields'] as $field => $count) {
-            $this->line(sprintf('  %-24s %d', $field, $count));
+            $this->newLine();
+            $this->warn('Nothing here can be treated as applied. Run the dry run again before doing anything else.');
+
+            return self::FAILURE;
         }
 
+        // Failures first: a run with any of them has not finished, whatever
+        // else it managed, and must not be headed COMPLETE.
         if ($result['failures'] !== []) {
             $this->newLine();
             $this->error(sprintf('%d students could not be written:', count($result['failures'])));
             $this->table(['Row', 'Student', 'Reason'], array_map(fn ($f) => [
                 $f['row'], $f['name'], mb_substr($f['reason'], 0, 60),
-            ], $result['failures']));
+            ], array_slice($result['failures'], 0, 25)));
+
+            if (count($result['failures']) > 25) {
+                $this->line(sprintf('  … and %d more.', count($result['failures']) - 25));
+            }
+
+            $this->newLine();
+            $this->error('REPAIR FAILED — see above. No part of this run should be assumed applied.');
 
             return self::FAILURE;
+        }
+
+        $this->newLine();
+        $this->heading('REPAIR COMPLETE');
+        $this->line(sprintf('Students corrected:   %d', $result['updated']));
+        $this->line(sprintf('  read back and confirmed on file: %d', $result['verified']));
+
+        // Committed inside somebody else's transaction, the rows read back
+        // correctly and can still be thrown away by whoever owns it. Worth
+        // saying out loud rather than refusing over, because a test suite
+        // legitimately runs this way.
+        if (DB::transactionLevel() > 0) {
+            $this->warn(sprintf(
+                '  Note: this ran inside an open transaction (depth %d); another caller decides whether it is kept.',
+                DB::transactionLevel(),
+            ));
+        }
+
+        $this->line(sprintf('Already correct:      %d', $result['unchanged']));
+        $this->line(sprintf('Left alone:           %d', $result['skipped']));
+
+        foreach ($result['fields'] as $field => $count) {
+            $this->line(sprintf('  %-24s %d', $field, $count));
         }
 
         return self::SUCCESS;
