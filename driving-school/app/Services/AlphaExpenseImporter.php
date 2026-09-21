@@ -50,6 +50,8 @@ class AlphaExpenseImporter
 
     public const NEEDS_REVIEW = 'NEEDS_REVIEW';
 
+    public const SKIP_INCOME = 'SKIP_INCOME';
+
     public const SKIP_TOTAL = 'SKIP_TOTAL';
 
     public const SKIP_HEADING = 'SKIP_HEADING';
@@ -349,6 +351,7 @@ class AlphaExpenseImporter
     {
         $haystack = $this->normalise($entry['description'].' '.$entry['extra']);
 
+        // 1. A total counts money already counted on the lines above it.
         foreach ((array) config('alpha_expense_import.total_words') as $word) {
             if ($this->mentions($haystack, $word)) {
                 return $this->rule($entry, self::SKIP_TOTAL, 'SUMMARY_TOTAL',
@@ -356,14 +359,16 @@ class AlphaExpenseImporter
             }
         }
 
-        if ($entry['amount'] === null) {
-            foreach ((array) config('alpha_expense_import.heading_words') as $word) {
-                if ($this->mentions($haystack, $word)) {
-                    return $this->rule($entry, self::SKIP_HEADING, 'HEADING',
-                        __('A heading, not an entry, and no amount is written against it'));
-                }
+        // 2. A heading names a section of the book, not a cost in it.
+        foreach ((array) config('alpha_expense_import.heading_words') as $word) {
+            if ($this->mentions($haystack, $word)) {
+                return $this->rule($entry, self::SKIP_HEADING, 'HEADING',
+                    __('A heading, not an entry'));
             }
+        }
 
+        // 3. Nothing to post.
+        if ($entry['amount'] === null) {
             return $this->rule($entry, self::INVALID, 'MISSING_AMOUNT',
                 __('No amount is written beside this line'));
         }
@@ -378,37 +383,24 @@ class AlphaExpenseImporter
                 __('An amount with nothing written against it'));
         }
 
+        // 4. Money that came in. Posting a receipt as an expense would charge
+        //    the school for being paid.
         foreach ((array) config('alpha_expense_import.incoming_words') as $word) {
             if ($this->mentions($haystack, $word)) {
-                return $this->rule($entry, self::NEEDS_REVIEW, 'INCOMING_MONEY',
+                return $this->rule($entry, self::SKIP_INCOME, 'INCOMING_MONEY',
                     __('Money received (":word"), not money spent', ['word' => $word]));
             }
         }
 
-        // Held back before the safe list is tried at all, so a line that names
-        // both a person and a purchase — "Abdullhi 50 lesien" — is a question
-        // about who the licence was for rather than a licence to post.
-        foreach ((array) config('alpha_expense_import.review_words') as $word) {
-            if ($this->mentions($haystack, $word)) {
-                return $this->rule($entry, self::NEEDS_REVIEW, 'NOT_CLEARLY_A_SCHOOL_COST',
-                    __('":word" — the line does not say this was bought for the school', ['word' => $word]));
-            }
-        }
-
-        [$code, $rule] = $this->categorise($haystack);
-
-        if ($code === null) {
-            return $this->rule($entry, self::NEEDS_REVIEW, 'NO_RULE_MATCHED',
-                __('Nothing in the wording says what this money bought'));
-        }
+        // 5. Everything else is the school's spending. This is the owner's
+        //    ruling: the document is the school's expense book, so a line in
+        //    it is a cost, whether or not the wording says what it bought.
+        [$entry['category_code'], $entry['category_rule']] = $this->categorise($haystack);
 
         if ($entry['date_source'] === 'fallback' && config('alpha_expense_import.undated_policy') === 'review') {
             return $this->rule($entry, self::NEEDS_REVIEW, 'NO_DATE',
                 __('The document gives no date for this line'));
         }
-
-        $entry['category_code'] = $code;
-        $entry['category_rule'] = $rule;
 
         return $entry;
     }
@@ -427,13 +419,13 @@ class AlphaExpenseImporter
     }
 
     /**
-     * The category and the word that chose it, or nothing.
+     * The category and the word that chose it.
      *
-     * There is no fallback. A line that matches no rule is a line whose
-     * wording does not say what the money bought, and the answer to that is a
-     * question, not a category.
+     * Never nothing: a line nothing recognises is filed under Other Expense,
+     * because not knowing what something bought is a reason to shelve it
+     * carefully, not a reason to leave it out of the books.
      *
-     * @return array{0: string|null, 1: string|null}
+     * @return array{0: string, 1: string|null}
      */
     protected function categorise(string $haystack): array
     {
@@ -443,8 +435,6 @@ class AlphaExpenseImporter
                     continue;
                 }
 
-                // Some words only mean what they look like when something else
-                // is beside them: washing is a car wash when a car is named.
                 if (($rule['needs'] ?? null) === 'vehicle' && ! $this->namesAVehicle($haystack)) {
                     continue;
                 }
@@ -453,13 +443,7 @@ class AlphaExpenseImporter
             }
         }
 
-        foreach ((array) config('alpha_expense_import.categories.other_business') as $word) {
-            if ($this->mentions($haystack, $word)) {
-                return ['other_business', $word];
-            }
-        }
-
-        return [null, null];
+        return [config('alpha_expense_import.categories.fallback', 'other_expense'), null];
     }
 
     protected function namesAVehicle(string $haystack): bool

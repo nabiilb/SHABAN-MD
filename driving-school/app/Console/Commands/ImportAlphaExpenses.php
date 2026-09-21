@@ -163,6 +163,7 @@ class ImportAlphaExpenses extends Command
         $totals = $this->decided($plan, AlphaExpenseImporter::SKIP_TOTAL);
         $headings = $this->decided($plan, AlphaExpenseImporter::SKIP_HEADING);
         $invalid = $this->decided($plan, AlphaExpenseImporter::INVALID);
+        $income = $this->decided($plan, AlphaExpenseImporter::SKIP_INCOME);
         $review = $this->decided($plan, AlphaExpenseImporter::NEEDS_REVIEW);
 
         $dated = array_filter($import, fn ($e) => $e['date_source'] === 'line');
@@ -180,12 +181,13 @@ class ImportAlphaExpenses extends Command
         $this->line(sprintf('Entries scanned:               %d', count($plan['entries'])));
         $this->line(sprintf('Blank pairs:                   %d', $plan['blank']));
         $this->newLine();
-        $this->line(sprintf('SAFE business expenses:        %d  (%s)', count($import), $this->money($this->sum($import))));
-        $this->line(sprintf('Already imported (duplicates): %d  (%s)', count($already), $this->money($this->sum($already))));
-        $this->line(sprintf('NEEDS REVIEW, not imported:    %d  (%s)', count($review), $this->money($this->sum($review))));
-        $this->line(sprintf('Totals/subtotals skipped:      %d  (%s)', count($totals), $this->money($this->sum($totals))));
-        $this->line(sprintf('Headings skipped:              %d', count($headings)));
-        $this->line(sprintf('Invalid lines:                 %d', count($invalid)));
+        $this->line(sprintf('IMPORT_EXPENSE:                %d  (%s)', count($import), $this->money($this->sum($import))));
+        $this->line(sprintf('DUPLICATE, already on file:    %d  (%s)', count($already), $this->money($this->sum($already))));
+        $this->line(sprintf('SKIP_INCOME:                   %d  (%s)', count($income), $this->money($this->sum($income))));
+        $this->line(sprintf('SKIP_TOTAL:                    %d  (%s)', count($totals), $this->money($this->sum($totals))));
+        $this->line(sprintf('SKIP_HEADING:                  %d', count($headings)));
+        $this->line(sprintf('INVALID:                       %d', count($invalid)));
+        $this->line(sprintf('NEEDS_REVIEW:                  %d', count($review)));
 
         if ($fuelRecords !== []) {
             $this->line(sprintf('Fuel records:                  %d', count($fuelRecords)));
@@ -198,11 +200,12 @@ class ImportAlphaExpenses extends Command
         $this->categoryTotals($import, $already);
         $this->missingCategories($plan);
         $this->fuelNote();
-        $this->reconciliation($import, $review, $totals);
-        $this->exclusions('NEEDS REVIEW — NOT IMPORTED', $review);
-        $this->exclusions('SKIPPED — SUMMARY/TOTAL LINES', $totals);
-        $this->exclusions('SKIPPED — HEADINGS', $headings);
-        $this->exclusions('INVALID', $invalid);
+        $this->reconciliation($import, array_merge($income, $review), $totals);
+        $this->exclusions('SKIP_INCOME — MONEY COMING IN, NOT SPENDING', $income);
+        $this->exclusions('NEEDS_REVIEW — NOT IMPORTED', $review);
+        $this->exclusions('SKIP_TOTAL — SUMMARY LINES', $totals);
+        $this->exclusions('SKIP_HEADING — SECTION LABELS', $headings);
+        $this->exclusions('INVALID — NO USABLE AMOUNT', $invalid);
         $this->dateNote($plan, $dated);
         $this->preview($plan);
     }
@@ -231,9 +234,9 @@ class ImportAlphaExpenses extends Command
     {
         $this->newLine();
         $this->heading('RECONCILIATION');
-        $this->line(sprintf('Safe business expenses:         %s', $this->money($this->sum($import))));
-        $this->line(sprintf('Held for review:                %s', $this->money($this->sum($review))));
-        $this->line(sprintf('Everything the document spends: %s', $this->money($this->sum($import) + $this->sum($review))));
+        $this->line(sprintf('Imported as expenses:           %s', $this->money($this->sum($import))));
+        $this->line(sprintf('Excluded (income and review):   %s', $this->money($this->sum($review))));
+        $this->line(sprintf('Everything the document spends: %s', $this->money($this->sum($import))));
         $this->newLine();
         $this->line('Totals written in the document, for comparison only:');
 
