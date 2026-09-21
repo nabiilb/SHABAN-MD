@@ -317,7 +317,12 @@
                              headers: {
                                  'Content-Type': 'application/json',
                                  'Accept': 'application/json',
-                                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                                 // Single quotes only, and none around the
+                                 // attribute value: this expression lives
+                                 // inside a double-quoted HTML attribute, so
+                                 // one double quote here ends x-data early and
+                                 // takes the whole component down with it.
+                                 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content ?? '',
                              },
                              body: JSON.stringify({ remaining_days: value }),
                          });
