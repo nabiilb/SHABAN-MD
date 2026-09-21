@@ -273,6 +273,82 @@
                  get pickedName() {
                      return (this.results.find((student) => student.id === this.picked) || {}).full_name || '';
                  },
+
+                 /*
+                  * Correcting the days a student has left.
+                  *
+                  * The figure in the register can simply be wrong, and the
+                  * teacher at the console is the one who knows. Editing it
+                  * queues nobody: the answer comes back from the server — the
+                  * same calculation the Students page uses — and the row is
+                  * redrawn with it, Add to Queue still waiting to be pressed.
+                  */
+                 editing: null,
+                 editValue: 0,
+                 savingRemaining: false,
+                 editError: '',
+
+                 startEdit(student) {
+                     this.editing = student.id;
+                     this.editValue = student.remaining_days;
+                     this.editError = '';
+                     this.$nextTick(() => document.getElementById('remaining-' + student.id)?.focus());
+                 },
+
+                 cancelEdit() { this.editing = null; this.editError = ''; },
+
+                 async saveRemaining(student) {
+                     const value = parseInt(this.editValue, 10);
+
+                     if (! Number.isInteger(value) || value < 0) {
+                         this.editError = '{{ __('Remaining days cannot be negative.') }}';
+                         return;
+                     }
+
+                     this.savingRemaining = true;
+                     this.editError = '';
+
+                     try {
+                         const url = '{{ route('instructor.training.students.remaining', ['student' => '__ID__']) }}'
+                             .replace('__ID__', student.id);
+
+                         const response = await fetch(url, {
+                             method: 'PATCH',
+                             headers: {
+                                 'Content-Type': 'application/json',
+                                 'Accept': 'application/json',
+                                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                             },
+                             body: JSON.stringify({ remaining_days: value }),
+                         });
+
+                         const body = await response.json();
+
+                         if (! response.ok) {
+                             this.editError = body.message
+                                 ?? Object.values(body.errors ?? {}).flat()[0]
+                                 ?? '{{ __('That could not be saved.') }}';
+                             return;
+                         }
+
+                         // Redrawn from the server's answer, never from the
+                         // number that was typed.
+                         Object.assign(student, {
+                             remaining_days: body.remaining_days,
+                             remaining_label: body.remaining_label,
+                             progress: body.progress,
+                             status_label: body.status_label,
+                             eligible: body.eligible,
+                             blocked_by: body.blocked_by,
+                         });
+
+                         this.editing = null;
+                     } catch (e) {
+                         this.editError = '{{ __('That could not be saved.') }}';
+                     } finally {
+                         this.savingRemaining = false;
+                     }
+                 },
              }">
             <div class="card-header">
                 <h3 class="card-title">🟡 {{ __('Waiting Queue') }}</h3>
@@ -479,6 +555,48 @@
                                             <span class="badge-slate" x-text="student.status_label"></span>
                                         </span>
                                     </button>
+
+                                    {{-- Putting the figure right, without leaving the dialog. The
+                                         control sits outside the select button so tapping it on a
+                                         phone does not also pick the student. --}}
+                                    <div class="px-3 pb-3 -mt-1">
+                                        <button type="button" x-show="editing !== student.id"
+                                                @click="startEdit(student)"
+                                                class="btn btn-ghost btn-sm max-sm:w-full">
+                                            ✏️ {{ __('Edit remaining days') }}
+                                        </button>
+
+                                        <div x-show="editing === student.id" x-cloak
+                                             class="rounded-lg border border-brand-200 bg-brand-50/60 p-3">
+                                            <label class="label text-xs" :for="`remaining-${student.id}`">
+                                                {{ __('Remaining days') }}
+                                            </label>
+
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <input type="number" inputmode="numeric" min="0" step="1"
+                                                       :id="`remaining-${student.id}`"
+                                                       x-model.number="editValue"
+                                                       @keydown.enter.prevent="saveRemaining(student)"
+                                                       @keydown.escape.prevent="cancelEdit()"
+                                                       class="input w-24 max-sm:flex-1">
+
+                                                <button type="button" class="btn btn-primary btn-sm"
+                                                        :disabled="savingRemaining"
+                                                        @click="saveRemaining(student)">
+                                                    <span x-show="! savingRemaining">{{ __('Save') }}</span>
+                                                    <span x-show="savingRemaining" x-cloak>{{ __('Saving…') }}</span>
+                                                </button>
+
+                                                <button type="button" class="btn btn-secondary btn-sm"
+                                                        @click="cancelEdit()">{{ __('Cancel') }}</button>
+                                            </div>
+
+                                            <p class="field-error" x-show="editError" x-cloak x-text="editError"></p>
+                                            <p class="mt-1 text-xs text-slate-500">
+                                                {{ __('Days trained from today on keep counting down from this figure.') }}
+                                            </p>
+                                        </div>
+                                    </div>
                                 </li>
                             </template>
 

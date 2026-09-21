@@ -73,15 +73,20 @@ class FuelController extends Controller
         $this->authorize('create', FuelRecord::class);
 
         try {
-            $fuel = $this->fuel->record($request->fuelData(), $request->user(), requiresApproval: true);
+            // The instructor's submission is the authorisation. There is no
+            // second pair of eyes to wait for, so the record is approved as it
+            // is created and FuelService posts it in the same transaction —
+            // an expense for cash, a debt for credit, by the same code an
+            // admin's Approve has always run. Nothing about that accounting
+            // is repeated here.
+            $fuel = $this->fuel->record($request->fuelData(), $request->user(), requiresApproval: false);
         } catch (RuntimeException $e) {
             return back()->withInput()->withErrors(['fuel' => $e->getMessage()]);
         }
 
-        return redirect()->route('instructor.fuel.index')->with('status', __(
-            'Fuel record :number submitted for approval.',
-            ['number' => $fuel->fuel_number],
-        ));
+        return redirect()->route('instructor.fuel.index')->with('status', $fuel->is_credit
+            ? __('Fuel record :number recorded on credit.', ['number' => $fuel->fuel_number])
+            : __('Fuel record :number recorded.', ['number' => $fuel->fuel_number]));
     }
 
     public function show(FuelRecord $fuel): View

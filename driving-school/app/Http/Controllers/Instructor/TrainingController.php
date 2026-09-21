@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Instructor;
 use App\Events\TrainingBoardChanged;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AddToTrainingQueueRequest;
+use App\Http\Requests\CorrectRemainingDaysRequest;
 use App\Http\Requests\EvaluateTrainingRequest;
 use App\Http\Requests\StartTrainingRequest;
 use App\Models\LessonTopic;
@@ -13,6 +14,7 @@ use App\Models\Student;
 use App\Models\TrainingQueueEntry;
 use App\Models\TrainingSession;
 use App\Models\Vehicle;
+use App\Services\StudentProgressService;
 use App\Services\TrainingBoardService;
 use App\Services\TrainingQueueService;
 use App\Services\TrainingSessionService;
@@ -22,6 +24,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use InvalidArgumentException;
 use RuntimeException;
 
 /**
@@ -112,6 +115,50 @@ class TrainingController extends Controller
      * instructor who will train them is the one in the session, never a value
      * from the browser.
      */
+    /**
+     * Puts right the days a student has left, from the queue dialog.
+     *
+     * Correcting the figure does not queue anybody: the teacher still presses
+     * Add to Queue afterwards, and the eligibility rules answer that question
+     * as they always did.
+     */
+    public function updateRemaining(
+        CorrectRemainingDaysRequest $request,
+        Student $student,
+        StudentProgressService $progress,
+    ): JsonResponse {
+        // The dialog only ever offers active students, and a correction is not
+        // a way to reach the ones it does not.
+        if ($student->status !== 'active') {
+            return response()->json([
+                'message' => __('Only an active student\'s remaining days can be corrected here.'),
+            ], 422);
+        }
+
+        try {
+            $student = $progress->correctRemaining($student, $request->integer('remaining_days'), $request->user());
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $verdict = $this->queue->eligibilityFor($student);
+
+        return response()->json([
+            'id' => $student->id,
+            'remaining_days' => $student->remaining_days,
+            'remaining_label' => trans_choice(
+                '{0}:count days|{1}:count day|[2,*]:count days',
+                $student->remaining_days,
+                ['count' => $student->remaining_days],
+            ),
+            'progress' => $student->progress_percentage,
+            'status_label' => __(ucfirst($student->status)),
+            'eligible' => $verdict->eligible,
+            'blocked_by' => $verdict->eligible ? null : $verdict->reason,
+            'message' => __('Remaining days updated.'),
+        ]);
+    }
+
     public function addToQueue(AddToTrainingQueueRequest $request): RedirectResponse
     {
         $student = Student::findOrFail($request->integer('student_id'));

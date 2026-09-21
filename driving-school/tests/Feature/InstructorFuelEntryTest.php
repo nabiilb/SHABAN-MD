@@ -10,11 +10,13 @@ use App\Models\Role;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Models\Vehicle;
+use App\Services\DashboardService;
 use App\Services\DebtService;
 use App\Services\FuelService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\TestCase;
@@ -23,9 +25,10 @@ use Tests\TestCase;
  * An instructor recording a fill-up.
  *
  * Recording fuel writes into the company ledger — an expense for cash, a debt
- * for credit — so an instructor's submission waits as `pending` and posts
- * nothing until an admin approves it. The admin's own entries are unchanged:
- * approved on save, posted in the same transaction.
+ * for credit. The instructor's submission is the authorisation: the record is
+ * approved as it is created and posts in the same transaction, by the same
+ * FuelService code an admin's Approve has always run. The approval path itself
+ * is untouched and still settles records that are already pending.
  */
 class InstructorFuelEntryTest extends TestCase
 {
@@ -110,7 +113,7 @@ class InstructorFuelEntryTest extends TestCase
     }
 
     /* B + C + D ------------------------------------------------------- */
-    public function test_a_submission_is_recorded_pending_against_the_right_vehicle_and_instructor(): void
+    public function test_a_submission_is_approved_at_once_against_the_right_vehicle_and_instructor(): void
     {
         $this->submit($this->xasanUser)->assertRedirect(route('instructor.fuel.index'));
 
@@ -119,48 +122,45 @@ class InstructorFuelEntryTest extends TestCase
         $this->assertSame($this->xasansCar->id, $fuel->vehicle_id);
         $this->assertSame($this->xasan->id, $fuel->instructor_id);
         $this->assertSame($this->xasanUser->id, $fuel->created_by);
-        $this->assertSame(FuelRecord::PENDING, $fuel->status);
-        $this->assertNull($fuel->approved_by);
+        $this->assertSame(FuelRecord::APPROVED, $fuel->status);
+        // The instructor is the one who authorised it; no admin is invented.
+        $this->assertSame($this->xasanUser->id, $fuel->approved_by);
+        $this->assertNotNull($fuel->approved_at);
         $this->assertSame(30.0, (float) $fuel->amount);
         $this->assertStringStartsWith('FUEL-', $fuel->fuel_number);
     }
 
-    /* E — nothing reaches the ledger while it is pending. */
-    public function test_a_pending_submission_posts_nothing_to_the_company_ledger(): void
+    /* E — a cash fill-up posts its expense as it is recorded. */
+    public function test_a_cash_submission_writes_the_company_expense_at_once(): void
     {
         $this->submit($this->xasanUser);
 
         $fuel = FuelRecord::firstOrFail();
-
-        $this->assertNull($fuel->company_expense_id);
-        $this->assertNull($fuel->company_debt_id);
-        $this->assertSame(0, CompanyExpense::count());
-        $this->assertSame(0, CompanyDebt::count());
-    }
-
-    /* E — and approving posts it, through the existing expense path. */
-    public function test_approving_a_cash_submission_writes_the_company_expense(): void
-    {
-        $this->submit($this->xasanUser);
-        $fuel = FuelRecord::firstOrFail();
-
-        $this->actingAs($this->admin)->post(route('admin.fuel.approve', $fuel))->assertRedirect();
-
-        $fuel->refresh();
 
         $this->assertSame(FuelRecord::APPROVED, $fuel->status);
-        $this->assertSame($this->admin->id, $fuel->approved_by);
-        $this->assertNotNull($fuel->approved_at);
         $this->assertNotNull($fuel->company_expense_id);
         $this->assertNull($fuel->company_debt_id);
+        $this->assertSame(1, CompanyExpense::count());
+        $this->assertSame(0, CompanyDebt::count());
 
         $expense = CompanyExpense::findOrFail($fuel->company_expense_id);
         $this->assertSame(30.0, (float) $expense->amount);
         $this->assertSame($this->xasansCar->id, $expense->vehicle_id);
     }
 
-    /* F — credit goes to DebtService, not to an expense. */
-    public function test_approving_a_credit_submission_raises_a_company_debt_and_no_expense(): void
+    /* E — and no admin has to press anything. */
+    public function test_no_pending_record_is_left_for_an_admin_to_approve(): void
+    {
+        $this->submit($this->xasanUser);
+
+        $this->assertSame(0, FuelRecord::where('status', FuelRecord::PENDING)->count());
+
+        $this->actingAs($this->admin)->get(route('admin.fuel.index'))->assertOk();
+        $this->assertSame(1, FuelRecord::where('status', FuelRecord::APPROVED)->count());
+    }
+
+    /* F — credit goes to DebtService, not to an expense, and goes at once. */
+    public function test_a_credit_submission_raises_a_company_debt_and_no_expense(): void
     {
         $this->submit($this->xasanUser, [
             'is_credit' => 1,
@@ -169,11 +169,9 @@ class InstructorFuelEntryTest extends TestCase
         ]);
 
         $fuel = FuelRecord::firstOrFail();
-        $this->assertSame(0, CompanyDebt::count());
 
-        $this->actingAs($this->admin)->post(route('admin.fuel.approve', $fuel))->assertRedirect();
-
-        $fuel->refresh();
+        $this->assertSame(FuelRecord::APPROVED, $fuel->status);
+        $this->assertSame(1, CompanyDebt::count());
         $debt = CompanyDebt::findOrFail($fuel->company_debt_id);
 
         $this->assertNull($fuel->company_expense_id);
@@ -190,13 +188,12 @@ class InstructorFuelEntryTest extends TestCase
     /* G + H — the fuel and its ledger entry stand or fall together. */
     public function test_a_failed_ledger_write_rolls_the_fuel_record_back(): void
     {
-        $this->submit($this->xasanUser, [
-            'is_credit' => 1,
-            'supplier_id' => $this->station->id,
-            'payment_method' => 'other',
-        ]);
-
-        $fuel = FuelRecord::firstOrFail();
+        $fuel = app(FuelService::class)->record(
+            $this->payload(['is_credit' => 1, 'supplier_id' => $this->station->id, 'payment_method' => 'other'])
+                + ['instructor_id' => $this->xasan->id],
+            $this->xasanUser,
+            requiresApproval: true,
+        );
 
         // A DebtService that cannot write, standing in for a failure mid-post.
         $this->app->bind(DebtService::class, fn () => new class extends DebtService
@@ -312,12 +309,6 @@ class InstructorFuelEntryTest extends TestCase
             'payment_method' => 'other',
         ]);
 
-        $fuel = FuelRecord::firstOrFail();
-
-        // Nothing exists to see while it is pending.
-        $this->assertSame(0, CompanyDebt::query()->visibleTo($this->xasanUser)->count());
-
-        $this->actingAs($this->admin)->post(route('admin.fuel.approve', $fuel));
         $debt = CompanyDebt::firstOrFail();
 
         $this->assertSame([$debt->id], CompanyDebt::query()->visibleTo($this->xasanUser)->pluck('id')->all());
@@ -368,10 +359,23 @@ class InstructorFuelEntryTest extends TestCase
     }
 
     /** Rejecting refuses the submission and still posts nothing. */
-    public function test_a_rejected_submission_never_reaches_the_ledger(): void
+    /**
+     * Rejection still works, for the records that are still pending.
+     *
+     * An instructor's own submissions no longer wait, but admin entries held
+     * back and anything left pending from before this change still go through
+     * the same approve/reject pair, untouched.
+     */
+    public function test_a_pending_record_can_still_be_rejected_and_never_reaches_the_ledger(): void
     {
-        $this->submit($this->xasanUser);
-        $fuel = FuelRecord::firstOrFail();
+        $fuel = app(FuelService::class)->record(
+            $this->payload() + ['instructor_id' => $this->xasan->id],
+            $this->xasanUser,
+            requiresApproval: true,
+        );
+
+        $this->assertSame(FuelRecord::PENDING, $fuel->status);
+        $this->assertSame(0, CompanyExpense::count());
 
         $this->actingAs($this->admin)
             ->post(route('admin.fuel.reject', $fuel), ['rejection_reason' => 'Receipt missing'])
@@ -424,6 +428,59 @@ class InstructorFuelEntryTest extends TestCase
     }
 
     /* 14 — the audit trail. */
+    /* The dashboard counts a cash fill-up the moment it is recorded. */
+    public function test_the_dashboard_total_moves_by_the_amount_recorded(): void
+    {
+        $before = app(DashboardService::class)->adminMetrics()['total_expenses'];
+
+        $this->submit($this->xasanUser);
+
+        $after = app(DashboardService::class)->adminMetrics()['total_expenses'];
+
+        $this->assertSame(round($before + 30.0, 2), round($after, 2));
+    }
+
+    /* A credit fill-up is an obligation, so the expense total does not move. */
+    public function test_a_credit_fill_up_raises_a_debt_without_moving_the_expense_total(): void
+    {
+        $before = app(DashboardService::class)->adminMetrics();
+
+        $this->submit($this->xasanUser, [
+            'is_credit' => 1,
+            'supplier_id' => $this->station->id,
+            'payment_method' => 'other',
+        ]);
+
+        $after = app(DashboardService::class)->adminMetrics();
+
+        $this->assertSame($before['total_expenses'], $after['total_expenses']);
+        $this->assertSame(round($before['outstanding_debt'] + 30.0, 2), round($after['outstanding_debt'], 2));
+    }
+
+    /* Recording fuel is not a way to reach students or training. */
+    public function test_recording_fuel_touches_no_student_or_training_record(): void
+    {
+        $tables = ['students', 'attendance', 'student_payments', 'training_sessions',
+            'training_queue_entries', 'training_evaluations'];
+
+        $before = [];
+
+        foreach ($tables as $table) {
+            $before[$table] = DB::table($table)->get()->toArray();
+        }
+
+        $this->submit($this->xasanUser, [
+            'is_credit' => 1,
+            'supplier_id' => $this->station->id,
+            'payment_method' => 'other',
+        ]);
+
+        foreach ($tables as $table) {
+            $this->assertEquals($before[$table], DB::table($table)->get()->toArray(),
+                "Recording fuel changed {$table}.");
+        }
+    }
+
     public function test_every_step_is_written_to_the_audit_log(): void
     {
         $this->submit($this->xasanUser, [
@@ -433,8 +490,9 @@ class InstructorFuelEntryTest extends TestCase
         ]);
 
         $fuel = FuelRecord::firstOrFail();
-        $this->actingAs($this->admin)->post(route('admin.fuel.approve', $fuel));
 
+        // Created and posted in one step, by the instructor, so the debt is
+        // raised under their name rather than an admin's.
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'fuelrecord.created',
             'auditable_id' => $fuel->id,
@@ -442,14 +500,14 @@ class InstructorFuelEntryTest extends TestCase
         ]);
 
         $this->assertDatabaseHas('audit_logs', [
-            'action' => 'fuelrecord.approved',
-            'auditable_id' => $fuel->id,
-            'user_id' => $this->admin->id,
+            'action' => 'debt.created',
+            'user_id' => $this->xasanUser->id,
         ]);
 
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'debt.created',
-            'user_id' => $this->admin->id,
+        // Nothing was approved separately, because nothing waited.
+        $this->assertDatabaseMissing('audit_logs', [
+            'action' => 'fuelrecord.approved',
+            'auditable_id' => $fuel->id,
         ]);
     }
 }
