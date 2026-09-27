@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+
+/*
+ * 48HRS design tokens — sourced from the design-system tokens shipped with the
+ * prototype (tokens/colors.css, typography.css, spacing.css, effects.css).
+ * Navy identity, gold used only as a small accent, light neutral surfaces.
+ */
+@theme {
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+
+  --color-navy-50: #f1f6fd;
+  --color-navy-100: #dce8f8;
+  --color-navy-200: #aecbec;
+  --color-navy-300: #6b9fdc;
+  --color-navy-400: #2f6fc4;
+  --color-navy-500: #1c5aa8;
+  --color-navy-600: #17498a;
+  --color-navy-700: #123a6b;
+  --color-navy-800: #0d2447;
+  --color-navy-900: #0a1424;
+
+  --color-gold-100: #f7edc6;
+  --color-gold-400: #e4c660;
+  --color-gold-500: #d9b53f;
+  --color-gold-600: #c9a02e;
+
+  --color-gray-50: #f7f9fc;
+  --color-gray-100: #eef1f6;
+  --color-gray-200: #e2e7ee;
+  --color-gray-300: #c7ced9;
+  --color-gray-400: #98a2b3;
+  --color-gray-500: #6b7688;
+  --color-gray-600: #4b5566;
+  --color-gray-800: #232936;
+  --color-gray-900: #12161f;
+
+  /* Semantic surfaces & text */
+  --color-page: #f7f9fc;
+  --color-card: #ffffff;
+  --color-sunken: #eef1f6;
+  --color-line: #e2e7ee;
+  --color-line-strong: #c7ced9;
+  --color-ink: #12161f;
+  --color-ink-2: #4b5566;
+  --color-ink-3: #6b7688;
+  --color-brand: #17498a;
+  --color-brand-hover: #123a6b;
+  --color-brand-active: #0d2447;
+  --color-sidebar: #0a1424;
+
+  /* Status */
+  --color-success: #1f8a4c;
+  --color-success-bg: #e7f5ec;
+  --color-warning: #a56a12;
+  --color-warning-bg: #fdf3e0;
+  --color-danger: #c53030;
+  --color-danger-hover: #a92727;
+  --color-danger-bg: #fbe9e9;
+  --color-info: #17498a;
+  --color-info-bg: #f1f6fd;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  --shadow-xs: 0 1px 2px rgba(10, 20, 36, 0.06);
+  --shadow-sm: 0 2px 6px rgba(10, 20, 36, 0.08);
+  --shadow-md: 0 6px 16px rgba(10, 20, 36, 0.1);
+  --shadow-lg: 0 16px 36px rgba(10, 20, 36, 0.14);
+
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-page font-sans text-ink antialiased;
+    font-size: 14px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-navy-400);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+}
+
+/* Section label used across the prototype ("PATIENT INFORMATION", "CASE SUMMARY"…) */
+@utility eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes sla-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@utility animate-sla-pulse {
+  animation: sla-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+}

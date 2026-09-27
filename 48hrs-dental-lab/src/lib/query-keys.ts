@@ -1,0 +1,27 @@
+/** Central query-key factory so invalidation stays consistent. */
+export const qk = {
+  cases: {
+    all: ['cases'] as const,
+    list: (params: object) => ['cases', 'list', params] as const,
+    detail: (id: string) => ['cases', 'detail', id] as const,
+    counts: ['cases', 'counts'] as const,
+  },
+  patients: { all: ['patients'] as const, list: (p: object) => ['patients', 'list', p] as const, detail: (id: string) => ['patients', 'detail', id] as const },
+  doctors: { all: ['doctors'] as const, list: (p: object) => ['doctors', 'list', p] as const, detail: (id: string) => ['doctors', 'detail', id] as const },
+  clinics: { all: ['clinics'] as const, list: (p: object) => ['clinics', 'list', p] as const, detail: (id: string) => ['clinics', 'detail', id] as const },
+  technicians: { all: ['technicians'] as const, list: (p: object) => ['technicians', 'list', p] as const, detail: (id: string) => ['technicians', 'detail', id] as const },
+  invoices: { all: ['invoices'] as const, list: (p: object) => ['invoices', 'list', p] as const, detail: (id: string) => ['invoices', 'detail', id] as const },
+  payments: { all: ['payments'] as const, list: (p: object) => ['payments', 'list', p] as const },
+  qc: { all: ['quality-checks'] as const, list: (p: object) => ['quality-checks', 'list', p] as const },
+  deliveries: { all: ['deliveries'] as const, list: (p: object) => ['deliveries', 'list', p] as const },
+  notifications: { all: ['notifications'] as const, list: (p: object) => ['notifications', 'list', p] as const },
+  dashboard: ['dashboard'] as const,
+  reports: (f: object) => ['reports', f] as const,
+  search: (q: string) => ['search', q] as const,
+  users: { all: ['users'] as const, list: (p: object) => ['users', 'list', p] as const },
+  roles: ['roles'] as const,
+  permissions: ['permissions'] as const,
+  services: (all: boolean) => ['services', all] as const,
+  settings: ['settings'] as const,
+  activity: (p: object) => ['activity', p] as const,
+};
