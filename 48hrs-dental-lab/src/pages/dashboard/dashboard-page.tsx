@@ -54,6 +54,7 @@ function OperationsDashboard({ role }: { role: RoleKey }) {
         <StatCard loading={isLoading} label="Active cases" value={v(d?.activeCases)} to="/cases?view=open" />
         <StatCard loading={isLoading} label="New today" value={v(d?.newToday)} to="/cases" />
         <StatCard loading={isLoading} label="Due today" value={v(d?.dueToday)} emphasis={d?.dueToday ? 'warning' : 'default'} to="/cases?sla=due_today" />
+        <StatCard loading={isLoading} label="At risk" value={v(d?.performance.atRisk)} emphasis={d?.performance.atRisk ? 'warning' : 'default'} hint="≤ 12h remaining" to="/cases?sla=at_risk" />
         <StatCard loading={isLoading} label="Overdue" value={v(d?.overdue)} emphasis={d?.overdue ? 'danger' : 'default'} to="/cases?sla=overdue" />
         <StatCard loading={isLoading} label="In production" value={v(d?.inProduction)} to="/production" />
         <StatCard loading={isLoading} label="Pending QC" value={v(d?.pendingQc)} to="/quality-control" />
@@ -83,18 +84,18 @@ function OperationsDashboard({ role }: { role: RoleKey }) {
                     <span className="bg-danger" style={{ width: `${(d.performance.overdue / inLabTotal) * 100}%` }} />
                   </div>
                 )}
-                <dl className="grid grid-cols-2 gap-4 border-t border-line pt-4">
+                <div className="grid grid-cols-2 gap-4 border-t border-line pt-4">
                   <div className="flex flex-col gap-1">
-                    <dt className="text-xs text-ink-3">On-time rate (30 days)</dt>
-                    <dd className="font-mono text-2xl font-bold">{formatPercent(d.performance.onTimeRate)}</dd>
+                    <span className="text-xs text-ink-3">On-time rate (30 days)</span>
+                    <span className="font-mono text-2xl font-bold">{formatPercent(d.performance.onTimeRate)}</span>
                     <ProgressBar value={d.performance.onTimeRate ?? 0} tone="success" label="On-time rate" />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <dt className="flex items-center gap-1 text-xs text-ink-3"><Timer className="size-3.5" /> Avg. completion</dt>
-                    <dd className="font-mono text-2xl font-bold">{d.performance.avgCompletionHours !== null ? `${d.performance.avgCompletionHours}h` : '—'}</dd>
+                    <span className="flex items-center gap-1 text-xs text-ink-3"><Timer className="size-3.5" /> Avg. completion</span>
+                    <span className="font-mono text-2xl font-bold">{d.performance.avgCompletionHours !== null ? `${d.performance.avgCompletionHours}h` : '—'}</span>
                     <span className="text-[11.5px] text-ink-3">Received → delivered</span>
                   </div>
-                </dl>
+                </div>
               </>
             )}
           </CardBody>

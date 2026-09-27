@@ -16,13 +16,15 @@ import type { LabService, LabSettings } from '@/types/models';
 import { formatMoney } from '@/utils/format';
 import { applyApiErrors } from '@/components/forms/api-errors';
 import { SelectField, SwitchField, TextField } from '@/components/forms/fields';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ActiveBadge } from '@/components/ui/record-badges';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Alert, ErrorState, PageLoader } from '@/components/ui/feedback';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SimpleTable } from '@/components/ui/simple-table';
+import { RowActions } from '@/components/tables/row-actions';
 
 const intIn = (label: string, min: number, max: number) =>
   z.coerce.number({ invalid_type_error: `${label} must be a number.` }).int(`${label} must be a whole number.`).min(min, `${label} must be at least ${min}.`).max(max, `${label} must be at most ${max}.`);
@@ -156,32 +158,35 @@ function ServicesPanel() {
     <Card>
       <CardHeader title="Services & pricing" description="The price list clients order from." actions={manage && <Button size="sm" onClick={() => setEditing('new')}><Plus /> Add service</Button>} />
       <CardBody className="pt-3">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-[11px] font-bold tracking-[.12em] text-ink-3 uppercase">
-                <th className="py-2.5 pr-4">Service</th><th className="py-2.5 pr-4">Type</th><th className="py-2.5 pr-4">Unit price</th><th className="py-2.5 pr-4">Default material</th><th className="py-2.5 pr-4">Status</th>{manage && <th className="py-2.5 text-right"><span className="sr-only">Actions</span></th>}
-              </tr>
-            </thead>
-            <tbody>
-              {q.data?.map((s) => (
-                <tr key={s.id} className="border-b border-line last:border-0">
-                  <td className="py-3 pr-4 font-bold">{s.name}</td>
-                  <td className="py-3 pr-4">{CASE_TYPE_LABELS[s.caseType]}</td>
-                  <td className="py-3 pr-4 font-mono font-bold">{formatMoney(s.unitPrice)} / {s.unitMode === 'tooth' ? 'tooth' : 'unit'}</td>
-                  <td className="py-3 pr-4 text-ink-2">{s.defaultMaterial}</td>
-                  <td className="py-3 pr-4"><Badge tone={s.active ? 'success' : 'neutral'}>{s.active ? 'Active' : 'Inactive'}</Badge></td>
-                  {manage && (
-                    <td className="py-3 text-right whitespace-nowrap">
-                      <Button variant="ghost" size="icon-sm" aria-label={`Edit ${s.name}`} onClick={() => setEditing(s)}><Pencil /></Button>
-                      <Button variant="ghost" size="icon-sm" aria-label={`Delete ${s.name}`} onClick={() => setToDelete(s)}><Trash2 className="text-danger" /></Button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <SimpleTable
+          caption="Services and pricing"
+          minWidth={560}
+          rows={q.data ?? []}
+          getKey={(s) => s.id}
+          empty="No services yet."
+          columns={[
+            { header: 'Service', className: 'font-bold', cell: (s) => s.name },
+            { header: 'Type', cell: (s) => CASE_TYPE_LABELS[s.caseType] },
+            { header: 'Unit price', className: 'font-mono font-bold', cell: (s) => `${formatMoney(s.unitPrice)} / ${s.unitMode === 'tooth' ? 'tooth' : 'unit'}` },
+            { header: 'Default material', className: 'text-ink-2', cell: (s) => s.defaultMaterial },
+            { header: 'Status', cell: (s) => <ActiveBadge active={s.active} /> },
+            ...(manage
+              ? [{
+                  header: <span className="sr-only">Actions</span>,
+                  align: 'right' as const,
+                  cell: (s: LabService) => (
+                    <RowActions
+                      label={s.name}
+                      actions={[
+                        { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(s) },
+                        { label: 'Delete', icon: <Trash2 />, tone: 'danger' as const, onSelect: () => setToDelete(s) },
+                      ]}
+                    />
+                  ),
+                }]
+              : []),
+          ]}
+        />
       </CardBody>
       <ServiceDialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)} record={editing && editing !== 'new' ? editing : null} />
       <ConfirmDialog

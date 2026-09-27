@@ -36,8 +36,6 @@ export default function PatientDetailPage() {
   return (
     <div className="flex flex-col gap-4">
       <DetailHeader
-        backTo="/patients"
-        backLabel="Patients"
         name={p.name}
         subtitle={<span className="font-mono">{p.code}</span>}
         actions={

@@ -1,19 +1,24 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Pencil, Plus } from 'lucide-react';
+import { Eye, Pencil, Plus, Trash2 } from 'lucide-react';
 import { PERMISSIONS } from '@/lib/permissions';
-import { useClinics } from '@/hooks/api/use-directory';
+import { useClinics, useDeleteClinic } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
+import { errorMessage } from '@/services/api/errors';
+import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { useUrlState } from '@/hooks/use-url-state';
+import { useListState } from '@/hooks/use-list-state';
 import type { ClinicListItem } from '@/types/api';
 import { formatMoney } from '@/utils/format';
 import { ClinicFormDialog } from '@/components/directory/directory-forms';
 import { DataTable } from '@/components/tables/data-table';
+import { RowActions } from '@/components/tables/row-actions';
 import { ClearFiltersButton, FilterSelect, SearchInput, ToolbarRow } from '@/components/tables/toolbar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PageToolbar } from '@/components/ui/page-toolbar';
+import { ActiveBadge } from '@/components/ui/record-badges';
 
 const DEFAULTS = { search: '', status: undefined as string | undefined, sort: 'name', dir: 'asc', page: '1', perPage: '20' };
 
@@ -21,10 +26,13 @@ export default function ClinicsPage() {
   usePageTitle('Clinics', 'Clinics the lab works for');
   const { can } = useAuth();
   const navigate = useNavigate();
-  const [f, setF, resetF] = useUrlState(DEFAULTS);
+  const list = useListState(DEFAULTS);
+  const { state: f, set: setF, reset: resetF } = list;
   const [editing, setEditing] = useState<ClinicListItem | null | 'new'>(null);
-  const q = useClinics({ search: f.search || undefined, status: f.status as 'active' | 'inactive' | undefined, sort: f.sort, dir: f.dir as 'asc' | 'desc', page: Number(f.page), perPage: Number(f.perPage) });
+  const q = useClinics({ ...list.listParams, status: f.status as 'active' | 'inactive' | undefined });
   const manage = can(PERMISSIONS.CLINICS_MANAGE);
+  const [toDelete, setToDelete] = useState<ClinicListItem | null>(null);
+  const del = useDeleteClinic();
   const money = can([PERMISSIONS.INVOICES_VIEW, PERMISSIONS.PAYMENTS_VIEW], 'any');
 
   const columns = useMemo<ColumnDef<ClinicListItem, unknown>[]>(
@@ -37,15 +45,29 @@ export default function ClinicsPage() {
       { id: 'cases', header: 'Cases', meta: { sortKey: 'caseCount', align: 'right' }, cell: ({ row }) => <span className="font-mono font-bold">{row.original.caseCount}</span> },
       { id: 'active', header: 'Active', meta: { sortKey: 'activeCases', align: 'right' }, cell: ({ row }) => <span className="font-mono">{row.original.activeCases}</span> },
       ...(money ? ([{ id: 'out', header: 'Outstanding', meta: { sortKey: 'outstanding', align: 'right' }, cell: ({ row }) => <span className={`font-mono font-bold ${row.original.outstanding ? 'text-warning' : ''}`}>{formatMoney(row.original.outstanding)}</span> }] as ColumnDef<ClinicListItem, unknown>[]) : []),
-      { id: 'status', header: 'Status', meta: { sortKey: 'status' }, cell: ({ row }) => <Badge tone={row.original.status === 'active' ? 'success' : 'neutral'}>{row.original.status === 'active' ? 'Active' : 'Inactive'}</Badge> },
-      ...(manage ? ([{ id: 'actions', header: () => <span className="sr-only">Actions</span>, meta: { align: 'right' }, cell: ({ row }) => <Button variant="ghost" size="icon-sm" aria-label={`Edit ${row.original.name}`} onClick={() => setEditing(row.original)}><Pencil /></Button> }] as ColumnDef<ClinicListItem, unknown>[]) : []),
+      { id: 'status', header: 'Status', meta: { sortKey: 'status' }, cell: ({ row }) => <ActiveBadge active={row.original.status === 'active'} /> },
+      {
+        id: 'actions',
+        header: () => <span className="sr-only">Actions</span>,
+        meta: { align: 'right' },
+        cell: ({ row }) => (
+          <RowActions
+            label={row.original.name}
+            actions={[
+              { label: 'View details', icon: <Eye />, onSelect: () => navigate(`/clinics/${row.original.id}`) },
+              { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(row.original), hidden: !manage },
+              { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => setToDelete(row.original), hidden: !manage },
+            ]}
+          />
+        ),
+      },
     ],
-    [manage, money],
+    [manage, navigate, money],
   );
 
   return (
     <div className="flex flex-col gap-4">
-      {manage && <div className="flex justify-end"><Button onClick={() => setEditing('new')}><Plus /> Add clinic</Button></div>}
+      <PageToolbar actions={manage && <Button onClick={() => setEditing('new')}><Plus /> Add clinic</Button>} />
       <DataTable
         caption="Clinics"
         columns={columns}
@@ -56,10 +78,7 @@ export default function ClinicsPage() {
         isFetching={q.isFetching}
         error={q.error}
         onRetry={() => void q.refetch()}
-        sort={{ key: f.sort, dir: f.dir as 'asc' | 'desc' }}
-        onSortChange={(s) => setF({ sort: s.key ?? DEFAULTS.sort, dir: s.dir ?? DEFAULTS.dir })}
-        onPageChange={(p) => setF({ page: String(p) }, { resetPage: false })}
-        onPerPageChange={(n) => setF({ perPage: String(n) })}
+        {...list.tableProps}
         onRowClick={(k) => navigate(`/clinics/${k.id}`)}
         emptyTitle="No clinics found."
         renderMobileCard={(k) => (
@@ -77,6 +96,25 @@ export default function ClinicsPage() {
         }
       />
       <ClinicFormDialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)} record={editing && editing !== 'new' ? editing : null} />
+      <ConfirmDialog
+        open={!!toDelete}
+        onOpenChange={(o) => !o && setToDelete(null)}
+        title="Delete clinic?"
+        tone="danger"
+        confirmLabel="Delete clinic"
+        loading={del.isPending}
+        description={<>Delete <b>{toDelete?.name}</b>? A clinic with cases cannot be deleted — set it to inactive instead.</>}
+        onConfirm={async () => {
+          if (!toDelete) return;
+          try {
+            await del.mutateAsync(toDelete.id);
+            toast.success('Clinic deleted');
+          } catch (err) {
+            toast.error(errorMessage(err));
+          }
+          setToDelete(null);
+        }}
+      />
     </div>
   );
 }

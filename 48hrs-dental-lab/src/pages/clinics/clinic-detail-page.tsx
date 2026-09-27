@@ -11,6 +11,7 @@ import { ClinicFormDialog, DoctorFormDialog } from '@/components/directory/direc
 import { CaseMiniTable, RelationStatsGrid } from '@/components/directory/relation-summary';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ActiveBadge } from '@/components/ui/record-badges';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
 import { ErrorState, PageLoader } from '@/components/ui/feedback';
 
@@ -28,11 +29,9 @@ export default function ClinicDetailPage() {
   return (
     <div className="flex flex-col gap-4">
       <DetailHeader
-        backTo="/clinics"
-        backLabel="Clinics"
         name={k.name}
         subtitle={k.address}
-        badges={<Badge tone={k.status === 'active' ? 'success' : 'neutral'}>{k.status === 'active' ? 'Active' : 'Inactive'}</Badge>}
+        badges={<ActiveBadge active={k.status === 'active'} />}
         actions={can(PERMISSIONS.CLINICS_MANAGE) && <Button variant="outline" onClick={() => setEditing(true)}><Pencil /> Edit</Button>}
       >
         <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">

@@ -85,6 +85,9 @@ export interface CaseListParams extends ListParams {
   /** Filter on receivedAt (falls back to createdAt), YYYY-MM-DD. */
   from?: string;
   to?: string;
+  /** Filter on dueAt (the 48-hour deadline), YYYY-MM-DD. */
+  dueFrom?: string;
+  dueTo?: string;
   /** Only open (not completed/cancelled/rejected) cases. */
   openOnly?: boolean;
 }

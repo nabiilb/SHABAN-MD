@@ -67,6 +67,14 @@ route('GET', '/cases', (raw) => {
     .filter((c) => !qStr(q, 'caseType') || c.caseType === qStr(q, 'caseType'))
     .filter((c) => !qBool(q, 'openOnly') || OPEN_STATUSES.includes(c.status))
     .filter((c) => {
+      const dueFrom = qStr(q, 'dueFrom');
+      const dueTo = qStr(q, 'dueTo');
+      if (!dueFrom && !dueTo) return true;
+      if (!c.dueAt) return false;
+      const day = localDay(c.dueAt);
+      return (!dueFrom || day >= dueFrom) && (!dueTo || day <= dueTo);
+    })
+    .filter((c) => {
       if (!from && !to) return true;
       const day = localDay(c.receivedAt ?? c.createdAt);
       return (!from || day >= from) && (!to || day <= to);

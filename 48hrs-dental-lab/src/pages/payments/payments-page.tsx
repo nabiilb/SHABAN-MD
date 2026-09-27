@@ -8,7 +8,7 @@ import { useClinics } from '@/hooks/api/use-directory';
 import { usePayments } from '@/hooks/api/use-finance';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { useUrlState } from '@/hooks/use-url-state';
+import { useListState } from '@/hooks/use-list-state';
 import type { PaymentListItem, PaymentMethod } from '@/types/models';
 import { downloadCsv } from '@/utils/download';
 import { formatDateTime, formatMoney } from '@/utils/format';
@@ -22,9 +22,10 @@ export default function PaymentsPage() {
   usePageTitle('Payments', 'Every payment received');
   const { can } = useAuth();
   const navigate = useNavigate();
-  const [f, setF, resetF] = useUrlState(DEFAULTS);
+  const list = useListState(DEFAULTS);
+  const { state: f, set: setF, reset: resetF } = list;
   const clinics = useClinics({ perPage: 200 }, can(PERMISSIONS.CLINICS_VIEW));
-  const q = usePayments({ search: f.search || undefined, method: f.method as PaymentMethod | undefined, clinicId: f.clinicId, from: f.from, to: f.to, sort: f.sort, dir: f.dir as 'asc' | 'desc', page: Number(f.page), perPage: Number(f.perPage) });
+  const q = usePayments({ ...list.listParams, method: f.method as PaymentMethod | undefined, clinicId: f.clinicId, from: f.from, to: f.to });
   const pageTotal = (q.data?.data ?? []).reduce((s, p) => s + p.amount, 0);
 
   const columns = useMemo<ColumnDef<PaymentListItem, unknown>[]>(
@@ -59,10 +60,7 @@ export default function PaymentsPage() {
         isFetching={q.isFetching}
         error={q.error}
         onRetry={() => void q.refetch()}
-        sort={{ key: f.sort, dir: f.dir as 'asc' | 'desc' }}
-        onSortChange={(s) => setF({ sort: s.key ?? DEFAULTS.sort, dir: s.dir ?? DEFAULTS.dir })}
-        onPageChange={(p) => setF({ page: String(p) }, { resetPage: false })}
-        onPerPageChange={(n) => setF({ perPage: String(n) })}
+        {...list.tableProps}
         onRowClick={(p) => navigate(`/invoices/${p.invoiceId}`)}
         emptyTitle="No payments found."
         renderMobileCard={(p) => (

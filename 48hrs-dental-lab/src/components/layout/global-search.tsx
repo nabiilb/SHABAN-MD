@@ -71,7 +71,7 @@ export function GlobalSearch() {
           <Command shouldFilter={false} loop label="Global search">
             <div className="flex items-center gap-2 border-b border-line px-4">
               <Search className="size-4 text-ink-3" aria-hidden />
-              <Command.Input value={q} onValueChange={setQ} placeholder="Case ID, patient, doctor, clinic, phone or invoice…" className="h-14 w-full bg-transparent text-[15px] outline-none placeholder:text-gray-400" autoFocus />
+              <Command.Input value={q} onValueChange={setQ} placeholder="Case ID, patient, doctor, clinic, phone or invoice…" className="h-14 w-full bg-transparent text-[15px] outline-none placeholder:text-ink-3" autoFocus />
               {isFetching && <Loader2 className="size-4 animate-spin text-ink-3" aria-hidden />}
             </div>
             <Command.List className="max-h-[60vh] overflow-y-auto p-2">

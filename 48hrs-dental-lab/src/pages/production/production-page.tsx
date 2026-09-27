@@ -56,7 +56,7 @@ export default function ProductionPage() {
         <SearchInput value={search} onChange={setSearch} placeholder="Case ID or patient…" />
         {techs.data && <FilterSelect label="Technician" value={technicianId} onChange={setTechnicianId} options={techs.data.data.map((t) => ({ value: t.id, label: `${t.name} (${t.activeCases})` }))} />}
       </div>
-      <div className="-mx-3 overflow-x-auto px-3 pb-2 sm:-mx-5 sm:px-5 lg:-mx-7 lg:px-7">
+      <div className="-mx-3 overflow-x-auto px-3 pb-2 sm:-mx-5 sm:px-5 lg:-mx-7 lg:px-7" tabIndex={0} role="region" aria-label="Production board">
         <div className="flex items-start gap-3">
           {COLUMNS.filter((c) => !scoped || c.title !== 'Waiting for assignment').map((col) => (
             <BoardColumn key={col.title} {...col} technicianId={technicianId} search={debounced || undefined} />

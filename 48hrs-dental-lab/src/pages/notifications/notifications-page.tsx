@@ -10,7 +10,7 @@ import { Pagination } from '@/components/tables/pagination';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState, ErrorState, Skeleton } from '@/components/ui/feedback';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 
 export default function NotificationsPage() {
   usePageTitle('Notifications', 'Case events that need your attention');
@@ -29,12 +29,12 @@ export default function NotificationsPage() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={tab} onValueChange={(v) => { setTab(v as 'all' | 'unread'); setPage(1); }}>
-          <TabsList label="Notification filter">
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="unread" count={q.data?.unreadCount}>Unread</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <SegmentedControl
+          label="Notification filter"
+          value={tab}
+          onChange={(v) => { setTab(v); setPage(1); }}
+          options={[{ value: 'all', label: 'All' }, { value: 'unread', label: 'Unread', count: q.data?.unreadCount }]}
+        />
         <Button variant="outline" onClick={() => markAll.mutate()} disabled={!q.data?.unreadCount} loading={markAll.isPending}>
           <CheckCheck /> Mark all read
         </Button>

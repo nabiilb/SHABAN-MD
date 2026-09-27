@@ -11,8 +11,8 @@ import { DetailHeader } from '@/components/directory/detail-header';
 import { TechnicianFormDialog } from '@/components/directory/directory-forms';
 import { CaseMiniTable } from '@/components/directory/relation-summary';
 import { StatCard, StatGrid } from '@/components/dashboard/stat-card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ActiveBadge } from '@/components/ui/record-badges';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
 import { ErrorState, PageLoader } from '@/components/ui/feedback';
 
@@ -29,11 +29,9 @@ export default function TechnicianDetailPage() {
   return (
     <div className="flex flex-col gap-4">
       <DetailHeader
-        backTo={can(PERMISSIONS.TECHNICIANS_VIEW) ? '/technicians' : '/dashboard'}
-        backLabel={can(PERMISSIONS.TECHNICIANS_VIEW) ? 'Technicians' : 'Dashboard'}
         name={t.name}
         subtitle={t.specialty}
-        badges={<Badge tone={t.active ? 'success' : 'neutral'}>{t.active ? 'Active' : 'Inactive'}</Badge>}
+        badges={<ActiveBadge active={t.active} />}
         actions={can(PERMISSIONS.TECHNICIANS_MANAGE) && <Button variant="outline" onClick={() => setEditing(true)}><Pencil /> Edit</Button>}
       >
         <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">

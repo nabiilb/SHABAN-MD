@@ -20,6 +20,7 @@ import { DateFilter, FilterSelect } from '@/components/tables/toolbar';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { EmptyState, ErrorState, Skeleton } from '@/components/ui/feedback';
+import { SimpleTable } from '@/components/ui/simple-table';
 
 const PRESETS = [
   { key: '7', label: 'Last 7 days' },
@@ -48,26 +49,13 @@ function ReportTable({ title, headers, rows, csvName, empty = 'No data for these
         }
       />
       <CardBody className="pt-3">
-        {!rows.length ? (
-          <p className="text-[13px] text-ink-3">{empty}</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
-              <thead>
-                <tr className="border-b border-line">
-                  {headers.map((h, i) => <th key={h} className={`py-2.5 pr-4 text-[11px] font-bold tracking-[.12em] whitespace-nowrap text-ink-3 uppercase ${i ? 'text-right' : 'text-left'}`}>{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i} className="border-b border-line last:border-0">
-                    {r.map((c, j) => <td key={j} className={`py-2.5 pr-4 ${j ? 'text-right font-mono' : 'font-semibold'}`}>{c}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <SimpleTable
+          caption={title}
+          rows={rows}
+          getKey={(_, i) => String(i)}
+          empty={empty}
+          columns={headers.map((h, j) => ({ header: h, align: j ? 'right' : 'left', className: j ? 'font-mono' : 'font-semibold', cell: (r: ReactNode[]) => r[j] }))}
+        />
       </CardBody>
     </Card>
   );

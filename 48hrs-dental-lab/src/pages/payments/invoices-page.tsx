@@ -8,7 +8,7 @@ import { useClinics } from '@/hooks/api/use-directory';
 import { useInvoices } from '@/hooks/api/use-finance';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { useUrlState } from '@/hooks/use-url-state';
+import { useListState } from '@/hooks/use-list-state';
 import type { InvoiceListItem, PaymentStatus } from '@/types/models';
 import { downloadCsv } from '@/utils/download';
 import { formatDate, formatMoney } from '@/utils/format';
@@ -23,9 +23,10 @@ export default function InvoicesPage() {
   usePageTitle('Invoices', 'One invoice per accepted case');
   const { can, user } = useAuth();
   const navigate = useNavigate();
-  const [f, setF, resetF] = useUrlState(DEFAULTS);
+  const list = useListState(DEFAULTS);
+  const { state: f, set: setF, reset: resetF } = list;
   const clinics = useClinics({ perPage: 200 }, can(PERMISSIONS.CLINICS_VIEW) && !user?.clinicId);
-  const q = useInvoices({ search: f.search || undefined, status: f.status as PaymentStatus | undefined, clinicId: f.clinicId, from: f.from, to: f.to, sort: f.sort, dir: f.dir as 'asc' | 'desc', page: Number(f.page), perPage: Number(f.perPage) });
+  const q = useInvoices({ ...list.listParams, status: f.status as PaymentStatus | undefined, clinicId: f.clinicId, from: f.from, to: f.to });
 
   const columns = useMemo<ColumnDef<InvoiceListItem, unknown>[]>(
     () => [
@@ -58,10 +59,7 @@ export default function InvoicesPage() {
         isFetching={q.isFetching}
         error={q.error}
         onRetry={() => void q.refetch()}
-        sort={{ key: f.sort, dir: f.dir as 'asc' | 'desc' }}
-        onSortChange={(s) => setF({ sort: s.key ?? DEFAULTS.sort, dir: s.dir ?? DEFAULTS.dir })}
-        onPageChange={(p) => setF({ page: String(p) }, { resetPage: false })}
-        onPerPageChange={(n) => setF({ perPage: String(n) })}
+        {...list.tableProps}
         onRowClick={(i) => navigate(`/invoices/${i.id}`)}
         bulkActions={(rows, clear) => <Button size="sm" variant="secondary" onClick={() => { exportCsv(rows); clear(); }}><Download /> Export {rows.length} selected</Button>}
         emptyTitle="No invoices found."

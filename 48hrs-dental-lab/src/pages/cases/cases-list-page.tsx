@@ -12,7 +12,7 @@ import { useClinics, useDoctors, useTechnicians } from '@/hooks/api/use-director
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
 import { useSlaConfig } from '@/hooks/use-sla';
-import { useUrlState } from '@/hooks/use-url-state';
+import { useListState } from '@/hooks/use-list-state';
 import { errorMessage } from '@/services/api/errors';
 import type { CaseListParams, SlaFilter } from '@/types/api';
 import type { CasePriority, CaseStatus, CaseType, CaseListItem, PaymentStatus } from '@/types/models';
@@ -27,7 +27,7 @@ import { ClearFiltersButton, CollapsibleFilters, DateFilter, FilterSelect, Searc
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 
 const DEFAULTS = {
   view: 'all',
@@ -42,6 +42,8 @@ const DEFAULTS = {
   sla: undefined as string | undefined,
   from: undefined as string | undefined,
   to: undefined as string | undefined,
+  dueFrom: undefined as string | undefined,
+  dueTo: undefined as string | undefined,
   sort: 'receivedAt',
   dir: 'desc',
   page: '1',
@@ -52,7 +54,8 @@ export default function CasesListPage() {
   usePageTitle('Cases', 'Every case, its stage and its 48-hour deadline');
   const { can, user } = useAuth();
   const navigate = useNavigate();
-  const [f, setF, resetF] = useUrlState(DEFAULTS);
+  const list = useListState(DEFAULTS);
+  const { state: f, set: setF, reset: resetF } = list;
   const [toDelete, setToDelete] = useState<CaseListItem | null>(null);
   const del = useDeleteCase();
   const slaConfig = useSlaConfig();
@@ -75,6 +78,8 @@ export default function CasesListPage() {
     sla: f.sla as SlaFilter | undefined,
     from: f.from,
     to: f.to,
+    dueFrom: f.dueFrom,
+    dueTo: f.dueTo,
     sort: f.sort,
     dir: f.dir as 'asc' | 'desc',
     page: Number(f.page),
@@ -202,18 +207,17 @@ export default function CasesListPage() {
     );
   };
 
-  const filtersActive = !!(f.search || f.status || f.priority || f.technicianId || f.doctorId || f.clinicId || f.caseType || f.paymentStatus || f.sla || f.from || f.to);
+  const { filtersActive } = list;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={f.view} onValueChange={(v) => setF({ view: v, status: undefined })}>
-          <TabsList label="Case views">
-            <TabsTrigger value="all">All cases</TabsTrigger>
-            <TabsTrigger value="open">Open</TabsTrigger>
-            <TabsTrigger value="done">Delivered</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <SegmentedControl
+          label="Case views"
+          value={f.view}
+          onChange={(v) => setF({ view: v, status: undefined })}
+          options={[{ value: 'all', label: 'All cases' }, { value: 'open', label: 'Open' }, { value: 'done', label: 'Delivered' }]}
+        />
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => query.data && exportRows(query.data.data)} disabled={!query.data?.data.length}>
             <Download /> Export page
@@ -236,10 +240,7 @@ export default function CasesListPage() {
         isFetching={query.isFetching}
         error={query.error}
         onRetry={() => void query.refetch()}
-        sort={{ key: f.sort, dir: f.dir as 'asc' | 'desc' }}
-        onSortChange={(s) => setF({ sort: s.key ?? DEFAULTS.sort, dir: s.dir ?? DEFAULTS.dir })}
-        onPageChange={(p) => setF({ page: String(p) }, { resetPage: false })}
-        onPerPageChange={(n) => setF({ perPage: String(n) })}
+        {...list.tableProps}
         onRowClick={(c) => navigate(`/cases/${c.id}`)}
         enableColumnToggle
         emptyTitle="No cases found."
@@ -270,7 +271,7 @@ export default function CasesListPage() {
         toolbar={
           <ToolbarRow>
             <SearchInput value={f.search} onChange={(v) => setF({ search: v })} placeholder="Case ID, patient, doctor, clinic…" />
-            <CollapsibleFilters activeCount={[f.status, f.sla, f.priority, f.caseType, f.technicianId, f.clinicId, f.doctorId, f.paymentStatus, f.from, f.to].filter(Boolean).length}>
+            <CollapsibleFilters activeCount={[f.status, f.sla, f.priority, f.caseType, f.technicianId, f.clinicId, f.doctorId, f.paymentStatus, f.from, f.to, f.dueFrom, f.dueTo].filter(Boolean).length}>
             <FilterSelect label="Status" value={f.status} onChange={(v) => setF({ status: v })} options={ALL_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label }))} />
             <FilterSelect label="Deadline" value={f.sla} onChange={(v) => setF({ sla: v })} options={[{ value: 'on_track', label: 'On track' }, { value: 'at_risk', label: 'At risk' }, { value: 'overdue', label: 'Overdue' }, { value: 'due_today', label: 'Due today' }]} />
             <FilterSelect label="Priority" value={f.priority} onChange={(v) => setF({ priority: v })} options={Object.entries(PRIORITY_META).map(([v, m]) => ({ value: v, label: m.label }))} />
@@ -281,8 +282,10 @@ export default function CasesListPage() {
               <FilterSelect label="Doctor" value={f.doctorId} onChange={(v) => setF({ doctorId: v })} options={doctors.data.data.filter((d) => !f.clinicId || d.clinicId === f.clinicId).map((d) => ({ value: d.id, label: d.name }))} />
             )}
             {showMoney && <FilterSelect label="Payment" value={f.paymentStatus} onChange={(v) => setF({ paymentStatus: v })} options={Object.entries(PAYMENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} />}
-            <DateFilter label="From" value={f.from} onChange={(v) => setF({ from: v })} />
-            <DateFilter label="To" value={f.to} onChange={(v) => setF({ to: v })} />
+            <DateFilter label="Received from" value={f.from} onChange={(v) => setF({ from: v })} />
+            <DateFilter label="Received to" value={f.to} onChange={(v) => setF({ to: v })} />
+            <DateFilter label="Due from" value={f.dueFrom} onChange={(v) => setF({ dueFrom: v })} />
+            <DateFilter label="Due to" value={f.dueTo} onChange={(v) => setF({ dueTo: v })} />
             </CollapsibleFilters>
             <ClearFiltersButton show={filtersActive} onClear={resetF} />
           </ToolbarRow>

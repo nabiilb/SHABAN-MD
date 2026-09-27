@@ -24,7 +24,7 @@ npm run dev               # http://localhost:5173
 | `npm run preview` | Serve the production build |
 | `npm run typecheck` | TypeScript only |
 | `npm run lint` | ESLint (typescript-eslint + react-hooks) |
-| `npm test` | Vitest suite (51 tests) |
+| `npm test` | Vitest suite (57 tests) |
 
 ### Demo accounts (mock mode only)
 
@@ -79,16 +79,21 @@ src/
 │       technicianService, paymentService (invoices+payments), labService (QC, deliveries),
 │       reportService (reports, dashboard, search), notificationService, adminService
 ├── mocks/                     # removable mock backend (see §6)
-├── hooks/                     # use-auth, use-now (shared clock), use-sla, use-url-state, use-debounce…
+├── hooks/                     # use-auth, use-now (shared clock), use-sla, use-list-state (URL-backed table state),
+│                              # use-url-state, use-debounce, use-page-title…
 │   └── api/                   # TanStack Query hooks per domain
 ├── stores/                    # Zustand: auth-store (session), ui-store (drawer, search, page title)
 ├── components/
-│   ├── ui/                    # Button, Input, Select, Badge, Card, Dialog, Menu, Tabs, Checkbox/Switch…
+│   ├── ui/                    # Button, Input/Select/Textarea, Badge, ActiveBadge, Card/Field, Dialog, ConfirmDialog,
+│   │                          # Menu, Tabs, SegmentedControl, Checkbox/Switch, Popover, Tooltip, SimpleTable,
+│   │                          # PageToolbar, feedback (Spinner, Skeleton, EmptyState, ErrorState, Alert, ProgressBar)
 │   ├── forms/                 # FormField, Text/Select/Date/Checkbox/Switch fields, Combobox, MultiSelect
-│   ├── tables/                # DataTable (sorting, pagination, selection, column toggle, states), toolbar
+│   ├── tables/                # DataTable (sorting, pagination, selection, column toggle, states), RowActions,
+│   │                          # toolbar (SearchInput, FilterSelect, DateFilter, CollapsibleFilters), Pagination
 │   ├── files/                 # dropzone, upload queue with progress, preview dialog
 │   ├── cases/                 # badges, SLA countdowns, tooth chart, timeline, action dialogs, attachments
-│   ├── dashboard/, directory/, payments/, notifications/, layout/
+│   ├── dashboard/, directory/, payments/, notifications/
+│   ├── layout/                # Sidebar, Header, Breadcrumbs, GlobalSearch, brand wordmark
 ├── layouts/                   # AppLayout (sidebar + header), AuthLayout (split login)
 ├── routes/                    # router, guards (RequireAuth, RequirePermission, Can), nav config
 ├── pages/                     # auth, dashboard, cases, patients, doctors, clinics, technicians,
@@ -101,7 +106,7 @@ src/
 
 `/login` `/forgot-password` `/reset-password` `/logout` · `/dashboard` · `/cases` `/cases/new` `/cases/:id` · `/patients` `/patients/:id` · `/doctors` `/doctors/:id` · `/clinics` `/clinics/:id` · `/technicians` `/technicians/:id` · `/production` · `/quality-control` · `/delivery` · `/invoices` `/invoices/:id` · `/payments` · `/reports` · `/notifications` · `/users` · `/roles` · `/activity` · `/settings`
 
-Every page is lazy-loaded, wrapped in an error boundary, and guarded by permission.
+Every page is lazy-loaded, wrapped in an error boundary, and guarded by permission. Breadcrumbs are derived from the route and the nav config; detail pages contribute their record title (e.g. the case number), and section links are only rendered when the user may open that section.
 
 ## 4. Authentication
 
@@ -177,7 +182,7 @@ Dashboard (role-specific: operations, technician, client) · Cases list (search,
 ## 9. Testing
 
 ```bash
-npm test          # 51 tests, ~4 s
+npm test          # 57 tests, ~6 s
 ```
 
 | Suite | Covers |
@@ -188,9 +193,18 @@ npm test          # 51 tests, ~4 s
 | `api.test.ts` | login/logout/expiry/disabled accounts/reset password, API-side 403 & scoping, create-case validation, workflow + history, QC fail → rework → pass, delivery, notifications, payments, search, filtering, pagination |
 | `http.test.ts` | real HTTP transport: bearer token, query arrays, 422 parsing, network errors, key casing |
 | `ui.test.tsx` | login form, redirect after login, protected route, permission gate, tooth chart, create-case validation |
+| `layout.test.tsx` | breadcrumbs (incl. permission-aware links), row actions, simple table, due-date filter |
+
+### Browser audit
+
+Checked in Chromium with Playwright and axe-core (WCAG 2 A/AA):
+
+- **Route crawl:** signed in as each of the 8 roles and followed every nav and in-page link — 109 page visits at 1366 px, 28 at 390 px. It found 0 console errors, 0 crashes, 0 broken links, 0 unlabeled controls and 0 axe violations.
+- **Workflow run** (client → reception → manager → technician → QC fail → rework → QC pass → dispatch → deliver → client confirm → final payment), plus logout, filters, sorting, cancel with reason, revoking a permission live, user creation and first sign-in, clinic creation, SLA settings validation and notifications.
+- **Tablet widths** (768 / 1024 px): no horizontal page overflow.
 
 The full UI workflow (client submits → reception accepts with deposit → manager assigns → technician produces → QC fails → rework → QC passes → dispatch → deliver → client confirms → remaining payment) was also verified end-to-end in Chromium at desktop and 390 px mobile widths with no console errors.
 
 ## 10. Design notes
 
-Tokens come from the prototype's design-system files (navy `#0a1424`–`#17498a`, gold accent `#d9b53f`, neutral surfaces, 10 px radius, navy-tinted shadows, Plus Jakarta Sans + Playfair Display wordmark). Status colours follow the prototype (green on track, amber attention, red critical, navy overdue). Chart colours (navy + deep gold) were validated for colour-vision deficiency and 3:1 contrast. Accessibility: labelled fields with `aria-describedby` errors, focus rings, Radix dialogs with focus trapping, keyboard-operable tooth chart and comboboxes, skip link, `prefers-reduced-motion` respected.
+Tokens come from the prototype's design-system files (navy `#0a1424`–`#17498a`, gold accent `#d9b53f`, neutral surfaces, 10 px radius, navy-tinted shadows, Plus Jakarta Sans + Playfair Display wordmark). Status colours follow the prototype (green on track, amber attention, red critical, navy overdue); the green, amber and tertiary-text tokens are one step darker than the prototype values so every label meets 4.5:1 contrast. Chart colours (navy + deep gold) were validated for colour-vision deficiency and 3:1 contrast. Accessibility: labelled fields with `aria-describedby` errors, focus rings, Radix dialogs with focus trapping, keyboard-operable tooth chart, comboboxes and segmented controls (arrow keys), focusable scroll regions, breadcrumb `aria-current`, skip link, `prefers-reduced-motion` respected. The universal-numbering reference image from the ZIP is available from the tooth chart (“Numbering guide”).

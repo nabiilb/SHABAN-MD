@@ -80,19 +80,19 @@ export function SlaCountdown({ c }: { c: SlaCase }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Clock className="size-4" aria-hidden />
         <span className="text-[11.5px] font-bold tracking-[.1em]">{LABEL[info.state]}</span>
-        {info.dueAt && <span className="ml-auto text-xs opacity-90">Due {formatDateTime(info.dueAt)}</span>}
+        {info.dueAt && <span className="ml-auto text-xs">Due {formatDateTime(info.dueAt)}</span>}
       </div>
       <div className="font-mono text-[28px] leading-none font-bold tabular" role="timer" aria-live="off">
         {running ? (
           <>
             {info.state === 'overdue' && '−'}
-            {h}h {String(m).padStart(2, '0')}m <span className="text-lg opacity-70">{String(sec).padStart(2, '0')}s</span>
+            {h}h {String(m).padStart(2, '0')}m <span className="text-lg">{String(sec).padStart(2, '0')}s</span>
           </>
         ) : (
           timeText(info)
         )}
       </div>
-      <span className="text-xs font-semibold opacity-90">
+      <span className="text-xs font-semibold">
         {info.state === 'not_started' ? 'The 48-hour countdown starts when Reception accepts the case.' : formatRemaining(info)}
       </span>
       {info.state !== 'not_started' && info.state !== 'stopped' && <ProgressBar value={info.progress} tone={s.bar} label="Share of the 48-hour window used" className="bg-black/10" />}

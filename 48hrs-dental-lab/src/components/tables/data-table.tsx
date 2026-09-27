@@ -211,7 +211,7 @@ export function DataTable<T>({
                     ))}
               </ul>
             )}
-            <div className={cn('overflow-x-auto', renderMobileCard && 'hidden md:block')}>
+            <div className={cn('overflow-x-auto', renderMobileCard && 'hidden md:block')} tabIndex={0} role="region" aria-label={caption ? `${caption} table` : 'Table'}>
               <table className="w-full min-w-[640px] border-collapse text-sm" aria-busy={isLoading}>
                 {caption && <caption className="sr-only">{caption}</caption>}
                 <thead>

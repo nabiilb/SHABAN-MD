@@ -1,17 +1,10 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
 import { Avatar } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 
-export function DetailHeader({ backTo, backLabel, name, subtitle, badges, actions, children }: { backTo: string; backLabel: string; name: string; subtitle?: ReactNode; badges?: ReactNode; actions?: ReactNode; children?: ReactNode }) {
+export function DetailHeader({ name, subtitle, badges, actions, children }: { name: string; subtitle?: ReactNode; badges?: ReactNode; actions?: ReactNode; children?: ReactNode }) {
   return (
-    <>
-      <div>
-        <Button asChild variant="ghost" size="sm"><Link to={backTo}><ArrowLeft /> {backLabel}</Link></Button>
-      </div>
-      <Card>
+    <Card>
         <CardBody className="flex flex-col gap-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3.5">
@@ -26,7 +19,6 @@ export function DetailHeader({ backTo, backLabel, name, subtitle, badges, action
           </div>
           {children}
         </CardBody>
-      </Card>
-    </>
+    </Card>
   );
 }

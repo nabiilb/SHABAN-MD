@@ -1,20 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Pencil, Plus } from 'lucide-react';
+import { Eye, Pencil, Plus } from 'lucide-react';
 import { PERMISSIONS } from '@/lib/permissions';
 import { useTechnicians } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { useUrlState } from '@/hooks/use-url-state';
+import { useListState } from '@/hooks/use-list-state';
 import type { TechnicianListItem } from '@/types/api';
 import { formatPercent } from '@/utils/format';
 import { TechnicianFormDialog } from '@/components/directory/directory-forms';
 import { DataTable } from '@/components/tables/data-table';
+import { RowActions } from '@/components/tables/row-actions';
 import { ClearFiltersButton, FilterSelect, SearchInput, ToolbarRow } from '@/components/tables/toolbar';
 import { Avatar } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PageToolbar } from '@/components/ui/page-toolbar';
+import { ActiveBadge } from '@/components/ui/record-badges';
 import { ProgressBar } from '@/components/ui/feedback';
 
 const DEFAULTS = { search: '', active: undefined as string | undefined, sort: 'name', dir: 'asc', page: '1', perPage: '20' };
@@ -23,9 +25,10 @@ export default function TechniciansPage() {
   usePageTitle('Technicians', 'Workload, output and on-time performance');
   const { can } = useAuth();
   const navigate = useNavigate();
-  const [f, setF, resetF] = useUrlState(DEFAULTS);
+  const list = useListState(DEFAULTS);
+  const { state: f, set: setF, reset: resetF } = list;
   const [editing, setEditing] = useState<TechnicianListItem | null | 'new'>(null);
-  const q = useTechnicians({ search: f.search || undefined, active: f.active === undefined ? undefined : f.active === 'true', sort: f.sort, dir: f.dir as 'asc' | 'desc', page: Number(f.page), perPage: Number(f.perPage) });
+  const q = useTechnicians({ ...list.listParams, active: f.active === undefined ? undefined : f.active === 'true' });
   const manage = can(PERMISSIONS.TECHNICIANS_MANAGE);
   const maxLoad = Math.max(1, ...(q.data?.data ?? []).map((t) => t.activeCases));
 
@@ -38,15 +41,28 @@ export default function TechniciansPage() {
       { id: 'overdue', header: 'Overdue', meta: { sortKey: 'overdue', align: 'right' }, cell: ({ row }) => <span className={`font-mono font-bold ${row.original.overdue ? 'text-danger' : ''}`}>{row.original.overdue}</span> },
       { id: 'done', header: 'Completed', meta: { sortKey: 'completedCases', align: 'right' }, cell: ({ row }) => <span className="font-mono">{row.original.completedCases}</span> },
       { id: 'ontime', header: 'On time', meta: { sortKey: 'onTimeRate', align: 'right' }, cell: ({ row }) => <span className="font-mono font-bold">{formatPercent(row.original.onTimeRate)}</span> },
-      { id: 'status', header: 'Status', cell: ({ row }) => <Badge tone={row.original.active ? 'success' : 'neutral'}>{row.original.active ? 'Active' : 'Inactive'}</Badge> },
-      ...(manage ? ([{ id: 'actions', header: () => <span className="sr-only">Actions</span>, meta: { align: 'right' }, cell: ({ row }) => <Button variant="ghost" size="icon-sm" aria-label={`Edit ${row.original.name}`} onClick={() => setEditing(row.original)}><Pencil /></Button> }] as ColumnDef<TechnicianListItem, unknown>[]) : []),
+      { id: 'status', header: 'Status', cell: ({ row }) => <ActiveBadge active={row.original.active} /> },
+      {
+        id: 'actions',
+        header: () => <span className="sr-only">Actions</span>,
+        meta: { align: 'right' },
+        cell: ({ row }) => (
+          <RowActions
+            label={row.original.name}
+            actions={[
+              { label: 'View details', icon: <Eye />, onSelect: () => navigate(`/technicians/${row.original.id}`) },
+              { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(row.original), hidden: !manage },
+            ]}
+          />
+        ),
+      },
     ],
-    [manage, maxLoad],
+    [manage, navigate, maxLoad],
   );
 
   return (
     <div className="flex flex-col gap-4">
-      {manage && <div className="flex justify-end"><Button onClick={() => setEditing('new')}><Plus /> Add technician</Button></div>}
+      <PageToolbar actions={manage && <Button onClick={() => setEditing('new')}><Plus /> Add technician</Button>} />
       <DataTable
         caption="Technicians"
         columns={columns}
@@ -57,10 +73,7 @@ export default function TechniciansPage() {
         isFetching={q.isFetching}
         error={q.error}
         onRetry={() => void q.refetch()}
-        sort={{ key: f.sort, dir: f.dir as 'asc' | 'desc' }}
-        onSortChange={(s) => setF({ sort: s.key ?? DEFAULTS.sort, dir: s.dir ?? DEFAULTS.dir })}
-        onPageChange={(p) => setF({ page: String(p) }, { resetPage: false })}
-        onPerPageChange={(n) => setF({ perPage: String(n) })}
+        {...list.tableProps}
         onRowClick={(t) => navigate(`/technicians/${t.id}`)}
         emptyTitle="No technicians found."
         renderMobileCard={(t) => (

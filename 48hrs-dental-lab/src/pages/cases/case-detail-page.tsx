@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Pencil, Printer, XCircle } from 'lucide-react';
+import { CheckCircle2, Pencil, Printer, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { DENTURE_TYPES } from '@/lib/billing';
 import { CASE_TYPE_LABELS, DELIVERY_METHOD_LABELS, QC_ISSUE_LABELS } from '@/lib/constants';
@@ -22,6 +22,7 @@ import { SlaCountdown } from '@/components/cases/sla';
 import { ToothChart } from '@/components/cases/tooth-chart';
 import { RecordPaymentDialog } from '@/components/payments/record-payment-dialog';
 import { Badge } from '@/components/ui/badge';
+import { PageToolbar } from '@/components/ui/page-toolbar';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
 import { Alert, EmptyState, ErrorState, PageLoader, ProgressBar } from '@/components/ui/feedback';
@@ -57,19 +58,19 @@ function CaseDetailView({ c }: { c: CaseDetail }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="no-print flex flex-wrap items-center justify-between gap-2">
-        <Button asChild variant="ghost" size="sm">
-          <Link to="/cases"><ArrowLeft /> All cases</Link>
-        </Button>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => window.print()}><Printer /> Print</Button>
-          {can(PERMISSIONS.CASES_EDIT) && meta.open && <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil /> Edit</Button>}
-        </div>
-      </div>
+      <PageToolbar
+        className="no-print"
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => window.print()}><Printer /> Print</Button>
+            {can(PERMISSIONS.CASES_EDIT) && meta.open && <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil /> Edit</Button>}
+          </>
+        }
+      />
 
       {/* Header */}
       <Card>
-        <CardBody className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <CardBody className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
           <div className="flex min-w-0 flex-col gap-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 flex-col gap-1">
@@ -87,7 +88,7 @@ function CaseDetailView({ c }: { c: CaseDetail }) {
                 {canMoney && <PaymentBadge status={c.paymentStatus} />}
               </div>
             </div>
-            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <Field label="Service">{c.restorationType}</Field>
               <Field label="Units" mono>{c.units}</Field>
               <Field label="Received">{c.receivedAt ? formatDateTime(c.receivedAt) : 'Awaiting intake'}</Field>

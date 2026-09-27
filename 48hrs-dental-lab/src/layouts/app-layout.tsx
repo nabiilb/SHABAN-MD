@@ -5,6 +5,7 @@ import { PageLoader } from '@/components/ui/feedback';
 import { GlobalSearch } from '@/components/layout/global-search';
 import { Header } from '@/components/layout/header';
 import { Sidebar } from '@/components/layout/sidebar';
+import { Breadcrumbs } from '@/components/layout/breadcrumbs';
 import { useSettings } from '@/hooks/api/use-admin';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -43,6 +44,7 @@ export function AppLayout() {
       <div className="flex min-w-0 flex-col">
         <Header />
         <main id="main" className="mx-auto w-full max-w-[1400px] flex-1 px-3 py-4 sm:px-5 sm:py-6 lg:px-7" tabIndex={-1}>
+          <Breadcrumbs />
           <RouteErrorBoundary key={location.pathname}>
             <Suspense fallback={<PageLoader />}>
               <Outlet />

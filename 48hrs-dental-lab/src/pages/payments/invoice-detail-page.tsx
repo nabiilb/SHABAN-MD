@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer, Wallet } from 'lucide-react';
+import { Printer, Wallet } from 'lucide-react';
 import logo from '@/assets/logo-48hrs.png';
 import { PAYMENT_METHOD_LABELS } from '@/lib/constants';
 import { PERMISSIONS } from '@/lib/permissions';
@@ -13,6 +13,8 @@ import { formatDate, formatDateTime, formatMoney } from '@/utils/format';
 import { PaymentBadge } from '@/components/cases/badges';
 import { RecordPaymentDialog } from '@/components/payments/record-payment-dialog';
 import { Button } from '@/components/ui/button';
+import { PageToolbar } from '@/components/ui/page-toolbar';
+import { SimpleTable } from '@/components/ui/simple-table';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
 import { ErrorState, PageLoader, ProgressBar } from '@/components/ui/feedback';
 
@@ -30,13 +32,15 @@ export default function InvoiceDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="no-print flex flex-wrap items-center justify-between gap-2">
-        <Button asChild variant="ghost" size="sm"><Link to="/invoices"><ArrowLeft /> Invoices</Link></Button>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => window.print()}><Printer /> Print</Button>
-          {can(PERMISSIONS.PAYMENTS_RECORD) && inv.remaining > 0 && <Button onClick={() => setPaying(true)}><Wallet /> Record payment</Button>}
-        </div>
-      </div>
+      <PageToolbar
+        className="no-print"
+        actions={
+          <>
+            <Button variant="outline" onClick={() => window.print()}><Printer /> Print</Button>
+            {can(PERMISSIONS.PAYMENTS_RECORD) && inv.remaining > 0 && <Button onClick={() => setPaying(true)}><Wallet /> Record payment</Button>}
+          </>
+        }
+      />
 
       <Card>
         <CardBody className="flex flex-col gap-6">
@@ -61,28 +65,18 @@ export default function InvoiceDetailPage() {
             <Field label="Due date">{formatDate(inv.dueDate)}</Field>
           </dl>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[480px] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-[11px] font-bold tracking-[.12em] text-ink-3 uppercase">
-                  <th className="py-2.5 pr-4">Description</th>
-                  <th className="py-2.5 pr-4 text-right">Qty</th>
-                  <th className="py-2.5 pr-4 text-right">Unit price</th>
-                  <th className="py-2.5 text-right">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inv.lineItems.map((l, i) => (
-                  <tr key={i} className="border-b border-line">
-                    <td className="py-3 pr-4">{l.description}</td>
-                    <td className="py-3 pr-4 text-right font-mono">{l.quantity}</td>
-                    <td className="py-3 pr-4 text-right font-mono">{formatMoney(l.unitPrice)}</td>
-                    <td className="py-3 text-right font-mono font-bold">{formatMoney(l.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SimpleTable
+            caption="Invoice lines"
+            minWidth={480}
+            rows={inv.lineItems}
+            getKey={(_, i) => String(i)}
+            columns={[
+              { header: 'Description', cell: (l) => l.description },
+              { header: 'Qty', align: 'right', className: 'font-mono', cell: (l) => l.quantity },
+              { header: 'Unit price', align: 'right', className: 'font-mono', cell: (l) => formatMoney(l.unitPrice) },
+              { header: 'Amount', align: 'right', className: 'font-mono font-bold', cell: (l) => formatMoney(l.amount) },
+            ]}
+          />
 
           <div className="ml-auto flex w-full max-w-xs flex-col gap-2 text-sm">
             <div className="flex justify-between"><span className="text-ink-2">Total</span><span className="font-mono font-bold">{formatMoney(inv.total)}</span></div>
@@ -96,30 +90,20 @@ export default function InvoiceDetailPage() {
       <Card>
         <CardHeader title="Payment history" />
         <CardBody>
-          {inv.payments.length === 0 ? (
-            <p className="text-[13px] text-ink-3">No payments recorded yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-sm">
-                <thead>
-                  <tr className="border-b border-line text-left text-[11px] font-bold tracking-[.12em] text-ink-3 uppercase">
-                    <th className="py-2.5 pr-4">Date</th><th className="py-2.5 pr-4">Method</th><th className="py-2.5 pr-4">Reference</th><th className="py-2.5 pr-4">Received by</th><th className="py-2.5 text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {inv.payments.map((p) => (
-                    <tr key={p.id} className="border-b border-line">
-                      <td className="py-3 pr-4 whitespace-nowrap">{formatDateTime(p.paidAt)}</td>
-                      <td className="py-3 pr-4">{PAYMENT_METHOD_LABELS[p.method]}</td>
-                      <td className="py-3 pr-4 font-mono text-[12.5px]">{p.reference || '—'}</td>
-                      <td className="py-3 pr-4">{p.receivedByName}</td>
-                      <td className="py-3 text-right font-mono font-bold">{formatMoney(p.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <SimpleTable
+            caption="Payment history"
+            minWidth={560}
+            rows={inv.payments}
+            getKey={(p) => p.id}
+            empty="No payments recorded yet."
+            columns={[
+              { header: 'Date', className: 'whitespace-nowrap', cell: (p) => formatDateTime(p.paidAt) },
+              { header: 'Method', cell: (p) => PAYMENT_METHOD_LABELS[p.method] },
+              { header: 'Reference', className: 'font-mono text-[12.5px]', cell: (p) => p.reference || '—' },
+              { header: 'Received by', cell: (p) => p.receivedByName },
+              { header: 'Amount', align: 'right', className: 'font-mono font-bold', cell: (p) => formatMoney(p.amount) },
+            ]}
+          />
         </CardBody>
       </Card>
 

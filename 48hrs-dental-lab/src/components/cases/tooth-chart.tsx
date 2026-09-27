@@ -1,4 +1,8 @@
-import { Check, X } from 'lucide-react';
+import { useState } from 'react';
+import { Check, CircleHelp, X } from 'lucide-react';
+import quadrantGuide from '@/assets/teeth-quadrants.webp';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { cn } from '@/lib/cn';
 import { QUADRANTS, TOOTH_GEOMETRY } from '@/lib/teeth';
 
@@ -15,6 +19,7 @@ interface ToothChartProps {
  * is a real toggle button, so the chart works with keyboard and screen readers.
  */
 export function ToothChart({ value, onChange, readOnly, invalid, describedBy }: ToothChartProps) {
+  const [guideOpen, setGuideOpen] = useState(false);
   const selected = new Set(value);
   const toggle = (n: number) => {
     if (readOnly || !onChange) return;
@@ -103,7 +108,12 @@ export function ToothChart({ value, onChange, readOnly, invalid, describedBy }: 
 
       {!readOnly && (
         <div className="flex flex-col gap-2">
-          <span className="eyebrow">Selected teeth</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="eyebrow">Selected teeth</span>
+            <Button variant="link" size="sm" onClick={() => setGuideOpen(true)}>
+              <CircleHelp /> Numbering guide
+            </Button>
+          </div>
           {value.length ? (
             <div className="flex flex-wrap gap-1.5">
               {value.map((n) => (
@@ -124,6 +134,12 @@ export function ToothChart({ value, onChange, readOnly, invalid, describedBy }: 
           )}
         </div>
       )}
+
+      <Dialog open={guideOpen} onOpenChange={setGuideOpen}>
+        <DialogContent size="lg" title="Universal numbering" description="Teeth 1–16 run across the upper arch from the patient's right; 17–32 return along the lower arch. Screen left is the patient's right.">
+          <img src={quadrantGuide} alt="Dental chart showing universal tooth numbers 1 to 32 in four quadrants, with the patient's right on the left" className="mx-auto w-full max-w-[520px] rounded-md border border-line" />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

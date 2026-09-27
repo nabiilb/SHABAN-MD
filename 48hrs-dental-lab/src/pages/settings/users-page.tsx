@@ -4,28 +4,30 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { MoreHorizontal, Pencil, Plus, Power, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Power, Trash2 } from 'lucide-react';
 import { PERMISSIONS, ROLE_LABELS, ROLE_ORDER } from '@/lib/permissions';
 import { emailField, optionalPhone, passwordSchema, requiredText } from '@/lib/validation';
 import { useDeleteUser, useSaveUser, useSetUserActive, useUsers } from '@/hooks/api/use-admin';
 import { useClinics } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { useUrlState } from '@/hooks/use-url-state';
+import { useListState } from '@/hooks/use-list-state';
 import { errorMessage } from '@/services/api/errors';
 import type { RoleKey, User } from '@/types/models';
 import { formatDateTime } from '@/utils/format';
 import { applyApiErrors } from '@/components/forms/api-errors';
 import { SelectField, SwitchField, TextField } from '@/components/forms/fields';
 import { DataTable } from '@/components/tables/data-table';
+import { RowActions } from '@/components/tables/row-actions';
 import { ClearFiltersButton, FilterSelect, SearchInput, ToolbarRow } from '@/components/tables/toolbar';
 import { Alert } from '@/components/ui/feedback';
 import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PageToolbar } from '@/components/ui/page-toolbar';
+import { ActiveBadge } from '@/components/ui/record-badges';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 
 const DEFAULTS = { search: '', role: undefined as string | undefined, active: undefined as string | undefined, sort: 'name', dir: 'asc', page: '1', perPage: '20' };
 
@@ -90,10 +92,11 @@ function UserDialog({ open, onOpenChange, record }: { open: boolean; onOpenChang
 export default function UsersPage() {
   usePageTitle('Users', 'Who has access, and with which role');
   const { can, user: me } = useAuth();
-  const [f, setF, resetF] = useUrlState(DEFAULTS);
+  const list = useListState(DEFAULTS);
+  const { state: f, set: setF, reset: resetF } = list;
   const [editing, setEditing] = useState<User | null | 'new'>(null);
   const [toDelete, setToDelete] = useState<User | null>(null);
-  const q = useUsers({ search: f.search || undefined, role: f.role as RoleKey | undefined, active: f.active === undefined ? undefined : f.active === 'true', sort: f.sort, dir: f.dir as 'asc' | 'desc', page: Number(f.page), perPage: Number(f.perPage) });
+  const q = useUsers({ ...list.listParams, role: f.role as RoleKey | undefined, active: f.active === undefined ? undefined : f.active === 'true' });
   const setActive = useSetUserActive();
   const del = useDeleteUser();
   const manage = can(PERMISSIONS.USERS_MANAGE);
@@ -113,7 +116,7 @@ export default function UsersPage() {
       { id: 'role', header: 'Role', meta: { sortKey: 'role' }, cell: ({ row }) => <Badge tone={row.original.role === 'super_admin' ? 'navy' : 'info'}>{ROLE_LABELS[row.original.role]}</Badge> },
       { id: 'phone', header: 'Phone', meta: { cellClassName: 'whitespace-nowrap text-ink-2' }, cell: ({ row }) => row.original.phone || '—' },
       { id: 'last', header: 'Last sign-in', meta: { sortKey: 'lastLoginAt', cellClassName: 'whitespace-nowrap text-ink-2' }, cell: ({ row }) => formatDateTime(row.original.lastLoginAt) },
-      { id: 'status', header: 'Status', meta: { sortKey: 'status' }, cell: ({ row }) => <Badge tone={row.original.active ? 'success' : 'neutral'}>{row.original.active ? 'ACTIVE' : 'DISABLED'}</Badge> },
+      { id: 'status', header: 'Status', meta: { sortKey: 'status' }, cell: ({ row }) => <ActiveBadge active={row.original.active} activeLabel="ACTIVE" inactiveLabel="DISABLED" /> },
       ...(manage
         ? ([
             {
@@ -121,14 +124,14 @@ export default function UsersPage() {
               header: () => <span className="sr-only">Actions</span>,
               meta: { align: 'right' },
               cell: ({ row }) => (
-                <Menu>
-                  <MenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`Actions for ${row.original.name}`}><MoreHorizontal /></Button></MenuTrigger>
-                  <MenuContent>
-                    <MenuItem onSelect={() => setEditing(row.original)}><Pencil /> Edit</MenuItem>
-                    {row.original.id !== me?.id && <MenuItem onSelect={() => void toggle(row.original)}><Power /> {row.original.active ? 'Disable' : 'Enable'}</MenuItem>}
-                    {row.original.id !== me?.id && (<><MenuSeparator /><MenuItem tone="danger" onSelect={() => setToDelete(row.original)}><Trash2 /> Delete</MenuItem></>)}
-                  </MenuContent>
-                </Menu>
+                <RowActions
+                  label={row.original.name}
+                  actions={[
+                    { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(row.original) },
+                    { label: row.original.active ? 'Disable' : 'Enable', icon: <Power />, onSelect: () => void toggle(row.original), hidden: row.original.id === me?.id },
+                    { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => setToDelete(row.original), hidden: row.original.id === me?.id },
+                  ]}
+                />
               ),
             },
           ] as ColumnDef<User, unknown>[])
@@ -140,7 +143,7 @@ export default function UsersPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      {manage && <div className="flex justify-end"><Button onClick={() => setEditing('new')}><Plus /> Add user</Button></div>}
+      <PageToolbar actions={manage && <Button onClick={() => setEditing('new')}><Plus /> Add user</Button>} />
       <DataTable
         caption="Users"
         columns={columns}
@@ -151,10 +154,7 @@ export default function UsersPage() {
         isFetching={q.isFetching}
         error={q.error}
         onRetry={() => void q.refetch()}
-        sort={{ key: f.sort, dir: f.dir as 'asc' | 'desc' }}
-        onSortChange={(s) => setF({ sort: s.key ?? DEFAULTS.sort, dir: s.dir ?? DEFAULTS.dir })}
-        onPageChange={(p) => setF({ page: String(p) }, { resetPage: false })}
-        onPerPageChange={(n) => setF({ perPage: String(n) })}
+        {...list.tableProps}
         emptyTitle="No users found."
         renderMobileCard={(u) => (
           <div className="flex items-center justify-between gap-2">

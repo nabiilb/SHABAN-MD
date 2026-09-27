@@ -38,7 +38,7 @@ function List({ options, selected, onPick, searchPlaceholder, emptyText, loading
             onSearchChange?.(v);
           }}
           placeholder={searchPlaceholder ?? 'Type to search…'}
-          className="h-10 w-full bg-transparent px-1 text-sm outline-none placeholder:text-gray-400"
+          className="h-10 w-full bg-transparent px-1 text-sm outline-none placeholder:text-ink-3"
         />
         {loading && <Loader2 className="size-4 animate-spin text-ink-3" aria-hidden />}
       </div>
@@ -77,7 +77,7 @@ export function Combobox({ value, onChange, placeholder = 'Select…', selectedL
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" id={props.id} role="combobox" aria-expanded={open} aria-invalid={props.invalid} aria-describedby={props.describedBy} disabled={props.disabled} className={triggerCls}>
-          <span className={cn('truncate', !label && 'text-gray-400')}>{label ?? placeholder}</span>
+          <span className={cn('truncate', !label && 'text-ink-3')}>{label ?? placeholder}</span>
           <ChevronsUpDown className="size-4 shrink-0 text-ink-3" aria-hidden />
         </button>
       </PopoverTrigger>
@@ -104,7 +104,7 @@ export function MultiSelect({ value, onChange, placeholder = 'Select…', ...pro
       <PopoverTrigger asChild>
         <button type="button" id={props.id} role="combobox" aria-expanded={open} aria-invalid={props.invalid} aria-describedby={props.describedBy} disabled={props.disabled} className={triggerCls}>
           <span className="flex min-w-0 flex-wrap gap-1.5">
-            {chosen.length === 0 && <span className="text-gray-400">{placeholder}</span>}
+            {chosen.length === 0 && <span className="text-ink-3">{placeholder}</span>}
             {chosen.map((o) => (
               <span key={o.value} className="inline-flex items-center gap-1 rounded-full border border-navy-100 bg-navy-50 px-2 py-0.5 text-xs font-semibold text-brand">
                 {o.label}

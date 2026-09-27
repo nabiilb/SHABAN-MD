@@ -3,7 +3,10 @@ import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { cn } from '@/lib/cn';
 
 export const Tabs = TabsPrimitive.Root;
-export const TabsContent = TabsPrimitive.Content;
+/** Panels stay mounted (hidden when inactive) so every tab's aria-controls points at a real element. */
+export function TabsContent({ className, ...props }: TabsPrimitive.TabsContentProps) {
+  return <TabsPrimitive.Content forceMount className={cn('data-[state=inactive]:hidden', className)} {...props} />;
+}
 
 export function TabsList({ children, className, label }: { children: ReactNode; className?: string; label?: string }) {
   return (
