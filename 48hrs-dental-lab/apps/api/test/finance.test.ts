@@ -30,7 +30,7 @@ describe('payments and invoice status', () => {
   it('overdue once the due date passes with money owed', async () => {
     const reception = await login(USERS.reception);
     const c = await createReceivedCase(reception);
-    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 15 * DAY });
+    vi.setSystemTime(Date.now() + 15 * DAY);
     const later = await login(USERS.reception);
     expect((await later.get(`/invoices/${c.invoice!.id}`)).body.status).toBe('overdue');
     const overdue = (await later.get('/invoices?status=overdue&perPage=200')).body.data as { id: string; status: string }[];

@@ -32,7 +32,7 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true,
       environment: 'jsdom',
-      setupFiles: ['./src/test/setup.ts'],
+      setupFiles: ['../../packages/shared/test/fixed-clock.ts', './src/test/setup.ts'],
       include: ['src/**/*.test.{ts,tsx}'],
       css: false,
       env: { VITE_USE_MOCKS: 'true', VITE_MOCK_LATENCY_MS: '0' },

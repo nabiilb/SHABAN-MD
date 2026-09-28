@@ -17,32 +17,37 @@ let lastPurge = 0;
 let stopping = false;
 let timer: NodeJS.Timeout | undefined;
 
-async function tick() {
+/** One pass; false when it failed (the loop carries on, a --once run exits non-zero for cron). */
+async function tick(): Promise<boolean> {
   try {
     const scan = await runDeadlineScan();
     if (scan.atRisk || scan.overdue) logger.info({ scan }, 'deadline alerts raised');
     else logger.debug({ scan }, 'deadline scan');
+    if (once) logger.info({ scan }, 'deadline scan complete');
     if (Date.now() - lastPurge > HOUR) {
       lastPurge = Date.now();
       const purged = await purgeExpiredCredentials();
       if (purged.sessions || purged.resetTokens) logger.info({ purged }, 'expired credentials purged');
     }
+    return true;
   } catch (err) {
     logger.error({ err }, 'worker pass failed');
+    return false;
   }
 }
 
 async function loop() {
-  await tick();
-  if (once || stopping) return shutdown();
+  const ok = await tick();
+  if (once) return shutdown(ok ? 0 : 1);
+  if (stopping) return shutdown();
   timer = setTimeout(() => void loop(), env.WORKER_INTERVAL_SECONDS * 1000);
 }
 
-async function shutdown() {
+async function shutdown(code = 0) {
   stopping = true;
   clearTimeout(timer);
   await disconnect();
-  process.exit(0);
+  process.exit(code);
 }
 
 process.on('SIGTERM', () => void shutdown());

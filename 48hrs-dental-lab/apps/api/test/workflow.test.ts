@@ -213,7 +213,7 @@ describe('SLA states from stored timestamps at server time', () => {
     const listed = async (who: Client, sla: string) => ((await who.get(`/cases?sla=${sla}&perPage=200`)).body.data as { id: string }[]).some((x) => x.id === c.id);
     expect(await listed(manager, 'on_track')).toBe(true);
 
-    vi.useFakeTimers({ toFake: ['Date'], now: start + 40 * HOUR });
+    vi.setSystemTime(start + 40 * HOUR);
     const m1 = await login(USERS.manager);
     expect(await listed(m1, 'at_risk')).toBe(true);
     expect(await listed(m1, 'overdue')).toBe(false);

@@ -22,6 +22,7 @@ export default defineConfig({
     environment: 'node',
     include: ['test/**/*.test.ts'],
     globalSetup: ['./test/global-setup.ts'],
+    setupFiles: ['../../packages/shared/test/fixed-clock.ts'],
     // One database: suites run one after another.
     fileParallelism: false,
     testTimeout: 30_000,

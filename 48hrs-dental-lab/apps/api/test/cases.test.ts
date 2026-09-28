@@ -121,11 +121,19 @@ describe('list: search, filters, sorting, pagination, scope', () => {
 
   it('date range on received date and on the deadline', async () => {
     const admin = await login(USERS.admin);
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Mogadishu' }).format(new Date());
+    // Days are lab-calendar days (LAB_TIMEZONE), whatever the server's or runner's zone and time of day.
+    const labDay = (d: Date | string | number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Mogadishu' }).format(new Date(d));
+    const fresh = await createReceivedCase(await login(USERS.reception));
+    const today = labDay(fresh.receivedAt);
     const recent = await list(admin, `from=${today}&to=${today}`);
-    expect(recent.length).toBeGreaterThan(0);
-    const due = await list(admin, `dueFrom=${today}&dueTo=${today}`);
-    expect(due.every((r) => r.dueAt)).toBe(true);
+    expect(recent.map((r) => r.id)).toContain(fresh.id);
+    expect(recent.every((r) => labDay(r.receivedAt ?? r.createdAt) === today)).toBe(true); // portal submissions: by submission date
+    const yesterday = labDay(new Date(fresh.receivedAt).getTime() - 86_400_000);
+    expect((await list(admin, `from=${yesterday}&to=${yesterday}`)).map((r) => r.id)).not.toContain(fresh.id);
+    const dueDay = labDay(fresh.dueAt);
+    const due = await list(admin, `dueFrom=${dueDay}&dueTo=${dueDay}`);
+    expect(due.map((r) => r.id)).toContain(fresh.id);
+    expect(due.every((r) => r.dueAt && labDay(r.dueAt) === dueDay)).toBe(true);
     expect((await admin.get('/cases?from=2026-13-40')).status).toBe(422);
   });
 

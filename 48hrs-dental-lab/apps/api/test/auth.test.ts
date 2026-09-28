@@ -120,7 +120,7 @@ describe('refresh, logout and expiry', () => {
 
   it('an expired access token is refreshed; the session end is absolute', async () => {
     const start = Date.now();
-    vi.useFakeTimers({ toFake: ['Date'], now: start });
+    vi.setSystemTime(start);
     const c = await login(USERS.reception);
     const session = (await c.get('/auth/me')).body;
 

@@ -61,6 +61,7 @@ describe('48-hour SLA — domain boundaries', () => {
 
 describe('48-hour SLA — stored timestamps through the API (time travel)', () => {
   it('a real case goes on track → at risk → overdue, is listed, counted and notified', async () => {
+    vi.useRealTimers(); // replace the advancing test clock with a frozen one
     vi.useFakeTimers({ toFake: ['Date'] });
     const t0 = new Date('2026-09-10T08:00:00Z').getTime();
     vi.setSystemTime(t0);
@@ -93,6 +94,7 @@ describe('48-hour SLA — stored timestamps through the API (time travel)', () =
   });
 
   it('records "delivered on time" vs "delivered late" from the stored delivery time', async () => {
+    vi.useRealTimers(); // replace the advancing test clock with a frozen one
     vi.useFakeTimers({ toFake: ['Date'] });
     const t0 = new Date('2026-09-10T08:00:00Z').getTime();
     vi.setSystemTime(t0);
@@ -186,6 +188,7 @@ describe('transition integrity', () => {
 
 describe('payments through the API', () => {
   it('Total − Paid = Remaining, with Unpaid → Partial → Paid and Overdue after the due date', async () => {
+    vi.useRealTimers(); // replace the advancing test clock with a frozen one
     vi.useFakeTimers({ toFake: ['Date'] });
     const t0 = new Date('2026-09-10T08:00:00Z').getTime();
     vi.setSystemTime(t0);
@@ -236,6 +239,7 @@ describe('dashboard period', () => {
 
 describe('session expiry', () => {
   it('the API rejects a token once its lifetime has passed', async () => {
+    vi.useRealTimers(); // replace the advancing test clock with a frozen one
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-10T08:00:00Z'));
     await loginAs('sagal@48hrs.lab');

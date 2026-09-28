@@ -63,6 +63,7 @@ Open http://localhost:5173 and sign in with a demo account below and your `SEED_
 | `npm run dev:api` / `npm run dev:web` / `npm run worker` | One process each |
 | `npm run build` | Web (`tsc -b` + Vite → `apps/web/dist`) and API (esbuild → `apps/api/dist/server.js`, `worker.js`) |
 | `npm start` / `npm run start:worker` | Run the built API / worker |
+| `npm run start:worker:once` (dev: `npm run worker:once`) | One worker pass, then exit (cron / systemd timer) |
 | `npm run typecheck` · `npm run lint` | TypeScript in every workspace · ESLint for the whole repo |
 | `npm test` | Unit and integration tests of every workspace (see §9) |
 | `npm run test:e2e` | Full-stack browser tests (web + API + PostgreSQL) |
@@ -228,7 +229,7 @@ Any open stage → Cancelled
 - **The server starts the clock:** `received_at` is the server time when reception registers a case or accepts a portal submission; `due_at = received_at + SLA hours` (48 by default, set in Settings). `CaseSlaService` classifies cases as on time, at risk, overdue, completed on time or completed late — from stored timestamps at server time, never the browser clock.
 - **Every transition is validated on the backend:** a step that is not valid from the current status is `409 Invalid workflow transition.`; the status update is conditional on the status that was validated, so two people acting at once cannot both succeed (the second gets 409, and the UI reloads the case). Input rules (QC issues and notes, courier, receiver, payment) come from the shared `validateActionInput()`; nothing is written when any rule fails.
 - Each step writes, in one transaction: the status and its timestamp, `case_status_history` (from, to, user, role, note), the assignment log, QC checks with their issues, delivery records (who delivered, when, to whom, received by, notes), the invoice on receipt, an optional deposit, the activity log and the notifications.
-- **Deadline worker** (`npm run worker`, or `npm run start:worker` in production): every `WORKER_INTERVAL_SECONDS` it finds cases entering the at-risk window or passing their deadline and notifies the technician, lab managers and admins (plus reception when overdue). Each alert is claimed with a conditional update, so it is sent **exactly once per case** even with several workers running. `--once` runs a single pass for cron-style scheduling.
+- **Deadline worker** (`npm run worker`, or `npm run start:worker` in production): every `WORKER_INTERVAL_SECONDS` it finds cases entering the at-risk window or passing their deadline and notifies the technician, lab managers and admins (plus reception when overdue). Each alert is claimed with a conditional update, so it is sent **exactly once per case** even with several workers running. `npm run start:worker:once` (development: `npm run worker:once`) runs a single pass and exits, for cron-style scheduling.
 
 ## 8. REST API
 

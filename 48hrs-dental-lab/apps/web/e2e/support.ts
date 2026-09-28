@@ -21,7 +21,7 @@ export const dialog = (page: Page) => page.getByRole('dialog');
 export const act = (page: Page, label: string) => page.getByRole('button', { name: label, exact: true }).first().click();
 export const toast = (page: Page, text: string | RegExp) => expect(page.getByText(text).first()).toBeVisible();
 
-/** One pass of the deadline worker, exactly as `npm run worker -- --once` runs it. */
+/** One pass of the deadline worker, exactly as `npm run worker:once` runs it. */
 export function runWorkerOnce() {
   execFileSync('npx', ['tsx', '../api/src/jobs/worker.ts', '--once'], { env: { ...process.env, ...stackEnv() }, stdio: 'pipe' });
 }

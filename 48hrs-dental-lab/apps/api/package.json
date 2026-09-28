@@ -7,9 +7,11 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env src/server.ts",
     "worker": "tsx --env-file-if-exists=../../.env src/jobs/worker.ts",
+    "worker:once": "tsx --env-file-if-exists=../../.env src/jobs/worker.ts --once",
     "build": "node build.mjs",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "start:worker": "node --env-file-if-exists=../../.env dist/worker.js",
+    "start:worker:once": "node --env-file-if-exists=../../.env dist/worker.js --once",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
