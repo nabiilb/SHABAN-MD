@@ -101,13 +101,13 @@ Open http://localhost:5173 and sign in with a demo account below and your `SEED_
 ├── packages/shared/src/         types, permissions, workflow, sla, billing, analytics, notifications,
 │                                case-requests (REST contract), schemas (Zod), dates, demo-data
 ├── prisma/                      schema.prisma · migrations/ · seed.ts
-├── deploy/                      staging / production environment templates
+├── deploy/                      staging / production env templates · nginx.conf.example (HTTPS proxy) · systemd/ units
 └── scripts/dev.mjs              runs the whole stack for development
 ```
 
 ## 3. Environment variables
 
-Backend variables live in the root `.env` (template: `.env.example`; staging/production templates in `deploy/`). **Never commit `.env` files**, database passwords, JWT secrets or real credentials — `.gitignore` excludes them. The API validates its configuration at start-up and refuses to run with a short `JWT_SECRET`, an unknown time zone or, in production, non-secure cookies, no allowed origin or no SMTP.
+Backend variables live in the root `.env` (template: `.env.example`; staging/production templates in `deploy/`). **Never commit `.env` files**, database passwords, JWT secrets or real credentials — `.gitignore` excludes them. The API validates its configuration at start-up and refuses to run with a short `JWT_SECRET` or one still holding a template `CHANGE_ME` placeholder, or an unknown time zone; in production it also refuses non-secure cookies, a missing or non-`https://` allowed origin, a non-`https://` or localhost `APP_URL`, `CHANGE_ME` in `DATABASE_URL`/`SMTP_URL`, a localhost `MAIL_FROM` and the log mail transport. The seed refuses `CHANGE_ME` passwords and, in production, demo data.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ Frontend variables (`apps/web/.env`, compiled into the public bundle — no secr
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `VITE_API_URL` | `/api` | API base URL (same origin by default; the dev server proxies `/api` → `API_PROXY_TARGET`, default `http://localhost:4000`) |
+| `VITE_API_URL` | `/api` | API base URL, **must end in `/api`** (e.g. `/api` or `https://api.example.com/api`; the dev server and the build fail otherwise). Same origin by default; the dev server proxies `/api` → `API_PROXY_TARGET` (default `http://localhost:4000`) |
 | `VITE_USE_MOCKS` | `false` | `true` runs the UI against the in-browser mock backend, without API or database |
 | `VITE_MOCK_LATENCY_MS`, `VITE_SESSION_TIMEOUT_MINUTES` | `250`, `480` | Mock backend only |
 
@@ -269,41 +269,64 @@ Components never call `fetch`: **page → TanStack Query hook → service (`apps
 
 ## 9. Testing
 
+Prerequisites: `TEST_DATABASE_URL` and `E2E_DATABASE_URL` in the root `.env` — two **disposable** PostgreSQL databases (both are wiped; the runners refuse to use `DATABASE_URL`). Playwright needs Chromium (`npx playwright install chromium` once, unless it is pre-installed).
+
+```bash
+npm run typecheck && npm run lint     # TypeScript (every workspace, incl. e2e specs) · ESLint
+npm test                              # shared + web + API suites (API: real PostgreSQL)
+npm run test:e2e                      # builds the web app in API mode, starts the API on it, runs Playwright
+npm run build                         # production web + API builds
+npm audit --omit=dev                  # runtime dependency advisories
+```
+
 | Command | Suite | Tests |
 | --- | --- | --- |
 | `npm test -w @48hrs/shared` | dates in any time zone, the REST request contract, analytics, schemas, deadline alerts | 15 |
-| `npm test -w @48hrs/web` | UI (login, guards, tooth chart, forms, tables, breadcrumbs), transport, and the mock backend end to end | 94 |
-| `npm test -w @48hrs/api` | **Vitest + Supertest on a real PostgreSQL database** (`TEST_DATABASE_URL`, migrated and re-seeded per suite) | 77 |
-| `npm run test:e2e` | **Playwright: built web app + API + PostgreSQL** (`E2E_DATABASE_URL`) | 6 |
+| `npm test -w @48hrs/web` | UI (login, guards, tooth chart, forms, tables), the mock backend end to end, and the **API contract** (base URL, transport URLs, every service call ↔ a route on the Node router) | 100 |
+| `npm test -w @48hrs/api` | **Vitest + Supertest on a real PostgreSQL database**, including `security.test.ts`, `auth-rate-limit.test.ts`, `worker.test.ts` (real worker processes) and `web-serving.test.ts` | 118 |
+| `npm run test:e2e` | **Playwright: built web app + Node API + PostgreSQL** (no mocks) | 8 |
 
-API tests: authentication (login, lockout, disabled accounts, CSRF, refresh rotation and replay, access-token expiry, absolute session end, logout revocation, disabling a user, live permission changes, password reset), every workflow action × every role (allowed ⇔ shared rules), the complete flow with QC fail → rework → pass and persisted history, reassignment log, 409 on invalid and on concurrent transitions, 422 input rules with nothing written, the SLA clock (server time; on track → at risk → overdue; delivered late), case CRUD, pricing, validation, every list filter, sorting, pagination and row scope, invoices and payments (unpaid → partial → paid, overdue, invalid payments, a concurrent over-payment race, scope), attachments (bytes round-trip, content sniffing, ownership, scope), directory rules, QC/delivery history, notifications and the worker (alerts once per case, even with two workers at once), dashboard and report figures against the database, financial gating, search, users/roles/services/settings/activity. Status codes asserted throughout: 401, 403, 404, 409, 422, 429.
+**Deterministic time.** Every Vitest suite runs on a fixed test clock (`packages/shared/test/fixed-clock.ts`: Monday 12:00 lab time, advancing in real time), so results never depend on the machine's date, time of day or zone. Override it to check an edge, e.g. `TEST_EPOCH=2026-06-15T20:59:00Z TZ=America/Los_Angeles npm test` (one minute before lab midnight). The suites pass at lab 23:59 and 00:00, on New Year's Eve, across a DST switch and in UTC, Los Angeles, Kiritimati, Kolkata and New York. Playwright deliberately uses the real server clock (it verifies server-time behaviour) and moves deadlines in the database instead.
 
-End-to-end: login → dashboard → create case → assign → production → QC fail → rework → QC pass → ready → invalid then valid payments → dispatch → delivery → completed (history and delivery records checked in the database, no console errors); deadline exceeded → overdue from the server clock and the worker; a device clock three days fast changes nothing; a technician blocked in the UI and by the API; a stale page gets 409 and shows the real state; the access token silently refreshed, then the session ending with sign-in and return.
+API tests: authentication (login, lockout, disabled accounts, CSRF, refresh rotation and replay, access-token expiry, absolute session end, logout revocation, disabling a user, live permission changes, password reset, the per-IP `AUTH_RATE_LIMIT` incl. spoofed `X-Forwarded-For`); an **RBAC matrix** of every role × representative endpoints (allowed exactly where the role holds the permission, `403 Access restricted.` elsewhere, 401 without a session); request tampering (scope-widening query parameters, server-owned body fields, privilege escalation, a technician re-assigning, a spoofed payment actor); every workflow action × every role; the complete flow with QC fail → rework → pass and persisted history; 409 on invalid and on concurrent transitions, assignments and QC results; 422 input rules with nothing written; the SLA clock; case CRUD, filters, sorting, pagination and row scope; payments (unpaid → partial → paid, overdue, invalid input, fully paid invoices, over-payment and **duplicate-reference races checked in SQL**, all-or-nothing acceptance with payment); files (ASCII/binary STL round-trip, client MIME ignored, double extensions, executables/HTML refused, size limit, 401 without a session, outsiders 404, known storage keys never served); the worker as a process (`--once` with and without work, two at once, failure → non-zero exit, continuous until SIGTERM); dashboard/report figures against the database; search; administration; production configuration guards and placeholder secrets.
 
-Browser audits (Playwright + axe-core, WCAG 2 A/AA), run against the real API: every page for all 8 roles (109 visits, 0 errors, 0 axe violations), 387 permission checks on sidebar, pages, buttons and direct URLs, 57 form checks, 20 keyboard checks, and the full journeys — all passing. The crawl and the full journey also pass in mock mode.
+End-to-end (committed `apps/web/e2e/full-stack.spec.ts`): client-portal submission with an STL upload (bytes checked on disk and via download; 401 anonymously) → acceptance with a deposit → assignment → production → QC fail → rework → QC pass → ready → dispatch → delivered → invalid then final payment → client confirms → completed, with history, QC and ledger verified in PostgreSQL and no console errors; deadline exceeded → overdue from the server clock and the worker; device clock 9 h ahead and 9 h behind (fresh login, reload, SLA from the server, expired server session still ends); technician restrictions in the UI and the API; a stale page in a second browser gets 409, refetches and shows the server state; silent token refresh then session end with sign-in and return; global search within the user's scope.
 
-## 10. Deployment
+## 10. Deployment (Node.js, verified)
 
-1. **Provision** PostgreSQL (backups enabled), a Node.js 22 runtime and TLS in front of the API (nginx, Caddy or a load balancer).
-2. **Configure** the environment from `deploy/production.env.example` (staging: `deploy/staging.env.example`) in the platform's secret store. Generate a unique `JWT_SECRET` per environment.
-3. **Build** (CI or the server): `npm ci && npm run build`.
-4. **Migrate:** `npm run db:deploy`. **First deployment only:** `npm run db:seed` with `SEED_MODE=base` and `SEED_ADMIN_*` set, then remove `SEED_ADMIN_PASSWORD` from the environment and change that password after the first sign-in.
-5. **Run two processes** under a supervisor (systemd, PM2, the platform's process manager), restarting on failure:
-   - `npm start` — the API (`node apps/api/dist/server.js`), with `WEB_DIST_DIR=../web/dist` to serve the SPA from the same origin, or host `apps/web/dist` on a CDN/web server and route `/api` to the API;
-   - `npm run start:worker` — the deadline worker (one or more; alerts are never duplicated).
-6. Behind a proxy set `TRUST_PROXY` to the number of proxies and keep `COOKIE_SECURE=true`. Health checks: `GET /api/health` (liveness) and `GET /api/health/ready` (database).
-7. Back up the database and `UPLOAD_DIR` together.
+The path below was run end to end on an empty PostgreSQL database from a fresh clone: runtime-only install, migrations, base seed, API + worker as production processes behind nginx with TLS, then a browser sign-in and an 80-check API smoke test (auth, RBAC, portal submission with STL, full lifecycle, payments incl. a raced duplicate reference, search, reports, worker alerts). No Docker image is provided because none has been verified.
 
-Example systemd unit for the API (the worker is identical with `start:worker`):
-
-```ini
-[Service]
-WorkingDirectory=/srv/48hrs-dental-lab
-EnvironmentFile=/etc/48hrs/api.env
-ExecStart=/usr/bin/npm start
-Restart=always
-User=lab
-```
+1. **Provision** PostgreSQL 14+ (backups on), Node.js 22+, nginx (or another TLS proxy), a DNS name and a certificate (e.g. `certbot --nginx -d lab.example.com`).
+2. **Get the code and build** (on the server or in CI — the build needs the dev tools):
+   ```bash
+   git clone <repository> /srv/48hrs-dental-lab && cd /srv/48hrs-dental-lab
+   npm ci                    # full install (build tools) + prisma generate
+   npm run build             # apps/web/dist and apps/api/dist
+   npm ci --omit=dev         # reinstall runtime dependencies only; the dist folders are kept
+   ```
+   `npm ci --omit=dev` cannot come *before* `npm run build`: TypeScript, Vite and esbuild are devDependencies. Prisma, `tsx` and `dotenv` are runtime dependencies, so migrations and the seed work after the prune.
+3. **Configure** the environment from `deploy/production.env.example` (staging: `deploy/staging.env.example`): as `/srv/48hrs-dental-lab/.env` (read by `npm start` and the Prisma CLI) or as `/etc/48hrs/api.env` for systemd, `chmod 600`. Set a unique `JWT_SECRET` (`openssl rand -base64 48`), the real `DATABASE_URL`, `CORS_ORIGINS` and `APP_URL` (`https://…`), `SMTP_URL`, `MAIL_FROM`, `UPLOAD_DIR` (writable, backed up), `TRUST_PROXY=1` behind nginx. The API refuses to start while any production rule in §3 is violated.
+4. **Migrate and seed:**
+   ```bash
+   npx prisma migrate deploy   # = npm run db:deploy; applies prisma/migrations (safe to re-run)
+   npm run db:seed             # production: SEED_MODE=base — catalogue, roles, settings, first Super Admin (idempotent)
+   ```
+   Then remove `SEED_ADMIN_PASSWORD` from the environment and change that password after the first sign-in.
+5. **Start the API and the worker** as services (`deploy/systemd/48hrs-api.service`, `deploy/systemd/48hrs-worker.service`: `systemctl enable --now 48hrs-api 48hrs-worker`), or directly:
+   ```bash
+   npm start                   # API on PORT; with WEB_DIST_DIR=../web/dist it also serves the SPA (single origin)
+   npm run start:worker        # continuous deadline worker (several instances are safe)
+   ```
+   Instead of the continuous worker, cron can run one pass per minute — it exits non-zero when a pass fails:
+   `* * * * * cd /srv/48hrs-dental-lab && npm run start:worker:once >> /var/log/48hrs-worker.log 2>&1`
+6. **Reverse proxy + HTTPS:** install `deploy/nginx.conf.example` as the site (HTTP → HTTPS redirect, TLS 1.2/1.3, `X-Forwarded-Proto`, overwritten `X-Forwarded-For`, 55 MB body limit, streamed uploads), then `nginx -t && systemctl reload nginx`. Keep `COOKIE_SECURE=true` and `TRUST_PROXY=1`; the API adds HSTS and a strict CSP.
+7. **Verify:**
+   ```bash
+   curl -fsS https://lab.example.com/api/health        # {"status":"ok"}        liveness
+   curl -fsS https://lab.example.com/api/health/ready  # {"status":"ready"}     database reachable
+   ```
+   then sign in as the Super Admin in a browser.
+8. **Operate:** back up the database and `UPLOAD_DIR` together; updates repeat steps 2, 4 (`migrate deploy` only) and a service restart. Hosting `apps/web/dist` on a CDN instead is possible: build it with `VITE_API_URL=https://api.example.com/api` (the API must be on the same registrable domain as the web app, so its `SameSite=Lax` cookies are sent), add the web origin to `CORS_ORIGINS`, leave `WEB_DIST_DIR` empty.
 
 ## 11. Known limitations
 

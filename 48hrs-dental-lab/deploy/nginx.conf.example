@@ -6,7 +6,7 @@
 
 server {
     listen 80;
-    listen [::]:80;
+    listen [::]:80;   # remove the [::] lines on hosts without IPv6
     server_name lab.example.com;
     return 301 https://$host$request_uri;
 }
