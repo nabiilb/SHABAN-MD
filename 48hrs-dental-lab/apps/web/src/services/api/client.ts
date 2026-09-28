@@ -1,0 +1,95 @@
+import type { AuthSession } from '@48hrs/shared/types';
+import { ApiError } from './errors';
+import { httpTransport } from './http-transport';
+import { tokenStore } from './token-store';
+import type { ApiRequest, HttpMethod, QueryParams, Transport, UploadProgress } from './types';
+
+let transportPromise: Promise<Transport> | null = null;
+
+/**
+ * Picks the transport once. The mock backend is code-split and only loaded when
+ * VITE_USE_MOCKS=true, so production bundles talking to the Node API never ship it.
+ */
+function getTransport(): Promise<Transport> {
+  if (!transportPromise) {
+    // Inline env check (not env.useMocks) so the bundler can drop the mock code in API builds.
+    transportPromise = import.meta.env.VITE_USE_MOCKS === 'true'
+      ? import('@/mocks/transport').then((m) => m.mockTransport)
+      : Promise.resolve(httpTransport);
+  }
+  return transportPromise;
+}
+
+type UnauthorizedHandler = () => void;
+type RefreshedHandler = (session: AuthSession) => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+let onRefreshed: RefreshedHandler | null = null;
+
+/** The auth store registers these: any unrecoverable 401 logs the user out; a refresh updates the session. */
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null) {
+  onUnauthorized = fn;
+}
+
+export function setSessionRefreshedHandler(fn: RefreshedHandler | null) {
+  onRefreshed = fn;
+}
+
+/** Requests that must never trigger a refresh-and-retry. */
+const AUTH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/forgot-password', '/auth/reset-password'];
+
+let refreshing: Promise<boolean> | null = null;
+
+/** Exchanges the refresh cookie for a new access token once, however many requests hit a 401 together. */
+function refreshSession(transport: Transport) {
+  refreshing ??= transport({ method: 'POST', path: '/auth/refresh', token: tokenStore.get()?.token ?? null })
+    .then((s) => {
+      onRefreshed?.(s as AuthSession);
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
+async function send<T>(req: Omit<ApiRequest, 'token'>): Promise<T> {
+  const transport = await getTransport();
+  const attempt = () => transport({ ...req, token: tokenStore.get()?.token ?? null }) as Promise<T>;
+  try {
+    return await attempt();
+  } catch (err) {
+    if (!(err instanceof ApiError) || !err.isUnauthorized || AUTH_PATHS.includes(req.path)) throw err;
+    // The access token may just have expired: refresh once and replay the request.
+    if (tokenStore.get() && (await refreshSession(transport))) {
+      try {
+        return await attempt();
+      } catch (retryErr) {
+        if (retryErr instanceof ApiError && retryErr.isUnauthorized) onUnauthorized?.();
+        throw retryErr;
+      }
+    }
+    onUnauthorized?.();
+    throw err;
+  }
+}
+
+interface Opts {
+  params?: QueryParams;
+  signal?: AbortSignal;
+}
+
+function call<T>(method: HttpMethod, path: string, body?: unknown, opts: Opts = {}) {
+  return send<T>({ method, path, body, params: opts.params, signal: opts.signal });
+}
+
+export const api = {
+  get: <T>(path: string, opts?: Opts) => call<T>('GET', path, undefined, opts),
+  post: <T>(path: string, body?: unknown, opts?: Opts) => call<T>('POST', path, body, opts),
+  put: <T>(path: string, body?: unknown, opts?: Opts) => call<T>('PUT', path, body, opts),
+  patch: <T>(path: string, body?: unknown, opts?: Opts) => call<T>('PATCH', path, body, opts),
+  delete: <T>(path: string, opts?: Opts) => call<T>('DELETE', path, undefined, opts),
+  upload: <T>(path: string, formData: FormData, onUploadProgress?: (p: UploadProgress) => void, signal?: AbortSignal) =>
+    send<T>({ method: 'POST', path, formData, onUploadProgress, signal }),
+  download: (path: string) => send<Blob>({ method: 'GET', path, responseType: 'blob' }),
+};
