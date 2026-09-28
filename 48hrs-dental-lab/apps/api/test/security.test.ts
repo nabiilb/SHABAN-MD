@@ -300,6 +300,10 @@ describe('production configuration guards', () => {
     fails({ APP_URL: 'http://localhost:5173' }, 'APP_URL');
     fails({ MAIL_FROM: undefined }, 'MAIL_FROM');
     fails({ LAB_TIMEZONE: 'Mars/Olympus' }, 'LAB_TIMEZONE');
+    fails({ JWT_SECRET: 'CHANGE_ME_openssl_rand_base64_48' }, 'JWT_SECRET'); // the template value is long enough, but public
+    fails({ JWT_SECRET: 'CHANGE_ME_TO_48_RANDOM_BYTES_BASE64', NODE_ENV: 'development' }, 'JWT_SECRET');
+    fails({ DATABASE_URL: 'postgresql://lab_app:CHANGE_ME@db.internal:5432/dental_lab' }, 'DATABASE_URL');
+    fails({ SMTP_URL: 'smtps://USER:CHANGE_ME@smtp.example.com:465' }, 'SMTP_URL');
     fails({ COOKIE_SECURE: 'false', COOKIE_SAMESITE: 'none', NODE_ENV: 'development' }, 'COOKIE_SAMESITE');
   });
 });

@@ -77,6 +77,8 @@ const schema = z
     } catch {
       ctx.addIssue({ code: 'custom', path: ['LAB_TIMEZONE'], message: `Unknown time zone "${v.LAB_TIMEZONE}"` });
     }
+    // Template placeholders (.env.example, deploy/*.env.example) must never run: a copied example secret is public.
+    if (/CHANGE_ME/i.test(v.JWT_SECRET)) ctx.addIssue({ code: 'custom', path: ['JWT_SECRET'], message: 'Replace the template placeholder with a random secret (openssl rand -base64 48)' });
     if (v.MAIL_TRANSPORT === 'smtp' && !v.SMTP_URL) ctx.addIssue({ code: 'custom', path: ['SMTP_URL'], message: 'SMTP_URL is required when MAIL_TRANSPORT=smtp' });
     if (v.NODE_ENV === 'production') {
       if (!v.COOKIE_SECURE) ctx.addIssue({ code: 'custom', path: ['COOKIE_SECURE'], message: 'Cookies must be Secure in production' });
@@ -84,6 +86,7 @@ const schema = z
       if (v.MAIL_TRANSPORT === 'log') ctx.addIssue({ code: 'custom', path: ['MAIL_TRANSPORT'], message: 'Configure SMTP in production so reset links are e-mailed, not logged' });
       if (!/^https:\/\//.test(v.APP_URL) || /localhost|127\.0\.0\.1/.test(v.APP_URL)) ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'Set APP_URL to the public https:// address of the web app' });
       if (v.CORS_ORIGINS.some((o) => !o.startsWith('https://'))) ctx.addIssue({ code: 'custom', path: ['CORS_ORIGINS'], message: 'Production origins must be https://' });
+      for (const key of ['DATABASE_URL', 'SMTP_URL'] as const) if (/CHANGE_ME/i.test(v[key] ?? '')) ctx.addIssue({ code: 'custom', path: [key], message: 'Replace the template placeholder with the real value' });
       if (/localhost/.test(v.MAIL_FROM)) ctx.addIssue({ code: 'custom', path: ['MAIL_FROM'], message: 'Set MAIL_FROM to a real sender address' });
     }
     if (v.COOKIE_SAMESITE === 'none' && !v.COOKIE_SECURE) ctx.addIssue({ code: 'custom', path: ['COOKIE_SAMESITE'], message: 'SameSite=None requires COOKIE_SECURE=true' });

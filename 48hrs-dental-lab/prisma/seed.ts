@@ -15,6 +15,7 @@ function requirePassword(name: string) {
   const value = process.env[name];
   const parsed = passwordSchema.safeParse(value ?? '');
   if (!parsed.success) throw new Error(`${name} must be set to a password of at least 8 characters with letters and numbers.`);
+  if (/CHANGE_ME/i.test(parsed.data)) throw new Error(`${name} still holds the template placeholder; choose a real password.`);
   return parsed.data;
 }
 
