@@ -48,3 +48,13 @@ describe('48-hour deadline', () => {
     expect(formatDuration(47 * HOUR_MS + 5 * 60_000)).toBe('47h 05m');
   });
 });
+
+describe('stageLabel', () => {
+  it('shows the timeline stage while open and the status once closed', async () => {
+    const { stageLabel } = await import('@/lib/workflow');
+    expect(stageLabel('in_production')).toBe('In Production');
+    expect(stageLabel('delivered')).toBe('Delivered');
+    expect(stageLabel('completed')).toBe('Completed');
+    expect(stageLabel('submitted')).toBe('Submitted');
+  });
+});

@@ -15,7 +15,7 @@ export const buttonVariants = cva(
         outline: 'bg-card text-ink border border-line-strong hover:bg-gray-50',
         ghost: 'bg-transparent text-ink hover:bg-gray-100',
         danger: 'bg-danger text-white hover:bg-danger-hover',
-        'danger-soft': 'bg-danger-bg text-danger hover:bg-[#f6d8d8]',
+        'danger-soft': 'bg-danger-bg text-danger hover:bg-danger-bg-hover',
         link: 'h-auto px-0 text-navy-500 underline-offset-4 hover:underline hover:text-navy-600',
       },
       size: {

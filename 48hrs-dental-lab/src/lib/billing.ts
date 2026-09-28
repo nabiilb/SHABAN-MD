@@ -63,3 +63,13 @@ export function validatePaymentAmount(amount: number, remaining: number): string
   if (round2(amount) > round2(remaining)) return `Amount cannot exceed the remaining balance of ${remaining.toFixed(2)}.`;
   return null;
 }
+
+/** Non-cash payments must carry a transaction reference (bank / mobile-money receipts). */
+export function paymentReferenceRequired(method: string | undefined | null) {
+  return !!method && method !== 'cash';
+}
+
+/** Balance left after a payment — used for previews; the API recomputes it authoritatively. */
+export function remainingAfter(remaining: number, amount: number) {
+  return Math.max(0, round2(remaining - (Number.isFinite(amount) ? amount : 0)));
+}

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Eye, Pencil, Plus } from 'lucide-react';
+import { Eye, Pencil, Plus, Trash2 } from 'lucide-react';
 import { PERMISSIONS } from '@/lib/permissions';
-import { useTechnicians } from '@/hooks/api/use-directory';
+import { useDeleteTechnician, useTechnicians } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
 import { useListState } from '@/hooks/use-list-state';
@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 import { ActiveBadge } from '@/components/ui/record-badges';
 import { ProgressBar } from '@/components/ui/feedback';
+import { useConfirmedDelete } from '@/components/ui/use-confirmed-delete';
 
 const DEFAULTS = { search: '', active: undefined as string | undefined, sort: 'name', dir: 'asc', page: '1', perPage: '20' };
 
@@ -25,6 +26,14 @@ export default function TechniciansPage() {
   usePageTitle('Technicians', 'Workload, output and on-time performance');
   const { can } = useAuth();
   const navigate = useNavigate();
+  const del = useDeleteTechnician();
+  const { request: requestDelete, element: deleteDialog } = useConfirmedDelete<TechnicianListItem>({
+    title: 'Delete technician?',
+    confirmLabel: 'Delete technician',
+    describe: (t) => <>Delete <b>{t.name}</b>? Technicians with case history cannot be deleted — set them to inactive instead, so past cases keep their owner.</>,
+    remove: (t) => del.mutateAsync(t.id),
+    successMessage: () => 'Technician deleted',
+  });
   const list = useListState(DEFAULTS);
   const { state: f, set: setF, reset: resetF } = list;
   const [editing, setEditing] = useState<TechnicianListItem | null | 'new'>(null);
@@ -52,12 +61,13 @@ export default function TechniciansPage() {
             actions={[
               { label: 'View details', icon: <Eye />, onSelect: () => navigate(`/technicians/${row.original.id}`) },
               { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(row.original), hidden: !manage },
+              { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => requestDelete(row.original), hidden: !manage },
             ]}
           />
         ),
       },
     ],
-    [manage, navigate, maxLoad],
+    [manage, navigate, maxLoad, requestDelete],
   );
 
   return (
@@ -91,6 +101,7 @@ export default function TechniciansPage() {
         }
       />
       <TechnicianFormDialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)} record={editing && editing !== 'new' ? editing : null} />
+      {deleteDialog}
     </div>
   );
 }

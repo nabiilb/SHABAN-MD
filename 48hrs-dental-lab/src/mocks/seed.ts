@@ -27,6 +27,7 @@ import { DEFAULT_ROLES } from '@/lib/permissions';
 import { HOUR_MS } from '@/lib/sla';
 import { round2 } from '@/lib/billing';
 import { caseNumber, invoiceNumber } from '@/utils/case-keys';
+import { toIso } from '@/utils/dates';
 import type { MockDatabase, MockUser } from './db';
 import { DB_VERSION } from './db';
 
@@ -119,8 +120,7 @@ type Spec = {
 export function buildSeed(now: number): MockDatabase {
   const rnd = mulberry32(4848);
   const pick = <T,>(arr: readonly T[]) => arr[Math.floor(rnd() * arr.length)];
-  const iso = (t: number) => new Date(t).toISOString();
-  const createdBase = iso(now - 400 * DAY_MS);
+  const createdBase = toIso(now - 400 * DAY_MS);
   let idCounter = 1000;
   const id = (p: string) => `${p}_${(idCounter++).toString(36)}`;
 
@@ -196,7 +196,7 @@ export function buildSeed(now: number): MockDatabase {
       dateOfBirth: new Date(Date.UTC(1960 + (i * 7) % 45, (i * 5) % 12, 1 + (i * 3) % 27)).toISOString().slice(0, 10),
       clinicId: clinic.id,
       notes: i % 9 === 0 ? 'Sensitive to cold; handle impressions quickly.' : '',
-      createdAt: iso(now - (300 - i * 5) * DAY_MS),
+      createdAt: toIso(now - (300 - i * 5) * DAY_MS),
     };
   });
 
@@ -277,7 +277,7 @@ export function buildSeed(now: number): MockDatabase {
 
   const addHistory = (c: LabCase, from: CaseStatus | null, to: CaseStatus, at: number, uid: string, note?: string) => {
     const u = userById(uid);
-    history.push({ id: id('hst'), caseId: c.id, fromStatus: from, toStatus: to, userId: u.id, userName: u.name, userRole: u.role, note, createdAt: iso(at) });
+    history.push({ id: id('hst'), caseId: c.id, fromStatus: from, toStatus: to, userId: u.id, userName: u.name, userRole: u.role, note, createdAt: toIso(at) });
   };
 
   specs.forEach((spec) => {
@@ -321,13 +321,13 @@ export function buildSeed(now: number): MockDatabase {
       instructions: pick(INSTRUCTIONS),
       notes: [],
       reworkCount: 0,
-      submittedAt: portal || preIntake ? iso(R - 0.3 * HOUR_MS) : null,
+      submittedAt: portal || preIntake ? toIso(R - 0.3 * HOUR_MS) : null,
       receivedAt: null,
       dueAt: null,
       paymentStatus: 'unpaid',
       createdById: portal && clientUser ? clientUser.id : actor.reception.id,
-      createdAt: iso(portal || preIntake ? R - 0.3 * HOUR_MS : R),
-      updatedAt: iso(R),
+      createdAt: toIso(portal || preIntake ? R - 0.3 * HOUR_MS : R),
+      updatedAt: toIso(R),
     };
     const creator = portal && clientUser ? clientUser.id : actor.reception.id;
 
@@ -335,15 +335,15 @@ export function buildSeed(now: number): MockDatabase {
       addHistory(c, null, 'submitted', R - 0.3 * HOUR_MS, clientUser?.id ?? actor.reception.id, 'Submitted through the clinic portal');
       if (spec.status === 'correction') addHistory(c, 'submitted', 'correction', R + 0.5 * HOUR_MS, actor.reception.id, 'Impression file unreadable. Please re-upload the STL.');
       if (spec.status === 'rejected') addHistory(c, 'submitted', 'rejected', R + 1 * HOUR_MS, actor.reception.id, 'Duplicate of an earlier submission.');
-      c.updatedAt = iso(R + HOUR_MS);
+      c.updatedAt = toIso(R + HOUR_MS);
       cases.push(c);
       seedAttachments(c, creator, R);
       return;
     }
 
     // Lab receipt starts the 48-hour clock.
-    c.receivedAt = iso(R);
-    c.dueAt = iso(R + SEED_SETTINGS.slaHours * HOUR_MS);
+    c.receivedAt = toIso(R);
+    c.dueAt = toIso(R + SEED_SETTINGS.slaHours * HOUR_MS);
     if (c.submittedAt) addHistory(c, null, 'submitted', R - 0.3 * HOUR_MS, creator, 'Submitted through the clinic portal');
     addHistory(c, c.submittedAt ? 'submitted' : null, 'received', R, actor.reception.id, c.submittedAt ? 'Accepted by Reception' : 'Registered at reception');
 
@@ -357,7 +357,7 @@ export function buildSeed(now: number): MockDatabase {
     const step = (to: CaseStatus, t: number, uid: string, note?: string) => {
       addHistory(c, last, to, t, uid, note);
       last = to;
-      c.updatedAt = iso(t);
+      c.updatedAt = toIso(t);
     };
 
     const invoice = {
@@ -371,8 +371,8 @@ export function buildSeed(now: number): MockDatabase {
       emergencyFee,
       discount: 0,
       total,
-      issuedAt: iso(R),
-      dueDate: iso(R + SEED_SETTINGS.invoiceDueDays * DAY_MS),
+      issuedAt: toIso(R),
+      dueDate: toIso(R + SEED_SETTINGS.invoiceDueDays * DAY_MS),
     };
 
     if (spec.status !== 'cancelled') {
@@ -383,17 +383,17 @@ export function buildSeed(now: number): MockDatabase {
     if (rnd() < 0.5 && reached('review')) step('review', at(0.02), actor.manager.id);
     if (reached('assigned')) {
       c.technicianId = tech.id;
-      c.assignedAt = iso(at(0.04));
+      c.assignedAt = toIso(at(0.04));
       step('assigned', at(0.04), actor.manager.id, `Assigned to ${tech.name}`);
     }
     if (reached('in_production')) {
-      c.productionStartedAt = iso(at(0.07));
+      c.productionStartedAt = toIso(at(0.07));
       step('in_production', at(0.07), tech.userId!);
-      c.notes.push({ id: id('note'), text: 'Model poured and scanned. Design approved.', authorId: tech.userId!, authorName: tech.name, createdAt: iso(at(0.15)) });
+      c.notes.push({ id: id('note'), text: 'Model poured and scanned. Design approved.', authorId: tech.userId!, authorName: tech.name, createdAt: toIso(at(0.15)) });
     }
     if (spec.status === 'cancelled') {
       c.status = 'cancelled';
-      c.cancelledAt = iso(at(0.2));
+      c.cancelledAt = toIso(at(0.2));
       step('cancelled', at(0.2), actor.manager.id, 'Clinic cancelled — patient postponed treatment.');
       cases.push(c);
       return;
@@ -403,7 +403,7 @@ export function buildSeed(now: number): MockDatabase {
         step('quality_control', at(0.55), tech.userId!);
         const failAt = at(0.6);
         const issue: QcIssue = pick(['shade', 'contacts', 'margins', 'occlusion']);
-        qualityChecks.push({ id: id('qc'), caseId: c.id, result: 'failed', reworkRequired: true, issues: [issue], notes: issue === 'shade' ? 'Shade mismatch. Please correct to ' + c.shade + '.' : 'Open contact distal — rebuild and re-glaze.', checkedById: actor.qc.id, checkedByName: actor.qc.name, checkedAt: iso(failAt) });
+        qualityChecks.push({ id: id('qc'), caseId: c.id, result: 'failed', reworkRequired: true, issues: [issue], notes: issue === 'shade' ? 'Shade mismatch. Please correct to ' + c.shade + '.' : 'Open contact distal — rebuild and re-glaze.', checkedById: actor.qc.id, checkedByName: actor.qc.name, checkedAt: toIso(failAt) });
         step('rework', failAt, actor.qc.id, 'QC failed — returned for rework');
         c.reworkCount = 1;
         if (spec.status !== 'rework') {
@@ -411,12 +411,12 @@ export function buildSeed(now: number): MockDatabase {
         }
       }
       if (spec.status !== 'rework') {
-        c.productionCompletedAt = iso(at(0.75));
+        c.productionCompletedAt = toIso(at(0.75));
         step('quality_control', at(0.75), tech.userId!, 'Production completed');
       }
     }
     if (reached('ready')) {
-      c.qcCompletedAt = iso(at(0.85));
+      c.qcCompletedAt = toIso(at(0.85));
       c.readyAt = c.qcCompletedAt;
       qualityChecks.push({ id: id('qc'), caseId: c.id, result: 'passed', reworkRequired: false, issues: [], notes: 'Fit, margins and occlusion verified on model.', checkedById: actor.qc.id, checkedByName: actor.qc.name, checkedAt: c.qcCompletedAt });
       step('ready', at(0.85), actor.qc.id, 'QC passed');
@@ -424,12 +424,12 @@ export function buildSeed(now: number): MockDatabase {
       const dlv: Delivery = { id: id('dlv'), caseId: c.id, status: 'ready', method, recordedById: actor.delivery.id, recordedByName: actor.delivery.name, createdAt: c.readyAt, dispatchedAt: null, deliveredAt: null };
       if (reached('out_for_delivery') && method !== 'clinic_pickup') {
         dlv.status = 'out_for_delivery';
-        dlv.dispatchedAt = iso(at(0.93));
+        dlv.dispatchedAt = toIso(at(0.93));
         dlv.courierName = method === 'lab_courier' ? 'Bashir Omar' : 'Dhl Express Mogadishu';
         step('out_for_delivery', at(0.93), actor.delivery.id, `Dispatched via ${method === 'lab_courier' ? 'lab courier' : 'third-party delivery'}`);
       }
       if (reached('delivered')) {
-        c.deliveredAt = iso(at(1));
+        c.deliveredAt = toIso(at(1));
         dlv.status = 'delivered';
         dlv.deliveredAt = c.deliveredAt;
         dlv.deliveredTo = c.clinicId === 'cln_smile' ? 'Smile Dental Clinic reception' : 'Clinic front desk';
@@ -439,7 +439,7 @@ export function buildSeed(now: number): MockDatabase {
       deliveries.push(dlv);
     }
     if (spec.status === 'completed') {
-      c.completedAt = iso(at(1) + 2 * HOUR_MS);
+      c.completedAt = toIso(at(1) + 2 * HOUR_MS);
       step('completed', at(1) + 2 * HOUR_MS, clientUser?.id ?? actor.reception.id, 'Receipt confirmed');
     }
     c.status = spec.status;
@@ -450,7 +450,7 @@ export function buildSeed(now: number): MockDatabase {
       const method: PaymentMethod = pick(['cash', 'bank_transfer', 'mobile_money', 'mobile_money']);
       const amount = pay === 'full' ? total : round2(total * 0.5);
       const paidAt = finished && c.deliveredAt ? new Date(c.deliveredAt).getTime() + rnd() * 3 * DAY_MS : R + 0.2 * HOUR_MS;
-      payments.push({ id: id('pay'), invoiceId: c.invoiceId, amount, method, reference: method === 'cash' ? '' : `TX${Math.floor(rnd() * 9e8 + 1e8)}`, notes: '', receivedById: actor.reception.id, receivedByName: actor.reception.name, paidAt: iso(Math.min(paidAt, now - 60_000)) });
+      payments.push({ id: id('pay'), invoiceId: c.invoiceId, amount, method, reference: method === 'cash' ? '' : `TX${Math.floor(rnd() * 9e8 + 1e8)}`, notes: '', receivedById: actor.reception.id, receivedByName: actor.reception.name, paidAt: toIso(Math.min(paidAt, now - 60_000)) });
     }
 
     cases.push(c);
@@ -474,7 +474,7 @@ export function buildSeed(now: number): MockDatabase {
 
   const notifications: AppNotification[] = [];
   const note = (uid: string, type: AppNotification['type'], title: string, message: string, c: LabCase | undefined, hoursAgo: number, read = false) =>
-    notifications.push({ id: id('ntf'), userId: uid, type, title, message, caseId: c?.id ?? null, caseNumber: c?.caseNumber ?? null, createdAt: iso(now - hoursAgo * HOUR_MS), readAt: read ? iso(now - (hoursAgo - 0.1) * HOUR_MS) : null });
+    notifications.push({ id: id('ntf'), userId: uid, type, title, message, caseId: c?.id ?? null, caseNumber: c?.caseNumber ?? null, createdAt: toIso(now - hoursAgo * HOUR_MS), readAt: read ? toIso(now - (hoursAgo - 0.1) * HOUR_MS) : null });
 
   const byStatus = (s: CaseStatus) => cases.filter((c) => c.status === s);
   byStatus('submitted').forEach((c, i) => ['usr_sagal', 'usr_hodan'].forEach((u) => note(u, 'case_submitted', 'New case submitted', `${c.caseNumber} was submitted by ${clinics.find((k) => k.id === c.clinicId)?.name}.`, c, 0.5 + i)));

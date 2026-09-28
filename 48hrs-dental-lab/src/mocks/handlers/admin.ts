@@ -1,6 +1,7 @@
 import { CASE_TYPE_LABELS } from '@/lib/constants';
 import { ALL_PERMISSION_KEYS, PERMISSION_CATALOGUE, PERMISSIONS, ROLE_LABELS } from '@/lib/permissions';
 import { ApiError } from '@/services/api/errors';
+import { toIso } from '@/utils/dates';
 import type { ServicePayload, UserPayload } from '@/types/api';
 import type { ActivityLogEntry, LabService, LabSettings, RoleKey } from '@/types/models';
 import { authenticate, authorize, publicUser } from '../auth-context';
@@ -9,7 +10,6 @@ import { logActivity } from '../domain';
 import { hashPassword, randomHex } from '../sha256';
 import { EMAIL_RE, includesText, paginate, qBool, qStr, requireFields, route, sortItems, validationError, type FieldErrors } from '../router';
 
-const iso = (t: number) => new Date(t).toISOString();
 
 /* --------------------------------- Users -------------------------------- */
 
@@ -48,7 +48,7 @@ function linkTechnician(ctx: ReturnType<typeof authenticate>, u: MockUser, reque
   }
   let tech = requested ? ctx.db.technicians.find((t) => t.id === requested) : ctx.db.technicians.find((t) => t.email.toLowerCase() === u.email.toLowerCase());
   if (!tech) {
-    tech = { id: nextId('tec'), userId: u.id, name: u.name, email: u.email, phone: u.phone ?? '', specialty: 'General', active: u.active, createdAt: iso(ctx.now) };
+    tech = { id: nextId('tec'), userId: u.id, name: u.name, email: u.email, phone: u.phone ?? '', specialty: 'General', active: u.active, createdAt: toIso(ctx.now) };
     ctx.db.technicians.push(tech);
   }
   tech.userId = u.id;
@@ -72,7 +72,7 @@ route('POST', '/users', (raw) => {
     doctorId: null,
     technicianId: null,
     lastLoginAt: null,
-    createdAt: iso(ctx.now),
+    createdAt: toIso(ctx.now),
     passwordSalt: salt,
     passwordHash: hashPassword(body.password!, salt),
   };

@@ -4,17 +4,29 @@ import { PERMISSIONS } from '@/lib/permissions';
 import { STATUS_META } from '@/lib/workflow';
 import { useAuth } from '@/hooks/use-auth';
 import { useDashboard } from '@/hooks/api/use-lab';
+import { useUrlState } from '@/hooks/use-url-state';
+import type { DashboardPeriod } from '@/types/api';
+import { PageToolbar } from '@/components/ui/page-toolbar';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import { useTechnician } from '@/hooks/api/use-directory';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { errorMessage } from '@/services/api/errors';
 import type { RoleKey } from '@/types/models';
 import { formatMoney, formatPercent } from '@/utils/format';
 import { BarList, ColumnChart } from '@/components/dashboard/charts';
 import { CaseQueueSection } from '@/components/dashboard/case-queue-section';
 import { StatCard, StatGrid } from '@/components/dashboard/stat-card';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { ErrorState, ProgressBar, Skeleton } from '@/components/ui/feedback';
+
+const PERIODS: { value: DashboardPeriod; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: 'month', label: 'This month' },
+];
+const PERIOD_DEFAULTS = { period: '30d' };
 
 const SUBTITLES: Record<RoleKey, string> = {
   super_admin: 'Who has access, and how is the system running?',
@@ -40,27 +52,36 @@ export default function DashboardPage() {
 
 function OperationsDashboard({ role }: { role: RoleKey }) {
   const { can } = useAuth();
-  const { data: d, isLoading, error, refetch } = useDashboard();
+  const [{ period }, setUrl] = useUrlState(PERIOD_DEFAULTS);
+  const { data: d, isLoading, error, refetch } = useDashboard(period as DashboardPeriod);
   const finance = can(PERMISSIONS.REPORTS_FINANCIAL);
+  const periodLabel = PERIODS.find((p) => p.value === period)?.label.toLowerCase() ?? '';
 
-  if (error) return <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />;
+  if (error) return <QueryError error={error} onRetry={() => void refetch()} />;
   const v = (n: number | undefined) => n ?? 0;
 
   const inLabTotal = d ? d.performance.onTime + d.performance.atRisk + d.performance.overdue : 0;
 
   return (
     <div className="flex flex-col gap-6">
+      <PageToolbar
+        actions={<SegmentedControl label="Dashboard period" value={period as DashboardPeriod} onChange={(v) => setUrl({ period: v })} options={PERIODS} />}
+      >
+        <p className="text-[13px] text-ink-2">
+          New, completed, revenue and on-time figures cover <b className="text-ink">{periodLabel}</b>. Live counts show the lab right now.
+        </p>
+      </PageToolbar>
       <StatGrid>
         <StatCard loading={isLoading} label="Active cases" value={v(d?.activeCases)} to="/cases?view=open" />
-        <StatCard loading={isLoading} label="New today" value={v(d?.newToday)} to="/cases" />
+        <StatCard loading={isLoading} label="New cases" value={v(d?.newCases)} hint={periodLabel} to={d ? `/cases?from=${d.periodStart}` : '/cases'} />
         <StatCard loading={isLoading} label="Due today" value={v(d?.dueToday)} emphasis={d?.dueToday ? 'warning' : 'default'} to="/cases?sla=due_today" />
         <StatCard loading={isLoading} label="At risk" value={v(d?.performance.atRisk)} emphasis={d?.performance.atRisk ? 'warning' : 'default'} hint="≤ 12h remaining" to="/cases?sla=at_risk" />
         <StatCard loading={isLoading} label="Overdue" value={v(d?.overdue)} emphasis={d?.overdue ? 'danger' : 'default'} to="/cases?sla=overdue" />
         <StatCard loading={isLoading} label="In production" value={v(d?.inProduction)} to="/production" />
         <StatCard loading={isLoading} label="Pending QC" value={v(d?.pendingQc)} to="/quality-control" />
         <StatCard loading={isLoading} label="Ready for delivery" value={v(d?.readyForDelivery)} to="/delivery" />
-        <StatCard loading={isLoading} label="Completed" value={v(d?.completed)} hint={d ? `${d.completedToday} delivered today` : undefined} to="/cases?view=done" />
-        {finance && <StatCard loading={isLoading} label="Revenue this month" value={formatMoney(d?.revenueMonth ?? 0, { compact: true })} to="/invoices" />}
+        <StatCard loading={isLoading} label="Completed" value={v(d?.completed)} hint={d ? `${d.completedInPeriod} delivered · ${periodLabel}` : undefined} to="/cases?view=done" />
+        {finance && <StatCard loading={isLoading} label="Revenue" value={formatMoney(d?.revenue ?? 0, { compact: true })} hint={d ? `${formatMoney(d.collected ?? 0, { compact: true })} collected · ${periodLabel}` : undefined} to="/invoices" />}
         {finance && <StatCard loading={isLoading} label="Outstanding payments" value={formatMoney(d?.outstanding ?? 0, { compact: true })} emphasis={d?.outstanding ? 'warning' : 'default'} to="/invoices?status=unpaid" />}
       </StatGrid>
 
@@ -86,7 +107,7 @@ function OperationsDashboard({ role }: { role: RoleKey }) {
                 )}
                 <div className="grid grid-cols-2 gap-4 border-t border-line pt-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs text-ink-3">On-time rate (30 days)</span>
+                    <span className="text-xs text-ink-3">On-time rate</span>
                     <span className="font-mono text-2xl font-bold">{formatPercent(d.performance.onTimeRate)}</span>
                     <ProgressBar value={d.performance.onTimeRate ?? 0} tone="success" label="On-time rate" />
                   </div>
@@ -169,7 +190,7 @@ function PerfTile({ icon, label, value, tone }: { icon: React.ReactNode; label: 
 function TechnicianDashboard({ technicianId }: { technicianId?: string }) {
   const { data: t, isLoading, error, refetch } = useTechnician(technicianId);
   if (!technicianId) return <ErrorState title="No technician profile" message="Your account is not linked to a technician profile. Ask an administrator to link it." />;
-  if (error) return <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />;
+  if (error) return <QueryError error={error} onRetry={() => void refetch()} />;
   return (
     <div className="flex flex-col gap-6">
       <StatGrid>

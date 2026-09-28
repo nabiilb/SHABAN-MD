@@ -19,5 +19,3 @@ export const passwordSchema = z
   .regex(/[A-Za-z]/, 'Include at least one letter.')
   .regex(/\d/, 'Include at least one number.');
 
-export const moneyField = (label = 'Amount') =>
-  z.coerce.number({ invalid_type_error: `${label} must be a number.` }).min(0, `${label} cannot be negative.`);

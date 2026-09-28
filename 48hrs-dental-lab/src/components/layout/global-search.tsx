@@ -5,6 +5,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Building2, FileText, FolderKanban, Loader2, Search, Stethoscope, UserRound } from 'lucide-react';
 import { useDebouncedValue } from '@/hooks/use-debounce';
 import { useSearch } from '@/hooks/api/use-lab';
+import { useReturnFocus } from '@/hooks/use-return-focus';
 import { useUiStore } from '@/stores/ui-store';
 import type { SearchResult } from '@/types/api';
 
@@ -40,6 +41,7 @@ export function GlobalSearch() {
   const term = useDebouncedValue(q.trim(), 250);
   const { data, isFetching } = useSearch(term);
   const navigate = useNavigate();
+  const returnFocus = useReturnFocus();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -65,7 +67,7 @@ export function GlobalSearch() {
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-navy-900/55" />
-        <DialogPrimitive.Content className="fixed top-[10vh] left-1/2 z-50 w-[calc(100vw-24px)] max-w-[600px] -translate-x-1/2 overflow-hidden rounded-lg bg-card shadow-lg focus:outline-none">
+        <DialogPrimitive.Content {...returnFocus} className="fixed top-[10vh] left-1/2 z-50 w-[calc(100vw-24px)] max-w-[600px] -translate-x-1/2 overflow-hidden rounded-lg bg-card shadow-lg focus:outline-none">
           <DialogPrimitive.Title className="sr-only">Global search</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">Search cases, patients, doctors, clinics, phone numbers and invoices.</DialogPrimitive.Description>
           <Command shouldFilter={false} loop label="Global search">

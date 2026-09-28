@@ -10,8 +10,7 @@ export function daysAgo(n: number, from = new Date()) {
   return d;
 }
 
-export function startOfLocalDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+/** Epoch milliseconds → ISO-8601 UTC string (the API's timestamp format). */
+export function toIso(t: number) {
+  return new Date(t).toISOString();
 }

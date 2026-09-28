@@ -8,7 +8,6 @@ import { useReport } from '@/hooks/api/use-lab';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
 import { useUrlState } from '@/hooks/use-url-state';
-import { errorMessage } from '@/services/api/errors';
 import type { ReportFilters } from '@/types/api';
 import type { CaseStatus, CaseType } from '@/types/models';
 import { daysAgo, localDay } from '@/utils/dates';
@@ -18,8 +17,9 @@ import { BarList, ColumnChart } from '@/components/dashboard/charts';
 import { StatCard, StatGrid } from '@/components/dashboard/stat-card';
 import { DateFilter, FilterSelect } from '@/components/tables/toolbar';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
-import { EmptyState, ErrorState, Skeleton } from '@/components/ui/feedback';
+import { EmptyState, Skeleton } from '@/components/ui/feedback';
 import { SimpleTable } from '@/components/ui/simple-table';
 
 const PRESETS = [
@@ -103,7 +103,7 @@ export default function ReportsPage() {
       </Card>
 
       {error ? (
-        <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />
+        <QueryError error={error} onRetry={() => void refetch()} />
       ) : isLoading || !r ? (
         <div className="grid gap-3 sm:grid-cols-4">{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-24" />)}</div>
       ) : r.totals.cases === 0 ? (

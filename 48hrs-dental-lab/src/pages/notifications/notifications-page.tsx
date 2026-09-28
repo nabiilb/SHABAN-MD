@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { CheckCheck } from 'lucide-react';
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/hooks/api/use-notifications';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { errorMessage } from '@/services/api/errors';
 import type { AppNotification } from '@/types/models';
 import { NotificationItem } from '@/components/notifications/notification-item';
 import { Pagination } from '@/components/tables/pagination';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Card } from '@/components/ui/card';
-import { EmptyState, ErrorState, Skeleton } from '@/components/ui/feedback';
+import { EmptyState, Skeleton } from '@/components/ui/feedback';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 
 export default function NotificationsPage() {
@@ -41,7 +41,7 @@ export default function NotificationsPage() {
       </div>
       <Card className="overflow-hidden">
         {q.error ? (
-          <div className="p-4"><ErrorState message={errorMessage(q.error)} onRetry={() => void q.refetch()} /></div>
+          <div className="p-4"><QueryError error={q.error} onRetry={() => void q.refetch()} /></div>
         ) : q.isLoading ? (
           <div className="flex flex-col gap-3 p-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}</div>
         ) : !q.data?.data.length ? (

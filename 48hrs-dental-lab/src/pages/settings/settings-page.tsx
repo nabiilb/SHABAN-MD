@@ -10,6 +10,7 @@ import { PERMISSIONS } from '@/lib/permissions';
 import { optionalEmail, optionalPhone, requiredText } from '@/lib/validation';
 import { useDeleteService, useResetDemo, useSaveService, useServices, useSettings, useUpdateSettings } from '@/hooks/api/use-admin';
 import { useAuth } from '@/hooks/use-auth';
+import { useUnsavedChangesGuard } from '@/hooks/use-unsaved-changes';
 import { usePageTitle } from '@/hooks/use-page-title';
 import { errorMessage } from '@/services/api/errors';
 import type { LabService, LabSettings } from '@/types/models';
@@ -17,11 +18,13 @@ import { formatMoney } from '@/utils/format';
 import { applyApiErrors } from '@/components/forms/api-errors';
 import { SelectField, SwitchField, TextField } from '@/components/forms/fields';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { ActiveBadge } from '@/components/ui/record-badges';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useConfirmedDelete } from '@/components/ui/use-confirmed-delete';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Alert, ErrorState, PageLoader } from '@/components/ui/feedback';
+import { Alert, PageLoader } from '@/components/ui/feedback';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SimpleTable } from '@/components/ui/simple-table';
 import { RowActions } from '@/components/tables/row-actions';
@@ -50,6 +53,7 @@ function LabSettingsForm({ settings, readOnly }: { settings: LabSettings; readOn
   const update = useUpdateSettings();
   const { register, handleSubmit, reset, setError, formState: { errors, isDirty } } = useForm<SettingsValues>({ resolver: zodResolver(settingsSchema), defaultValues: settings });
   useEffect(() => reset(settings), [settings, reset]);
+  const guard = useUnsavedChangesGuard(isDirty && !readOnly);
 
   const onSubmit = async (v: SettingsValues) => {
     try {
@@ -97,6 +101,7 @@ function LabSettingsForm({ settings, readOnly }: { settings: LabSettings; readOn
           <Button type="submit" loading={update.isPending} disabled={!isDirty}>Save settings</Button>
         </div>
       )}
+      {guard.element}
     </form>
   );
 }
@@ -148,11 +153,17 @@ function ServicesPanel() {
   const q = useServices(true);
   const del = useDeleteService();
   const [editing, setEditing] = useState<LabService | null | 'new'>(null);
-  const [toDelete, setToDelete] = useState<LabService | null>(null);
+  const { request: requestDelete, element: deleteDialog } = useConfirmedDelete<LabService>({
+    title: 'Delete service?',
+    confirmLabel: 'Delete service',
+    describe: (x) => <>Delete <b>{x.name}</b>? Services used by existing cases cannot be deleted — deactivate them instead.</>,
+    remove: (x) => del.mutateAsync(x.id),
+    successMessage: () => 'Service deleted',
+  });
   const manage = can(PERMISSIONS.SERVICES_MANAGE);
 
   if (q.isLoading) return <PageLoader />;
-  if (q.error) return <ErrorState message={errorMessage(q.error)} onRetry={() => void q.refetch()} />;
+  if (q.error) return <QueryError error={q.error} onRetry={() => void q.refetch()} />;
 
   return (
     <Card>
@@ -179,7 +190,7 @@ function ServicesPanel() {
                       label={s.name}
                       actions={[
                         { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(s) },
-                        { label: 'Delete', icon: <Trash2 />, tone: 'danger' as const, onSelect: () => setToDelete(s) },
+                        { label: 'Delete', icon: <Trash2 />, tone: 'danger' as const, onSelect: () => requestDelete(s) },
                       ]}
                     />
                   ),
@@ -189,25 +200,7 @@ function ServicesPanel() {
         />
       </CardBody>
       <ServiceDialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)} record={editing && editing !== 'new' ? editing : null} />
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Delete service?"
-        tone="danger"
-        confirmLabel="Delete service"
-        loading={del.isPending}
-        description="Services used by existing cases cannot be deleted — deactivate them instead."
-        onConfirm={async () => {
-          if (!toDelete) return;
-          try {
-            await del.mutateAsync(toDelete.id);
-            toast.success('Service deleted');
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
-          setToDelete(null);
-        }}
-      />
+      {deleteDialog}
     </Card>
   );
 }
@@ -249,7 +242,7 @@ export default function SettingsPage() {
   const { can } = useAuth();
   const q = useSettings();
   if (q.isLoading) return <PageLoader />;
-  if (q.error || !q.data) return <ErrorState message={errorMessage(q.error)} onRetry={() => void q.refetch()} />;
+  if (q.error || !q.data) return <QueryError error={q.error} onRetry={() => void q.refetch()} />;
   const readOnly = !can(PERMISSIONS.SETTINGS_MANAGE);
 
   return (

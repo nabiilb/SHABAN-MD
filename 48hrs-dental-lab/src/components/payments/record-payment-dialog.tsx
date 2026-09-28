@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { round2 } from '@/lib/billing';
+import { paymentReferenceRequired, remainingAfter, round2, validatePaymentAmount } from '@/lib/billing';
 import { PAYMENT_METHOD_LABELS } from '@/lib/constants';
 import { useRecordPayment } from '@/hooks/api/use-finance';
 import type { PaymentMethod } from '@/types/models';
@@ -17,14 +17,16 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 function buildSchema(remaining: number) {
   return z
     .object({
-      amount: z.coerce.number({ invalid_type_error: 'Enter an amount.' }).gt(0, 'Enter an amount greater than zero.').refine((n) => round2(n) <= round2(remaining), `Amount cannot exceed the remaining balance of ${formatMoney(remaining)}.`),
+      amount: z.coerce.number({ invalid_type_error: 'Enter an amount.' }),
       method: z.enum(['cash', 'bank_transfer', 'mobile_money', 'card', 'other']),
       reference: z.string().trim().max(80).optional(),
       paidAt: z.string().optional(),
       notes: z.string().trim().max(500).optional(),
     })
     .superRefine((v, ctx) => {
-      if (v.method !== 'cash' && !v.reference) ctx.addIssue({ code: 'custom', path: ['reference'], message: 'Enter the transaction reference.' });
+      const amountError = validatePaymentAmount(v.amount, remaining);
+      if (amountError) ctx.addIssue({ code: 'custom', path: ['amount'], message: amountError });
+      if (paymentReferenceRequired(v.method) && !v.reference) ctx.addIssue({ code: 'custom', path: ['reference'], message: 'Enter the transaction reference.' });
       if (v.paidAt && new Date(v.paidAt).getTime() > Date.now()) ctx.addIssue({ code: 'custom', path: ['paidAt'], message: 'Payment date cannot be in the future.' });
     });
 }
@@ -71,7 +73,7 @@ export function RecordPaymentDialog({ open, onOpenChange, invoiceId, invoiceNumb
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField name="amount" label="Amount" type="number" step="0.01" min="0" register={register} errors={errors} required />
             <SelectField name="method" label="Method" register={register} errors={errors} required options={Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => ({ value, label }))} />
-            <TextField name="reference" label="Reference" register={register} errors={errors} placeholder="TX123456" optional={watch('method') === 'cash'} required={watch('method') !== 'cash'} />
+            <TextField name="reference" label="Reference" register={register} errors={errors} placeholder="TX123456" optional={!paymentReferenceRequired(watch('method'))} required={paymentReferenceRequired(watch('method'))} />
             <TextField name="paidAt" label="Paid at" type="datetime-local" register={register} errors={errors} optional hint="Defaults to now." />
           </div>
           <TextareaField name="notes" label="Notes" register={register} errors={errors} optional rows={2} />
@@ -79,7 +81,7 @@ export function RecordPaymentDialog({ open, onOpenChange, invoiceId, invoiceNumb
             <Button variant="outline" size="sm" onClick={() => setValue('amount', remaining, { shouldValidate: true })}>Full balance</Button>
             <Button variant="outline" size="sm" onClick={() => setValue('amount', round2(remaining / 2), { shouldValidate: true })}>Half</Button>
           </div>
-          {amount > 0 && amount < remaining && <Alert tone="warning">After this payment {formatMoney(round2(remaining - amount))} remains — the invoice becomes Partial.</Alert>}
+          {amount > 0 && amount < remaining && <Alert tone="warning">After this payment {formatMoney(remainingAfter(remaining, amount))} remains — the invoice becomes Partial.</Alert>}
         </form>
       </DialogContent>
     </Dialog>

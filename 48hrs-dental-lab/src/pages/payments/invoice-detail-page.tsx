@@ -8,15 +8,15 @@ import { useInvoice } from '@/hooks/api/use-finance';
 import { useSettings } from '@/hooks/api/use-admin';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { errorMessage } from '@/services/api/errors';
 import { formatDate, formatDateTime, formatMoney } from '@/utils/format';
 import { PaymentBadge } from '@/components/cases/badges';
 import { RecordPaymentDialog } from '@/components/payments/record-payment-dialog';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 import { SimpleTable } from '@/components/ui/simple-table';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
-import { ErrorState, PageLoader, ProgressBar } from '@/components/ui/feedback';
+import { PageLoader, ProgressBar } from '@/components/ui/feedback';
 
 export default function InvoiceDetailPage() {
   const { id } = useParams();
@@ -27,7 +27,7 @@ export default function InvoiceDetailPage() {
   usePageTitle(inv?.invoiceNumber ?? 'Invoice', inv ? `${inv.clinic.name} · case ${inv.caseNumber}` : undefined);
 
   if (isLoading) return <PageLoader />;
-  if (error || !inv) return <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />;
+  if (error || !inv) return <QueryError error={error} onRetry={() => void refetch()} />;
   const lab = settings.data;
 
   return (

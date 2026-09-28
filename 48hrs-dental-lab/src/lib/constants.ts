@@ -3,6 +3,7 @@ import type {
   CasePriority,
   CaseType,
   DeliveryMethod,
+  DeliveryStatus,
   NotificationType,
   PaymentMethod,
   PaymentStatus,
@@ -56,6 +57,12 @@ export const DELIVERY_METHOD_LABELS: Record<DeliveryMethod, string> = {
   clinic_pickup: 'Clinic pickup',
   lab_courier: 'Lab courier',
   third_party: 'Third-party delivery',
+};
+
+export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
+  ready: 'Ready',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
 };
 
 export const ATTACHMENT_CATEGORY_LABELS: Record<AttachmentCategory, string> = {

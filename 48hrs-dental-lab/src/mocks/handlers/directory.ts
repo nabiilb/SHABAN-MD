@@ -1,5 +1,5 @@
 import { PERMISSIONS, hasPermission } from '@/lib/permissions';
-import { getSlaInfo, HOUR_MS } from '@/lib/sla';
+import { getSlaInfo, HOUR_MS, onTimeRate } from '@/lib/sla';
 import { DONE_STATUSES, IN_LAB_STATUSES, PRODUCTION_STATUSES, STATUS_META } from '@/lib/workflow';
 import { ApiError } from '@/services/api/errors';
 import type {
@@ -18,7 +18,7 @@ import type {
 } from '@/types/api';
 import type { Clinic, Doctor, LabCase, Patient, Technician } from '@/types/models';
 import { patientCode } from '@/utils/case-keys';
-import { localDay } from '@/utils/dates';
+import { localDay, toIso } from '@/utils/dates';
 import { authenticate, authorize } from '../auth-context';
 import { nextId, type MockDatabase } from '../db';
 import { invoiceView, logActivity, recentCases, relationStats, slaConfig, toListItem, visibleCases } from '../domain';
@@ -36,7 +36,6 @@ import {
   type FieldErrors,
 } from '../router';
 
-const iso = (t: number) => new Date(t).toISOString();
 
 function checkEmail(errors: FieldErrors, email: string | undefined, required = false) {
   if (!email?.trim()) {
@@ -126,7 +125,7 @@ route('POST', '/patients', (raw) => {
     dateOfBirth: body.dateOfBirth || null,
     clinicId: body.clinicId || null,
     notes: body.notes?.trim() ?? '',
-    createdAt: iso(ctx.now),
+    createdAt: toIso(ctx.now),
   };
   ctx.db.patients.push(p);
   logActivity(ctx.db, ctx.user, { action: 'patient.create', description: `Added patient ${p.name}`, subjectType: 'patient', subjectId: p.id, subjectLabel: p.code }, ctx.now);
@@ -210,7 +209,7 @@ route('POST', '/doctors', (raw) => {
   authorize(ctx, PERMISSIONS.DOCTORS_MANAGE);
   const body = (raw.body ?? {}) as DoctorPayload;
   validateDoctor(ctx.db, body);
-  const d: Doctor = { id: nextId('doc'), name: body.name.trim(), clinicId: body.clinicId, phone: body.phone.trim(), email: body.email?.trim() ?? '', specialty: body.specialty?.trim() ?? '', status: body.status ?? 'active', createdAt: iso(ctx.now) };
+  const d: Doctor = { id: nextId('doc'), name: body.name.trim(), clinicId: body.clinicId, phone: body.phone.trim(), email: body.email?.trim() ?? '', specialty: body.specialty?.trim() ?? '', status: body.status ?? 'active', createdAt: toIso(ctx.now) };
   ctx.db.doctors.push(d);
   logActivity(ctx.db, ctx.user, { action: 'doctor.create', description: `Added ${d.name}`, subjectType: 'doctor', subjectId: d.id, subjectLabel: d.name }, ctx.now);
   return d;
@@ -297,7 +296,7 @@ route('POST', '/clinics', (raw) => {
   const body = (raw.body ?? {}) as ClinicPayload;
   validateClinic(body);
   if (ctx.db.clinics.some((k) => k.name.toLowerCase() === body.name.trim().toLowerCase())) throw validationError({ name: ['A clinic with this name already exists.'] });
-  const k: Clinic = { id: nextId('cln'), ...clinicFields(body), createdAt: iso(ctx.now) };
+  const k: Clinic = { id: nextId('cln'), ...clinicFields(body), createdAt: toIso(ctx.now) };
   ctx.db.clinics.push(k);
   logActivity(ctx.db, ctx.user, { action: 'clinic.create', description: `Added clinic ${k.name}`, subjectType: 'clinic', subjectId: k.id, subjectLabel: k.name }, ctx.now);
   return k;
@@ -336,15 +335,13 @@ function techStats(db: MockDatabase, t: Technician, now: number): TechnicianList
   const today = localDay(now);
   const active = cases.filter((c) => PRODUCTION_STATUSES.includes(c.status) || c.status === 'quality_control');
   const done = cases.filter((c) => DONE_STATUSES.includes(c.status));
-  const measured = done.filter((c) => c.deliveredAt && c.dueAt);
-  const onTime = measured.filter((c) => c.deliveredAt! <= c.dueAt!).length;
   return {
     ...t,
     activeCases: active.length,
     completedCases: done.length + cases.filter((c) => c.status === 'ready' || c.status === 'out_for_delivery').length,
     dueToday: active.filter((c) => c.dueAt && localDay(c.dueAt) === today && getSlaInfo(c, now, cfg).state !== 'overdue').length,
     overdue: active.filter((c) => getSlaInfo(c, now, cfg).state === 'overdue').length,
-    onTimeRate: measured.length ? onTime / measured.length : null,
+    onTimeRate: onTimeRate(done),
   };
 }
 
@@ -403,7 +400,7 @@ route('POST', '/technicians', (raw) => {
   const body = (raw.body ?? {}) as TechnicianPayload;
   validateTech(ctx.db, body);
   const linked = ctx.db.users.find((u) => u.email.toLowerCase() === body.email.trim().toLowerCase() && u.role === 'technician');
-  const t: Technician = { id: nextId('tec'), userId: linked?.id ?? null, name: body.name.trim(), email: body.email.trim(), phone: body.phone.trim(), specialty: body.specialty.trim(), active: body.active !== false, createdAt: iso(ctx.now) };
+  const t: Technician = { id: nextId('tec'), userId: linked?.id ?? null, name: body.name.trim(), email: body.email.trim(), phone: body.phone.trim(), specialty: body.specialty.trim(), active: body.active !== false, createdAt: toIso(ctx.now) };
   ctx.db.technicians.push(t);
   if (linked) linked.technicianId = t.id;
   logActivity(ctx.db, ctx.user, { action: 'technician.create', description: `Added technician ${t.name}`, subjectType: 'technician', subjectId: t.id, subjectLabel: t.name }, ctx.now);
@@ -423,4 +420,20 @@ route('PUT', '/technicians/:id', (raw) => {
   Object.assign(t, { name: body.name.trim(), email: body.email.trim(), phone: body.phone.trim(), specialty: body.specialty.trim(), active: body.active !== false });
   logActivity(ctx.db, ctx.user, { action: 'technician.update', description: `Updated technician ${t.name}`, subjectType: 'technician', subjectId: t.id, subjectLabel: t.name }, ctx.now);
   return t;
+});
+
+route('DELETE', '/technicians/:id', (raw) => {
+  const ctx = authenticate(raw);
+  authorize(ctx, PERMISSIONS.TECHNICIANS_MANAGE);
+  const t = ctx.db.technicians.find((x) => x.id === raw.params.id);
+  if (!t) throw new ApiError(404, 'Technician not found.');
+  if (ctx.db.cases.some((c) => c.technicianId === t.id)) {
+    throw new ApiError(422, `${t.name} has case history and cannot be deleted. Set the technician to inactive instead.`);
+  }
+  ctx.db.technicians = ctx.db.technicians.filter((x) => x !== t);
+  ctx.db.users.forEach((u) => {
+    if (u.technicianId === t.id) u.technicianId = null;
+  });
+  logActivity(ctx.db, ctx.user, { action: 'technician.delete', description: `Deleted technician ${t.name}`, subjectType: 'technician', subjectLabel: t.name }, ctx.now);
+  return null;
 });

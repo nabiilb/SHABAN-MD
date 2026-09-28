@@ -1,13 +1,13 @@
-import { priceCase, round2, validatePaymentAmount } from '@/lib/billing';
+import { priceCase, round2 } from '@/lib/billing';
 import { categoryForExtension, extensionOf, validateFile } from '@/lib/constants';
 import { PERMISSIONS, hasPermission } from '@/lib/permissions';
 import { computeDueAt, getSlaInfo, HOUR_MS } from '@/lib/sla';
-import { CASE_ACTIONS, IN_LAB_STATUSES, OPEN_STATUSES, STATUS_META, canPerformAction } from '@/lib/workflow';
+import { CASE_ACTIONS, IN_LAB_STATUSES, OPEN_STATUSES, STATUS_META, canPerformAction, validateActionInput } from '@/lib/workflow';
 import { ApiError } from '@/services/api/errors';
 import type { CaseActionPayload, CaseListParams, CreateCasePayload, NavCounts, UpdateCasePayload } from '@/types/api';
 import type { AttachmentCategory, CaseAttachment, CaseStatus, Delivery, LabCase, Patient } from '@/types/models';
 import { caseNumber, invoiceNumber, patientCode } from '@/utils/case-keys';
-import { localDay } from '@/utils/dates';
+import { localDay, toIso } from '@/utils/dates';
 import { actorOf, authenticate, authorize } from '../auth-context';
 import { nextId, type MockDatabase } from '../db';
 import {
@@ -39,7 +39,6 @@ import {
 } from '../router';
 
 const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2 } as const;
-const iso = (t: number) => new Date(t).toISOString();
 
 /* --------------------------------- List -------------------------------- */
 
@@ -183,8 +182,8 @@ function createInvoice(db: MockDatabase, c: LabCase, now: number) {
     emergencyFee: c.emergencyFee,
     discount: 0,
     total: c.total,
-    issuedAt: iso(now),
-    dueDate: iso(now + db.settings.invoiceDueDays * 24 * HOUR_MS),
+    issuedAt: toIso(now),
+    dueDate: toIso(now + db.settings.invoiceDueDays * 24 * HOUR_MS),
   };
   db.invoices.push(inv);
   c.invoiceId = inv.id;
@@ -201,7 +200,7 @@ function history(ctx: AuthedContext, c: LabCase, from: CaseStatus | null, to: Ca
     userName: ctx.user.name,
     userRole: ctx.user.role,
     note: note?.trim() || undefined,
-    createdAt: iso(ctx.now),
+    createdAt: toIso(ctx.now),
   });
 }
 
@@ -236,7 +235,7 @@ route('POST', '/cases', (raw) => {
       dateOfBirth: null,
       clinicId: body.clinicId,
       notes: '',
-      createdAt: iso(now),
+      createdAt: toIso(now),
     };
     db.patients.push(patient);
   }
@@ -268,13 +267,13 @@ route('POST', '/cases', (raw) => {
     instructions: body.instructions?.trim() ?? '',
     notes: [],
     reworkCount: 0,
-    submittedAt: receiveNow ? null : iso(now),
-    receivedAt: receiveNow ? iso(now) : null,
-    dueAt: receiveNow ? (body.dueAt ? iso(new Date(body.dueAt).getTime()) : computeDueAt(new Date(now), db.settings.slaHours).toISOString()) : null,
+    submittedAt: receiveNow ? null : toIso(now),
+    receivedAt: receiveNow ? toIso(now) : null,
+    dueAt: receiveNow ? (body.dueAt ? toIso(new Date(body.dueAt).getTime()) : computeDueAt(new Date(now), db.settings.slaHours).toISOString()) : null,
     paymentStatus: 'unpaid',
     createdById: ctx.user.id,
-    createdAt: iso(now),
-    updatedAt: iso(now),
+    createdAt: toIso(now),
+    updatedAt: toIso(now),
   };
   db.cases.unshift(c);
   history(ctx, c, null, c.status, receiveNow ? 'Registered at reception — 48-hour clock started' : 'Submitted through the clinic portal');
@@ -319,7 +318,7 @@ route('PATCH', '/cases/:id', (raw) => {
     Object.assign(c, { units: price.units, emergencyFee: price.emergencyFee, total: price.total });
     if (inv) Object.assign(inv, { subtotal: price.subtotal, emergencyFee: price.emergencyFee, total: price.total });
   }
-  c.updatedAt = iso(ctx.now);
+  c.updatedAt = toIso(ctx.now);
   logActivity(ctx.db, ctx.user, { action: 'case.update', description: `Edited case ${c.caseNumber}`, subjectType: 'case', subjectId: c.id, subjectLabel: c.caseNumber }, ctx.now);
   return toDetail(ctx.db, c, ctx.now, ctx);
 });
@@ -358,13 +357,19 @@ route('POST', '/cases/:id/actions', (raw) => {
     throw new ApiError(409, `This case is "${STATUS_META[c.status].label}" — "${def.label}" is not possible now. Refresh to see the latest state.`);
   }
   if (!canPerformAction(action, c, actorOf(ctx))) throw new ApiError(403, 'You do not have permission to do that.');
+  // Validate every input before anything is written, so a 422 never leaves a half-applied transition.
+  const existingInvoice = c.invoiceId ? db.invoices.find((i) => i.id === c.invoiceId) : undefined;
+  const maxPayment = existingInvoice ? invoiceView(db, existingInvoice, now).remaining : c.total;
+  const inputErrors = validateActionInput(body as CaseActionPayload, { maxPayment });
+  if (Object.keys(inputErrors).length) throw validationError(Object.fromEntries(Object.entries(inputErrors).map(([k, m]) => [k, [m]])));
+  if (action === 'accept' && body.payment && !hasPermission(ctx.permissions, PERMISSIONS.PAYMENTS_RECORD)) throw new ApiError(403, 'You cannot record payments.');
+  const assignee = action === 'assign' ? db.technicians.find((t) => t.id === body.technicianId) : undefined;
+  if (action === 'assign' && !assignee) throw validationError({ technicianId: ['Choose a technician.'] });
+  if (assignee && !assignee.active) throw validationError({ technicianId: ['This technician is inactive.'] });
   const note = body.note?.trim() ?? '';
-  if (def.noteRequired && !note && !(action === 'qc_fail' && body.qc?.notes?.trim())) {
-    throw validationError({ note: ['Please give a reason.'] });
-  }
 
   const from = c.status;
-  const nowIso = iso(now);
+  const nowIso = toIso(now);
   const clinicName = db.clinics.find((k) => k.id === c.clinicId)?.name ?? 'the clinic';
   let historyNote = note;
 
@@ -373,10 +378,7 @@ route('POST', '/cases/:id/actions', (raw) => {
       c.receivedAt = nowIso;
       c.dueAt = computeDueAt(new Date(now), db.settings.slaHours).toISOString();
       const inv = c.invoiceId ? db.invoices.find((i) => i.id === c.invoiceId) : createInvoice(db, c, now);
-      if (body.payment && body.payment.amount > 0 && inv) {
-        if (!hasPermission(ctx.permissions, PERMISSIONS.PAYMENTS_RECORD)) throw new ApiError(403, 'You cannot record payments.');
-        const err = validatePaymentAmount(body.payment.amount, invoiceView(db, inv, now).remaining);
-        if (err) throw validationError({ 'payment.amount': [err] });
+      if (body.payment && inv) {
         db.payments.push({ id: nextId('pay'), invoiceId: inv.id, amount: round2(body.payment.amount), method: body.payment.method, reference: body.payment.reference ?? '', notes: 'Taken at acceptance', receivedById: ctx.user.id, receivedByName: ctx.user.name, paidAt: nowIso });
       }
       historyNote = note || `Accepted by ${ctx.user.name} — 48-hour clock started`;
@@ -394,9 +396,7 @@ route('POST', '/cases/:id/actions', (raw) => {
       notifyUsers(db, clinicUsers(db, c.clinicId), { type: 'correction_requested', title: 'Case rejected', message: `${c.caseNumber} was rejected: ${note}`, c }, now);
       break;
     case 'assign': {
-      const tech = db.technicians.find((t) => t.id === body.technicianId);
-      if (!tech) throw validationError({ technicianId: ['Choose a technician.'] });
-      if (!tech.active) throw validationError({ technicianId: ['This technician is inactive.'] });
+      const tech = assignee!;
       const reassigned = !!c.technicianId && c.technicianId !== tech.id;
       c.technicianId = tech.id;
       c.assignedAt = nowIso;
@@ -431,7 +431,6 @@ route('POST', '/cases/:id/actions', (raw) => {
     case 'qc_fail': {
       const issues = body.qc?.issues ?? [];
       const qcNotes = body.qc?.notes?.trim() || note;
-      if (!issues.length) throw validationError({ issues: ['Select at least one issue.'] });
       db.qualityChecks.push({ id: nextId('qc'), caseId: c.id, result: 'failed', reworkRequired: true, issues, notes: qcNotes, checkedById: ctx.user.id, checkedByName: ctx.user.name, checkedAt: nowIso });
       c.reworkCount += 1;
       historyNote = `QC failed — ${qcNotes}`;
@@ -441,9 +440,7 @@ route('POST', '/cases/:id/actions', (raw) => {
     case 'dispatch':
     case 'deliver': {
       const d = body.delivery;
-      if (!d?.method) throw validationError({ 'delivery.method': ['Choose a delivery method.'] });
-      if (action === 'deliver' && !d.receivedBy?.trim()) throw validationError({ 'delivery.receivedBy': ['Enter who received the case.'] });
-      if (action === 'dispatch' && d.method !== 'clinic_pickup' && !d.courierName?.trim()) throw validationError({ 'delivery.courierName': ['Enter the courier name.'] });
+      if (!d) break; // validated above
       let rec = db.deliveries.find((x) => x.caseId === c.id && x.status !== 'delivered');
       if (!rec) {
         rec = { id: nextId('dlv'), caseId: c.id, status: 'ready', method: d.method, recordedById: ctx.user.id, recordedByName: ctx.user.name, createdAt: nowIso, dispatchedAt: null, deliveredAt: null } satisfies Delivery;
@@ -496,8 +493,8 @@ route('POST', '/cases/:id/notes', (raw) => {
   const text = String((raw.body as { text?: string })?.text ?? '').trim();
   if (!text) throw validationError({ text: ['Write a note first.'] });
   if (text.length > 1000) throw validationError({ text: ['Keep notes under 1000 characters.'] });
-  c.notes.push({ id: nextId('note'), text, authorId: ctx.user.id, authorName: ctx.user.name, createdAt: iso(ctx.now) });
-  c.updatedAt = iso(ctx.now);
+  c.notes.push({ id: nextId('note'), text, authorId: ctx.user.id, authorName: ctx.user.name, createdAt: toIso(ctx.now) });
+  c.updatedAt = toIso(ctx.now);
   return toDetail(ctx.db, c, ctx.now, ctx);
 });
 
@@ -533,7 +530,7 @@ route('POST', '/cases/:id/attachments', async (raw) => {
     category,
     uploadedById: ctx.user.id,
     uploadedByName: ctx.user.name,
-    createdAt: iso(ctx.now),
+    createdAt: toIso(ctx.now),
     url: null,
   };
   await fileStore.put(att.id, file);

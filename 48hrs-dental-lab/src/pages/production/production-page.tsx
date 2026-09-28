@@ -5,11 +5,10 @@ import { useTechnicians } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
 import { useDebouncedValue } from '@/hooks/use-debounce';
-import { errorMessage } from '@/services/api/errors';
 import type { CaseStatus } from '@/types/models';
 import { CaseCard } from '@/components/cases/case-card';
 import { FilterSelect, SearchInput } from '@/components/tables/toolbar';
-import { ErrorState, Skeleton } from '@/components/ui/feedback';
+import { Skeleton } from '@/components/ui/feedback';
 
 const COLUMNS: { title: string; subtitle: string; statuses: CaseStatus[]; empty: string }[] = [
   { title: 'Waiting for assignment', subtitle: 'Received & in review', statuses: ['received', 'review'], empty: 'Every accepted case is assigned.' },
@@ -29,7 +28,7 @@ function BoardColumn({ title, subtitle, statuses, empty, technicianId, search }:
         <span className="ml-auto text-[11.5px] text-ink-3">{subtitle}</span>
       </header>
       {q.error ? (
-        <ErrorState message={errorMessage(q.error)} onRetry={() => void q.refetch()} />
+        <QueryError error={q.error} onRetry={() => void q.refetch()} />
       ) : q.isLoading ? (
         [0, 1].map((i) => <Skeleton key={i} className="h-56 bg-card" />)
       ) : q.data?.data.length ? (
@@ -41,6 +40,7 @@ function BoardColumn({ title, subtitle, statuses, empty, technicianId, search }:
   );
 }
 
+import { QueryError } from '@/components/ui/query-error';
 export default function ProductionPage() {
   const { can, user } = useAuth();
   const scoped = !!user?.technicianId && !can(PERMISSIONS.CASES_VIEW_ALL);

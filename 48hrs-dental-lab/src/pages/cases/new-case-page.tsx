@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/cn';
 import { DENTURE_TYPES, priceCase } from '@/lib/billing';
@@ -15,6 +15,7 @@ import { useClinics, useDoctors, usePatients } from '@/hooks/api/use-directory';
 import { useServices, useSettings } from '@/hooks/api/use-admin';
 import { useDebouncedValue } from '@/hooks/use-debounce';
 import { usePageTitle } from '@/hooks/use-page-title';
+import { useUnsavedChangesGuard } from '@/hooks/use-unsaved-changes';
 import type { CasePriority, DentureType, LabService } from '@/types/models';
 import { formatDateTime, formatMoney, formatTeeth } from '@/utils/format';
 import { applyApiErrors } from '@/components/forms/api-errors';
@@ -73,7 +74,7 @@ export default function NewCasePage() {
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { control, register, handleSubmit, setValue, setError, formState: { errors, isSubmitting } } = useForm<Values>({
+  const { control, register, handleSubmit, setValue, setError, formState: { errors, isSubmitting, isDirty } } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: {
       clinicId: user?.clinicId ?? '',
@@ -92,6 +93,7 @@ export default function NewCasePage() {
   });
 
   const v = useWatch({ control });
+  const guard = useUnsavedChangesGuard(isDirty || queue.items.length > 0);
   const clinicId = v.clinicId ?? '';
   const doctors = useDoctors({ perPage: 200, status: 'active', clinicId: clinicId || undefined }, !!clinicId);
   const [patientSearch, setPatientSearch] = useState('');
@@ -140,6 +142,7 @@ export default function NewCasePage() {
       const failed = queue.pending ? await queue.uploadAll(created.id) : 0;
       toast.success(isStaff ? `Case ${created.caseNumber} registered — 48-hour clock started` : `Case ${created.caseNumber} submitted — waiting for reception`);
       if (failed) toast.warning(`${failed} file${failed === 1 ? '' : 's'} failed to upload. Retry from the case page.`);
+      guard.allowNavigation();
       navigate(`/cases/${created.id}`, { replace: true });
     } catch (err) {
       setFormError(applyApiErrors(err, setError, API_FIELDS));
@@ -411,9 +414,14 @@ export default function NewCasePage() {
           </div>
           <Alert>{isStaff ? 'The 48-hour countdown starts as soon as you register the case.' : 'The 48-hour countdown starts only when Reception accepts the case.'}</Alert>
           {formError && <Alert tone="danger">{formError}</Alert>}
-          <Button type="submit" size="lg" loading={submitting} className="hidden w-full md:inline-flex">
-            {isStaff ? 'Register case' : 'Submit case'}
-          </Button>
+          <div className="hidden gap-2 md:flex">
+            <Button asChild variant="ghost" size="lg">
+              <Link to="/cases">Cancel</Link>
+            </Button>
+            <Button type="submit" size="lg" loading={submitting} className="flex-1">
+              {isStaff ? 'Register case' : 'Submit case'}
+            </Button>
+          </div>
         </CardBody>
       </Card>
 
@@ -427,6 +435,7 @@ export default function NewCasePage() {
       </div>
 
       <FilePreviewDialog target={preview} onClose={() => setPreview(null)} />
+      {guard.element}
     </form>
   );
 }

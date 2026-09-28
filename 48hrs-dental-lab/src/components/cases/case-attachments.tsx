@@ -15,7 +15,7 @@ import { FilePreviewDialog, type PreviewTarget } from '@/components/files/file-p
 import { FileTypeTag, UploadQueueList } from '@/components/files/upload-queue-list';
 import { useUploadQueue } from '@/components/files/use-upload-queue';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useConfirmedDelete } from '@/components/ui/use-confirmed-delete';
 import { Alert } from '@/components/ui/feedback';
 
 export function CaseAttachments({ caseId, attachments }: { caseId: string; attachments: CaseAttachment[] }) {
@@ -23,7 +23,13 @@ export function CaseAttachments({ caseId, attachments }: { caseId: string; attac
   const queue = useUploadQueue(caseId);
   const del = useDeleteAttachment(caseId);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
-  const [toDelete, setToDelete] = useState<CaseAttachment | null>(null);
+  const { request: requestDelete, element: deleteDialog } = useConfirmedDelete<CaseAttachment>({
+    title: 'Delete file?',
+    confirmLabel: 'Delete file',
+    describe: (a) => <>“{a.name}” will be removed from this case. The removal is written to the activity log.</>,
+    remove: (a) => del.mutateAsync(a.id),
+    successMessage: () => 'File deleted',
+  });
 
   if (!can(PERMISSIONS.FILES_VIEW)) {
     return <Alert tone="warning">Patient files are restricted for your role. A Super Admin must grant the “View case files” permission.</Alert>;
@@ -76,7 +82,7 @@ export function CaseAttachments({ caseId, attachments }: { caseId: string; attac
               )}
               <Button variant="outline" size="sm" onClick={() => void download(a)} aria-label={`Download ${a.name}`}><Download /> <span className="hidden sm:inline">Download</span></Button>
               {canDelete(a) && (
-                <Button variant="ghost" size="icon-sm" onClick={() => setToDelete(a)} aria-label={`Delete ${a.name}`}><Trash2 className="text-danger" /></Button>
+                <Button variant="ghost" size="icon-sm" onClick={() => requestDelete(a)} aria-label={`Delete ${a.name}`}><Trash2 className="text-danger" /></Button>
               )}
             </div>
           </li>
@@ -86,25 +92,7 @@ export function CaseAttachments({ caseId, attachments }: { caseId: string; attac
       {can(PERMISSIONS.FILES_UPLOAD) && <FileDropzone onFiles={queue.add} compact title="Add files to this case" />}
 
       <FilePreviewDialog target={preview} onClose={closePreview} />
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Delete file?"
-        tone="danger"
-        confirmLabel="Delete file"
-        loading={del.isPending}
-        description={<>“{toDelete?.name}” will be removed from this case. The removal is written to the activity log.</>}
-        onConfirm={async () => {
-          if (!toDelete) return;
-          try {
-            await del.mutateAsync(toDelete.id);
-            toast.success('File deleted');
-            setToDelete(null);
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
-        }}
-      />
+      {deleteDialog}
     </div>
   );
 }

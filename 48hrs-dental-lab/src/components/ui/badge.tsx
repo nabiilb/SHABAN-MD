@@ -11,15 +11,6 @@ const tones: Record<Tone, string> = {
   navy: 'bg-navy-900 text-white',
 };
 
-export const toneText: Record<Tone, string> = {
-  info: 'text-info',
-  success: 'text-success',
-  warning: 'text-warning',
-  danger: 'text-danger',
-  neutral: 'text-gray-600',
-  navy: 'text-navy-900',
-};
-
 export const toneDot: Record<Tone, string> = {
   info: 'bg-info',
   success: 'bg-success',

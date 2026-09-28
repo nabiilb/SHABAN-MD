@@ -1,32 +1,29 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Download, Eye, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { Download, Plus } from 'lucide-react';
 import { CASE_TYPE_LABELS, PAYMENT_STATUS_META, PRIORITY_META } from '@/lib/constants';
 import { PERMISSIONS } from '@/lib/permissions';
 import { getSlaInfo, formatRemaining } from '@/lib/sla';
 import { ALL_STATUSES, DONE_STATUSES, OPEN_STATUSES, STATUS_META } from '@/lib/workflow';
-import { useCases, useDeleteCase } from '@/hooks/api/use-cases';
+import { useCases } from '@/hooks/api/use-cases';
 import { useClinics, useDoctors, useTechnicians } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
 import { useSlaConfig } from '@/hooks/use-sla';
 import { useListState } from '@/hooks/use-list-state';
-import { errorMessage } from '@/services/api/errors';
 import type { CaseListParams, SlaFilter } from '@/types/api';
 import type { CasePriority, CaseStatus, CaseType, CaseListItem, PaymentStatus } from '@/types/models';
 import { downloadCsv } from '@/utils/download';
 import { formatDateTime, formatMoney, formatRelativeDay } from '@/utils/format';
 import { PaymentBadge, PriorityBadge, StatusBadge } from '@/components/cases/badges';
 import { CaseActions } from '@/components/cases/case-actions';
+import { CaseRowActions } from '@/components/cases/case-row-actions';
 import { SlaCell } from '@/components/cases/sla';
 import { StageMini } from '@/components/cases/stage-progress';
 import { DataTable } from '@/components/tables/data-table';
 import { ClearFiltersButton, CollapsibleFilters, DateFilter, FilterSelect, SearchInput, ToolbarRow } from '@/components/tables/toolbar';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 
 const DEFAULTS = {
@@ -56,8 +53,6 @@ export default function CasesListPage() {
   const navigate = useNavigate();
   const list = useListState(DEFAULTS);
   const { state: f, set: setF, reset: resetF } = list;
-  const [toDelete, setToDelete] = useState<CaseListItem | null>(null);
-  const del = useDeleteCase();
   const slaConfig = useSlaConfig();
 
   const isScopedTech = !!user?.technicianId && !can(PERMISSIONS.CASES_VIEW_ALL);
@@ -168,30 +163,12 @@ export default function CasesListPage() {
         cell: ({ row }) => (
           <div className="flex items-center justify-end gap-1.5">
             <CaseActions c={row.original} limit={1} />
-            <Menu>
-              <MenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label={`More actions for ${row.original.caseNumber}`}>
-                  <MoreHorizontal />
-                </Button>
-              </MenuTrigger>
-              <MenuContent>
-                <MenuItem onSelect={() => navigate(`/cases/${row.original.id}`)}><Eye /> View case</MenuItem>
-                {can(PERMISSIONS.CASES_EDIT) && STATUS_META[row.original.status].open && (
-                  <MenuItem onSelect={() => navigate(`/cases/${row.original.id}?edit=1`)}><Pencil /> Edit details</MenuItem>
-                )}
-                {can(PERMISSIONS.CASES_DELETE) && (
-                  <>
-                    <MenuSeparator />
-                    <MenuItem tone="danger" onSelect={() => setToDelete(row.original)}><Trash2 /> Delete case</MenuItem>
-                  </>
-                )}
-              </MenuContent>
-            </Menu>
+            <CaseRowActions c={row.original} />
           </div>
         ),
       },
     ],
-    [can, navigate, showMoney],
+    [showMoney],
   );
 
   const exportRows = (rows: CaseListItem[]) => {
@@ -292,25 +269,6 @@ export default function CasesListPage() {
         }
       />
 
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Delete case?"
-        tone="danger"
-        confirmLabel="Delete case"
-        loading={del.isPending}
-        description={<>This permanently removes <b className="font-mono">{toDelete?.caseNumber}</b>, its files, history and invoice. Cases with recorded payments cannot be deleted — cancel them instead.</>}
-        onConfirm={async () => {
-          if (!toDelete) return;
-          try {
-            await del.mutateAsync(toDelete.id);
-            toast.success(`${toDelete.caseNumber} deleted`);
-            setToDelete(null);
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
-        }}
-      />
     </div>
   );
 }

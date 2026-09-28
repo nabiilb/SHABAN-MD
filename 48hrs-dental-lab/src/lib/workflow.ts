@@ -1,6 +1,7 @@
-import type { CaseActionKey } from '@/types/api';
+import type { CaseActionKey, CaseActionPayload } from '@/types/api';
 import type { CaseStatus, LabCase, User } from '@/types/models';
 import { PERMISSIONS, hasPermission } from './permissions';
+import { paymentReferenceRequired, validatePaymentAmount } from './billing';
 
 export type Tone = 'info' | 'success' | 'warning' | 'danger' | 'neutral' | 'navy';
 
@@ -47,6 +48,12 @@ export const IN_LAB_STATUSES: CaseStatus[] = [
 export const DONE_STATUSES: CaseStatus[] = ['delivered', 'completed'];
 export const PRODUCTION_STATUSES: CaseStatus[] = ['assigned', 'in_production', 'rework'];
 
+/** Who acts next on a case, naming the assigned technician when it is theirs to do. */
+export function nextActorLabel(c: { status: CaseStatus; technician?: { name: string } | null }): string | null {
+  const actor = STATUS_META[c.status].nextActor;
+  return actor === 'Technician' && c.technician ? c.technician.name : actor;
+}
+
 /** The seven production stages shown in the case timeline. */
 export const WORKFLOW_STAGES = [
   { key: 'received', label: 'Received' },
@@ -57,6 +64,12 @@ export const WORKFLOW_STAGES = [
   { key: 'ready', label: 'Ready' },
   { key: 'delivered', label: 'Delivered' },
 ] as const;
+
+/** Human label for where a case is: its timeline stage while open, its status once closed (completed/cancelled) or before intake. */
+export function stageLabel(status: CaseStatus) {
+  const meta = STATUS_META[status];
+  return meta.stage >= 0 && status !== 'completed' ? WORKFLOW_STAGES[meta.stage].label : meta.label;
+}
 
 export interface ActionDef {
   key: CaseActionKey;
@@ -135,4 +148,29 @@ export function availableActions(c: CaseRef, actor: Actor): ActionDef[] {
 /** The single most relevant action for a card / row (first non-cancel action). */
 export function primaryAction(c: CaseRef, actor: Actor): ActionDef | null {
   return availableActions(c, actor).find((a) => a.key !== 'cancel' && a.key !== 'reject') ?? null;
+}
+
+/**
+ * Input rules for each workflow action — the single source of truth for both
+ * the action dialogs (client-side) and the API (server-side 422). Keys are
+ * payload paths, e.g. "note", "delivery.receivedBy", "payment.amount".
+ */
+export function validateActionInput(p: CaseActionPayload, ctx: { maxPayment?: number } = {}): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const def = CASE_ACTIONS[p.action];
+  const note = p.note?.trim() || (p.action === 'qc_fail' ? p.qc?.notes?.trim() : '') || '';
+  if (def.noteRequired && !note) errors.note = p.action === 'qc_fail' ? 'Describe what must be reworked.' : 'Please give a reason.';
+  if (p.action === 'assign' && !p.technicianId) errors.technicianId = 'Choose a technician.';
+  if (p.action === 'qc_fail' && !p.qc?.issues?.length) errors['qc.issues'] = 'Select at least one issue.';
+  if (p.action === 'accept' && p.payment) {
+    const amountError = validatePaymentAmount(p.payment.amount, ctx.maxPayment ?? Infinity);
+    if (amountError) errors['payment.amount'] = amountError;
+    if (paymentReferenceRequired(p.payment.method) && !p.payment.reference?.trim()) errors['payment.reference'] = 'Enter the transaction reference.';
+  }
+  if (p.action === 'dispatch' || p.action === 'deliver') {
+    if (!p.delivery?.method) errors['delivery.method'] = 'Choose a delivery method.';
+    if (p.action === 'dispatch' && p.delivery?.method !== 'clinic_pickup' && !p.delivery?.courierName?.trim()) errors['delivery.courierName'] = 'Enter the courier name.';
+    if (p.action === 'deliver' && !p.delivery?.receivedBy?.trim()) errors['delivery.receivedBy'] = 'Enter who received the case.';
+  }
+  return errors;
 }

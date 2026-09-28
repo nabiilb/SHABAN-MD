@@ -1,8 +1,8 @@
 import { PERMISSIONS, hasPermission } from '@/lib/permissions';
-import { getSlaInfo, HOUR_MS } from '@/lib/sla';
+import { getSlaInfo, HOUR_MS, onTimeRate } from '@/lib/sla';
 import { DONE_STATUSES, IN_LAB_STATUSES, OPEN_STATUSES, PRODUCTION_STATUSES } from '@/lib/workflow';
 import { ApiError } from '@/services/api/errors';
-import type { DashboardSummary, ReportResult, SearchResult } from '@/types/api';
+import type { DashboardPeriod, DashboardSummary, ReportResult, SearchResult } from '@/types/api';
 import type { CaseStatus, CaseType, LabCase } from '@/types/models';
 import { localDay } from '@/utils/dates';
 import { authenticate, authorize } from '../auth-context';
@@ -37,7 +37,13 @@ route('GET', '/dashboard', (raw) => {
   const inLab = cases.filter((c) => IN_LAB_STATUSES.includes(c.status));
   const sla = inLab.map((c) => ({ c, info: getSlaInfo(c, now, cfg) }));
   const n = (...s: CaseStatus[]) => cases.filter((c) => s.includes(c.status)).length;
-  const recentDone = cases.filter((c) => c.deliveredAt && c.receivedAt && now - new Date(c.deliveredAt).getTime() <= 30 * DAY_MS);
+  const period = (['today', '7d', '30d', 'month'].includes(qStr(raw.query, 'period') ?? '') ? qStr(raw.query, 'period') : '30d') as DashboardPeriod;
+  const startDate = new Date(now);
+  if (period === 'month') startDate.setDate(1);
+  else startDate.setDate(startDate.getDate() - (period === 'today' ? 0 : period === '7d' ? 6 : 29));
+  const periodStart = localDay(startDate);
+  const inPeriod = (v?: string | null) => !!v && localDay(v) >= periodStart;
+  const recentDone = cases.filter((c) => c.receivedAt && inPeriod(c.deliveredAt));
   const finance = hasPermission(ctx.permissions, PERMISSIONS.REPORTS_FINANCIAL);
 
   const last14Days = Array.from({ length: 14 }, (_, i) => {
@@ -50,7 +56,8 @@ route('GET', '/dashboard', (raw) => {
   });
 
   let revenueByMonth: DashboardSummary['revenueByMonth'] = null;
-  let revenueMonth: number | null = null;
+  let revenue: number | null = null;
+  let collected: number | null = null;
   let outstanding: number | null = null;
   if (finance) {
     const months = Array.from({ length: 6 }, (_, i) => {
@@ -64,28 +71,33 @@ route('GET', '/dashboard', (raw) => {
       invoiced: round1(db.invoices.filter((i) => monthKey(i.issuedAt) === m).reduce((s, i) => s + i.total, 0)),
       collected: round1(db.payments.filter((p) => monthKey(p.paidAt) === m).reduce((s, p) => s + p.amount, 0)),
     }));
-    revenueMonth = revenueByMonth[5].invoiced;
+    const scopedInvoices = db.invoices.filter((i) => inPeriod(i.issuedAt) && cases.some((c) => c.id === i.caseId));
+    revenue = round1(scopedInvoices.reduce((s, i) => s + i.total, 0));
+    collected = round1(db.payments.filter((p) => inPeriod(p.paidAt)).reduce((s, p) => s + p.amount, 0));
     outstanding = round1(db.invoices.reduce((s, i) => s + invoiceView(db, i, now).remaining, 0));
   }
 
   const summary: DashboardSummary = {
     activeCases: inLab.length,
-    newToday: cases.filter((c) => localDay(c.receivedAt ?? c.submittedAt ?? c.createdAt) === today && c.status !== 'rejected').length,
+    period,
+    periodStart,
+    newCases: cases.filter((c) => inPeriod(c.receivedAt ?? c.submittedAt ?? c.createdAt) && c.status !== 'rejected').length,
     dueToday: sla.filter(({ c, info }) => c.dueAt && localDay(c.dueAt) === today && info.state !== 'overdue').length,
     overdue: sla.filter(({ info }) => info.state === 'overdue').length,
     completed: n(...DONE_STATUSES),
-    completedToday: cases.filter((c) => c.deliveredAt && localDay(c.deliveredAt) === today).length,
+    completedInPeriod: recentDone.length,
     inProduction: n(...PRODUCTION_STATUSES),
     pendingQc: n('quality_control'),
     readyForDelivery: n('ready', 'out_for_delivery'),
     awaitingAcceptance: n('submitted'),
-    revenueMonth,
+    revenue,
+    collected,
     outstanding,
     performance: {
       onTime: sla.filter(({ info }) => info.state === 'on_track').length,
       atRisk: sla.filter(({ info }) => info.state === 'at_risk' || info.state === 'critical').length,
       overdue: sla.filter(({ info }) => info.state === 'overdue').length,
-      onTimeRate: recentDone.length ? recentDone.filter((c) => c.deliveredAt! <= c.dueAt!).length / recentDone.length : null,
+      onTimeRate: onTimeRate(recentDone),
       avgCompletionHours: avg(recentDone.map((c) => hoursBetween(c.receivedAt, c.deliveredAt)!)),
     },
     last14Days,
@@ -125,10 +137,6 @@ route('GET', '/reports', (raw) => {
     return s === 'overdue' || s === 'late';
   };
   const delivered = cases.filter((c) => c.deliveredAt && c.dueAt);
-  const onTimeRate = (list: LabCase[]) => {
-    const d = list.filter((c) => c.deliveredAt && c.dueAt);
-    return d.length ? d.filter((c) => c.deliveredAt! <= c.dueAt!).length / d.length : null;
-  };
   const invs = cases.map((c) => invoiceOf(db, c, now)).filter((x): x is NonNullable<typeof x> => !!x);
   const money = (n: number) => (finance ? round1(n) : 0);
 

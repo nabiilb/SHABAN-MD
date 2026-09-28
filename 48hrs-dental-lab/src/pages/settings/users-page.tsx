@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -26,7 +26,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 import { ActiveBadge } from '@/components/ui/record-badges';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useConfirmedDelete } from '@/components/ui/use-confirmed-delete';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 
 const DEFAULTS = { search: '', role: undefined as string | undefined, active: undefined as string | undefined, sort: 'name', dir: 'asc', page: '1', perPage: '20' };
@@ -95,20 +95,26 @@ export default function UsersPage() {
   const list = useListState(DEFAULTS);
   const { state: f, set: setF, reset: resetF } = list;
   const [editing, setEditing] = useState<User | null | 'new'>(null);
-  const [toDelete, setToDelete] = useState<User | null>(null);
   const q = useUsers({ ...list.listParams, role: f.role as RoleKey | undefined, active: f.active === undefined ? undefined : f.active === 'true' });
   const setActive = useSetUserActive();
   const del = useDeleteUser();
+  const { request: requestDelete, element: deleteDialog } = useConfirmedDelete<User>({
+    title: 'Delete user?',
+    confirmLabel: 'Delete user',
+    describe: (u) => <>Delete <b>{u.name}</b>? Users who appear in case history cannot be deleted — disable them instead so the audit trail stays intact.</>,
+    remove: (u) => del.mutateAsync(u.id),
+    successMessage: () => 'User deleted',
+  });
   const manage = can(PERMISSIONS.USERS_MANAGE);
 
-  const toggle = async (u: User) => {
+  const toggle = useCallback(async (u: User) => {
     try {
       await setActive.mutateAsync({ id: u.id, active: !u.active });
       toast.success(`${u.name} ${u.active ? 'disabled' : 'enabled'}`);
     } catch (err) {
       toast.error(errorMessage(err));
     }
-  };
+  }, [setActive]);
 
   const columns = useMemo<ColumnDef<User, unknown>[]>(
     () => [
@@ -129,7 +135,7 @@ export default function UsersPage() {
                   actions={[
                     { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(row.original) },
                     { label: row.original.active ? 'Disable' : 'Enable', icon: <Power />, onSelect: () => void toggle(row.original), hidden: row.original.id === me?.id },
-                    { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => setToDelete(row.original), hidden: row.original.id === me?.id },
+                    { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => requestDelete(row.original), hidden: row.original.id === me?.id },
                   ]}
                 />
               ),
@@ -137,8 +143,7 @@ export default function UsersPage() {
           ] as ColumnDef<User, unknown>[])
         : []),
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [manage, me?.id],
+    [manage, me?.id, requestDelete, toggle],
   );
 
   return (
@@ -172,26 +177,7 @@ export default function UsersPage() {
         }
       />
       <UserDialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)} record={editing && editing !== 'new' ? editing : null} />
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Delete user?"
-        tone="danger"
-        confirmLabel="Delete user"
-        loading={del.isPending}
-        description={<>Users who appear in case history cannot be deleted — disable them instead so the audit trail stays intact.</>}
-        onConfirm={async () => {
-          if (!toDelete) return;
-          try {
-            await del.mutateAsync(toDelete.id);
-            toast.success('User deleted');
-            setToDelete(null);
-          } catch (err) {
-            toast.error(errorMessage(err));
-            setToDelete(null);
-          }
-        }}
-      />
+      {deleteDialog}
     </div>
   );
 }

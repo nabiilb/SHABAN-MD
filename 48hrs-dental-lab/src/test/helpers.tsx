@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router-dom';
 import { render } from '@testing-library/react';
@@ -29,7 +28,3 @@ export function renderRoutes(routes: RouteObject[], initialPath: string) {
   return { ...utils, router };
 }
 
-export function withQuery(children: ReactNode) {
-  const client = createQueryClient();
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-}

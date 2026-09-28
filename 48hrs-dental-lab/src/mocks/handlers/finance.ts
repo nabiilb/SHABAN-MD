@@ -1,4 +1,4 @@
-import { round2, validatePaymentAmount } from '@/lib/billing';
+import { paymentReferenceRequired, round2, validatePaymentAmount } from '@/lib/billing';
 import { PAYMENT_METHOD_LABELS } from '@/lib/constants';
 import { PERMISSIONS, hasPermission } from '@/lib/permissions';
 import { ApiError } from '@/services/api/errors';
@@ -83,7 +83,7 @@ route('POST', '/invoices/:id/payments', (raw) => {
   const amountError = validatePaymentAmount(amount, view.remaining);
   if (amountError) errors.amount = [amountError];
   if (!body.method || !(body.method in PAYMENT_METHOD_LABELS)) errors.method = ['Choose a payment method.'];
-  if (body.method && body.method !== 'cash' && !body.reference?.trim()) errors.reference = ['Enter the transaction reference.'];
+  if (paymentReferenceRequired(body.method) && !body.reference?.trim()) errors.reference = ['Enter the transaction reference.'];
   if (body.paidAt && new Date(body.paidAt).getTime() > ctx.now + 60_000) errors.paidAt = ['Payment date cannot be in the future.'];
   if (Object.keys(errors).length) throw validationError(errors);
 

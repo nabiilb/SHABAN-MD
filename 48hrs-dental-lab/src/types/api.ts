@@ -312,18 +312,27 @@ export interface ReportResult {
 
 /* ------------------------- Dashboard ------------------------------ */
 
+export type DashboardPeriod = 'today' | '7d' | '30d' | 'month';
+
 export interface DashboardSummary {
+  period: DashboardPeriod;
+  /** First day (YYYY-MM-DD) of the selected period. */
+  periodStart: string;
   activeCases: number;
-  newToday: number;
+  /** Cases received/submitted in the period. */
+  newCases: number;
   dueToday: number;
   overdue: number;
   completed: number;
-  completedToday: number;
+  /** Cases delivered in the period. */
+  completedInPeriod: number;
   inProduction: number;
   pendingQc: number;
   readyForDelivery: number;
   awaitingAcceptance: number;
-  revenueMonth: number | null;
+  /** Invoiced in the period (null without reports.financial). */
+  revenue: number | null;
+  collected: number | null;
   outstanding: number | null;
   performance: {
     onTime: number;

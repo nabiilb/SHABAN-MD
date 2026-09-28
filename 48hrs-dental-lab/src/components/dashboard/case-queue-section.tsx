@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { useCases } from '@/hooks/api/use-cases';
-import { errorMessage } from '@/services/api/errors';
 import type { CaseListParams } from '@/types/api';
 import { CaseCard, CaseCardGrid } from '@/components/cases/case-card';
-import { EmptyState, ErrorState, Skeleton } from '@/components/ui/feedback';
+import { EmptyState, Skeleton } from '@/components/ui/feedback';
 
 /** A titled queue of case cards (prototype sections like "WAITING FOR ASSIGNMENT"). */
+import { QueryError } from '@/components/ui/query-error';
 export function CaseQueueSection({ title, subtitle, params, emptyText, limit = 6, viewAllHref }: { title: string; subtitle?: string; params: CaseListParams; emptyText: string; limit?: number; viewAllHref?: string }) {
   const { data, isLoading, error, refetch } = useCases({ perPage: limit, sort: 'dueAt', dir: 'asc', ...params }, { refetchInterval: 60_000 });
   const total = data?.meta.total ?? 0;
@@ -23,7 +23,7 @@ export function CaseQueueSection({ title, subtitle, params, emptyText, limit = 6
         )}
       </div>
       {error ? (
-        <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />
+        <QueryError error={error} onRetry={() => void refetch()} />
       ) : isLoading ? (
         <CaseCardGrid>{[0, 1, 2].map((i) => <Skeleton key={i} className="h-60" />)}</CaseCardGrid>
       ) : !data?.data.length ? (

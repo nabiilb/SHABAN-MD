@@ -101,6 +101,16 @@ export function formatRemaining(info: SlaInfo): string {
   return `${formatDuration(info.remainingMs)} remaining`;
 }
 
-export function isAtRiskOrWorse(state: SlaState) {
-  return state === 'at_risk' || state === 'critical' || state === 'overdue';
+type DeliveredCase = Pick<LabCase, 'receivedAt' | 'dueAt' | 'deliveredAt' | 'status'>;
+
+/** true = delivered by due_at, false = delivered late, null = not delivered / no deadline. */
+export function deliveredOnTime(c: DeliveredCase): boolean | null {
+  const s = getSlaInfo(c).state;
+  return s === 'met' ? true : s === 'late' ? false : null;
+}
+
+/** Share of delivered cases that met their deadline, or null when none were delivered. */
+export function onTimeRate(cases: DeliveredCase[]): number | null {
+  const measured = cases.map(deliveredOnTime).filter((x): x is boolean => x !== null);
+  return measured.length ? measured.filter(Boolean).length / measured.length : null;
 }

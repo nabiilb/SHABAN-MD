@@ -1,21 +1,20 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { FilePlus2, Pencil, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
 import { PERMISSIONS } from '@/lib/permissions';
 import { DONE_STATUSES, STATUS_META } from '@/lib/workflow';
 import { useDeletePatient, usePatient } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { errorMessage } from '@/services/api/errors';
 import { formatDate } from '@/utils/format';
 import { CaseMiniTable, RelationStatsGrid } from '@/components/directory/relation-summary';
 import { DetailHeader } from '@/components/directory/detail-header';
 import { PatientFormDialog } from '@/components/directory/directory-forms';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { ErrorState, PageLoader } from '@/components/ui/feedback';
+import { useConfirmedDelete } from '@/components/ui/use-confirmed-delete';
+import { PageLoader } from '@/components/ui/feedback';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function PatientDetailPage() {
@@ -24,12 +23,19 @@ export default function PatientDetailPage() {
   const { can } = useAuth();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const del = useDeletePatient();
+  const { request: requestDelete, element: deleteDialog } = useConfirmedDelete<{ id: string; name: string }>({
+    title: 'Delete patient?',
+    confirmLabel: 'Delete patient',
+    describe: (r) => <>Delete <b>{r.name}</b>? Patients with cases cannot be deleted — their records are part of the case history.</>,
+    remove: (r) => del.mutateAsync(r.id),
+    successMessage: () => 'Patient deleted',
+    onDeleted: () => navigate('/patients', { replace: true }),
+  });
   usePageTitle(p?.name ?? 'Patient', p ? `Patient ${p.code}` : undefined);
 
   if (isLoading) return <PageLoader />;
-  if (error || !p) return <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />;
+  if (error || !p) return <QueryError error={error} onRetry={() => void refetch()} />;
   const current = p.recentCases.filter((c) => STATUS_META[c.status].open);
   const completed = p.recentCases.filter((c) => DONE_STATUSES.includes(c.status));
 
@@ -42,7 +48,7 @@ export default function PatientDetailPage() {
           <>
             {can([PERMISSIONS.CASES_CREATE, PERMISSIONS.CASES_SUBMIT], 'any') && <Button asChild variant="secondary"><Link to="/cases/new"><FilePlus2 /> New case</Link></Button>}
             {can(PERMISSIONS.PATIENTS_EDIT) && <Button variant="outline" onClick={() => setEditing(true)}><Pencil /> Edit</Button>}
-            {can(PERMISSIONS.PATIENTS_DELETE) && <Button variant="danger-soft" onClick={() => setDeleting(true)}><Trash2 /> Delete</Button>}
+            {can(PERMISSIONS.PATIENTS_DELETE) && <Button variant="danger-soft" onClick={() => p && requestDelete(p)}><Trash2 /> Delete</Button>}
           </>
         }
       >
@@ -76,25 +82,7 @@ export default function PatientDetailPage() {
       </Card>
 
       <PatientFormDialog open={editing} onOpenChange={(o) => { setEditing(o); if (!o) void refetch(); }} record={p} />
-      <ConfirmDialog
-        open={deleting}
-        onOpenChange={setDeleting}
-        title="Delete patient?"
-        tone="danger"
-        confirmLabel="Delete patient"
-        loading={del.isPending}
-        description="Patients with cases cannot be deleted — their records are part of the case history."
-        onConfirm={async () => {
-          try {
-            await del.mutateAsync(p.id);
-            toast.success('Patient deleted');
-            navigate('/patients', { replace: true });
-          } catch (err) {
-            toast.error(errorMessage(err));
-            setDeleting(false);
-          }
-        }}
-      />
+      {deleteDialog}
     </div>
   );
 }

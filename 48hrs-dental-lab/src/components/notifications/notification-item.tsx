@@ -1,7 +1,7 @@
 import { cn } from '@/lib/cn';
 import { NOTIFICATION_TONE } from '@/lib/constants';
 import type { AppNotification } from '@/types/models';
-import { timeAgo } from '@/utils/format';
+import { formatDateTime, formatRelativeDay, timeAgo } from '@/utils/format';
 import { toneDot } from '@/components/ui/badge';
 
 export function NotificationItem({ n, onOpen, compact }: { n: AppNotification; onOpen: (n: AppNotification) => void; compact?: boolean }) {
@@ -20,7 +20,9 @@ export function NotificationItem({ n, onOpen, compact }: { n: AppNotification; o
         </span>
         <span className="text-[13px] leading-snug text-ink-2">{n.message}</span>
         <span className="font-mono text-[11px] text-ink-3">
-          {timeAgo(n.createdAt)}
+          <time dateTime={n.createdAt} title={formatDateTime(n.createdAt)}>
+            {timeAgo(n.createdAt)} · {formatRelativeDay(n.createdAt)}
+          </time>
           {unread && <span className="sr-only"> · unread</span>}
         </span>
       </span>

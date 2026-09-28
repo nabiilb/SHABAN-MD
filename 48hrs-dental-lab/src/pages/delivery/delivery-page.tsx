@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { DELIVERY_METHOD_LABELS } from '@/lib/constants';
+import { DELIVERY_METHOD_LABELS, DELIVERY_STATUS_LABELS } from '@/lib/constants';
 import { useCases } from '@/hooks/api/use-cases';
 import { useDeliveries } from '@/hooks/api/use-lab';
 import { usePageTitle } from '@/hooks/use-page-title';
@@ -16,7 +16,6 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const DEFAULTS = { tab: 'ready', search: '', method: undefined as string | undefined, page: '1' };
-const STATUS_LABEL = { ready: 'Ready', out_for_delivery: 'Out for delivery', delivered: 'Delivered' } as const;
 
 export default function DeliveryPage() {
   usePageTitle('Delivery', 'Dispatch finished cases and record the hand-over');
@@ -33,9 +32,10 @@ export default function DeliveryPage() {
       { id: 'to', header: 'Delivered to', cell: ({ row }) => <div className="flex flex-col"><span className="whitespace-nowrap">{row.original.deliveredTo ?? row.original.clinicName}</span><span className="text-xs text-ink-3">{row.original.clinicName}</span></div> },
       { id: 'by', header: 'Received by', meta: { cellClassName: 'whitespace-nowrap' }, cell: ({ row }) => row.original.receivedBy ?? '—' },
       { id: 'method', header: 'Method', meta: { cellClassName: 'whitespace-nowrap' }, cell: ({ row }) => DELIVERY_METHOD_LABELS[row.original.method] },
+      { id: 'recorded', header: 'Delivered by', meta: { cellClassName: 'whitespace-nowrap' }, cell: ({ row }) => row.original.recordedByName },
       { id: 'courier', header: 'Courier', meta: { cellClassName: 'whitespace-nowrap text-ink-2' }, cell: ({ row }) => row.original.courierName ?? '—' },
       { id: 'date', header: 'Delivery date', meta: { cellClassName: 'whitespace-nowrap text-ink-2' }, cell: ({ row }) => formatDateTime(row.original.deliveredAt) },
-      { id: 'status', header: 'Status', cell: ({ row }) => <Badge tone="success">{STATUS_LABEL[row.original.status]}</Badge> },
+      { id: 'status', header: 'Status', cell: ({ row }) => <Badge tone="success">{DELIVERY_STATUS_LABELS[row.original.status]}</Badge> },
       { id: 'notes', header: 'Notes', meta: { cellClassName: 'text-[13px] text-ink-2' }, cell: ({ row }) => row.original.notes || '—' },
     ],
     [],

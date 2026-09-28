@@ -1,9 +1,9 @@
 import { api } from './api/client';
-import type { DashboardSummary, ReportFilters, ReportResult, SearchResult } from '@/types/api';
+import type { DashboardPeriod, DashboardSummary, ReportFilters, ReportResult, SearchResult } from '@/types/api';
 
 export const reportService = {
   run: (filters: ReportFilters) => api.get<ReportResult>('/reports', { params: { ...filters } }),
-  dashboard: () => api.get<DashboardSummary>('/dashboard'),
+  dashboard: (period: DashboardPeriod = '30d') => api.get<DashboardSummary>('/dashboard', { params: { period } }),
 };
 
 export const searchService = {

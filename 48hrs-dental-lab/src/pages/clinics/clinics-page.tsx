@@ -5,9 +5,7 @@ import { Eye, Pencil, Plus, Trash2 } from 'lucide-react';
 import { PERMISSIONS } from '@/lib/permissions';
 import { useClinics, useDeleteClinic } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
-import { errorMessage } from '@/services/api/errors';
-import { toast } from 'sonner';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useConfirmedDelete } from '@/components/ui/use-confirmed-delete';
 import { usePageTitle } from '@/hooks/use-page-title';
 import { useListState } from '@/hooks/use-list-state';
 import type { ClinicListItem } from '@/types/api';
@@ -26,13 +24,19 @@ export default function ClinicsPage() {
   usePageTitle('Clinics', 'Clinics the lab works for');
   const { can } = useAuth();
   const navigate = useNavigate();
+  const del = useDeleteClinic();
+  const { request: requestDelete, element: deleteDialog } = useConfirmedDelete<ClinicListItem>({
+    title: 'Delete clinic?',
+    confirmLabel: 'Delete clinic',
+    describe: (k) => <>Delete <b>{k.name}</b>? A clinic with doctors or cases cannot be deleted — set it to inactive instead.</>,
+    remove: (r) => del.mutateAsync(r.id),
+    successMessage: () => 'Clinic deleted',
+  });
   const list = useListState(DEFAULTS);
   const { state: f, set: setF, reset: resetF } = list;
   const [editing, setEditing] = useState<ClinicListItem | null | 'new'>(null);
   const q = useClinics({ ...list.listParams, status: f.status as 'active' | 'inactive' | undefined });
   const manage = can(PERMISSIONS.CLINICS_MANAGE);
-  const [toDelete, setToDelete] = useState<ClinicListItem | null>(null);
-  const del = useDeleteClinic();
   const money = can([PERMISSIONS.INVOICES_VIEW, PERMISSIONS.PAYMENTS_VIEW], 'any');
 
   const columns = useMemo<ColumnDef<ClinicListItem, unknown>[]>(
@@ -56,13 +60,13 @@ export default function ClinicsPage() {
             actions={[
               { label: 'View details', icon: <Eye />, onSelect: () => navigate(`/clinics/${row.original.id}`) },
               { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(row.original), hidden: !manage },
-              { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => setToDelete(row.original), hidden: !manage },
+              { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => requestDelete(row.original), hidden: !manage },
             ]}
           />
         ),
       },
     ],
-    [manage, navigate, money],
+    [manage, navigate, money, requestDelete],
   );
 
   return (
@@ -96,25 +100,7 @@ export default function ClinicsPage() {
         }
       />
       <ClinicFormDialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)} record={editing && editing !== 'new' ? editing : null} />
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Delete clinic?"
-        tone="danger"
-        confirmLabel="Delete clinic"
-        loading={del.isPending}
-        description={<>Delete <b>{toDelete?.name}</b>? A clinic with cases cannot be deleted — set it to inactive instead.</>}
-        onConfirm={async () => {
-          if (!toDelete) return;
-          try {
-            await del.mutateAsync(toDelete.id);
-            toast.success('Clinic deleted');
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
-          setToDelete(null);
-        }}
-      />
+      {deleteDialog}
     </div>
   );
 }

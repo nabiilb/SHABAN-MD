@@ -2,13 +2,11 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Eye, FilePlus2, Pencil, Plus, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
 import { PERMISSIONS } from '@/lib/permissions';
 import { useClinics, useDeletePatient, usePatients } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { useListState } from '@/hooks/use-list-state';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { errorMessage } from '@/services/api/errors';
 import type { PatientListItem } from '@/types/api';
 import { formatDate } from '@/utils/format';
 import { PatientFormDialog } from '@/components/directory/directory-forms';
@@ -16,7 +14,7 @@ import { DataTable } from '@/components/tables/data-table';
 import { RowActions } from '@/components/tables/row-actions';
 import { ClearFiltersButton, FilterSelect, SearchInput, ToolbarRow } from '@/components/tables/toolbar';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { useConfirmedDelete } from '@/components/ui/use-confirmed-delete';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 
 const DEFAULTS = { search: '', clinicId: undefined as string | undefined, sort: 'createdAt', dir: 'desc', page: '1', perPage: '20' };
@@ -25,11 +23,17 @@ export default function PatientsPage() {
   usePageTitle('Patients', 'Patient records and their case history');
   const { can } = useAuth();
   const navigate = useNavigate();
+  const del = useDeletePatient();
+  const { request: requestDelete, element: deleteDialog } = useConfirmedDelete<PatientListItem>({
+    title: 'Delete patient?',
+    confirmLabel: 'Delete patient',
+    describe: (p) => <>Delete <b>{p.name}</b>? Patients with cases cannot be deleted — their records are part of the case history.</>,
+    remove: (r) => del.mutateAsync(r.id),
+    successMessage: () => 'Patient deleted',
+  });
   const list = useListState(DEFAULTS);
   const f = list.state;
   const [editing, setEditing] = useState<PatientListItem | null | 'new'>(null);
-  const [toDelete, setToDelete] = useState<PatientListItem | null>(null);
-  const del = useDeletePatient();
   const clinics = useClinics({ perPage: 200 }, can(PERMISSIONS.CLINICS_VIEW));
   const q = usePatients({ ...list.listParams, clinicId: f.clinicId });
 
@@ -53,13 +57,13 @@ export default function PatientsPage() {
               { label: 'View patient', icon: <Eye />, onSelect: () => navigate(`/patients/${row.original.id}`) },
               { label: 'New case', icon: <FilePlus2 />, onSelect: () => navigate('/cases/new'), hidden: !can([PERMISSIONS.CASES_CREATE, PERMISSIONS.CASES_SUBMIT], 'any') },
               { label: 'Edit', icon: <Pencil />, onSelect: () => setEditing(row.original), hidden: !can(PERMISSIONS.PATIENTS_EDIT) },
-              { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => setToDelete(row.original), hidden: !can(PERMISSIONS.PATIENTS_DELETE) },
+              { label: 'Delete', icon: <Trash2 />, tone: 'danger', onSelect: () => requestDelete(row.original), hidden: !can(PERMISSIONS.PATIENTS_DELETE) },
             ]}
           />
         ),
       },
     ],
-    [can, navigate],
+    [can, navigate, requestDelete],
   );
 
   return (
@@ -94,25 +98,7 @@ export default function PatientsPage() {
         }
       />
       <PatientFormDialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)} record={editing && editing !== 'new' ? editing : null} onSaved={(p) => editing === 'new' && navigate(`/patients/${p.id}`)} />
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Delete patient?"
-        tone="danger"
-        confirmLabel="Delete patient"
-        loading={del.isPending}
-        description={<>Delete <b>{toDelete?.name}</b>? Patients with cases cannot be deleted — their records are part of the case history.</>}
-        onConfirm={async () => {
-          if (!toDelete) return;
-          try {
-            await del.mutateAsync(toDelete.id);
-            toast.success('Patient deleted');
-          } catch (err) {
-            toast.error(errorMessage(err));
-          }
-          setToDelete(null);
-        }}
-      />
+      {deleteDialog}
     </div>
   );
 }

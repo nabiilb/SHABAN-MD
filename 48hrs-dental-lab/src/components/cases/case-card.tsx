@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Paperclip } from 'lucide-react';
-import { STATUS_META } from '@/lib/workflow';
+import { nextActorLabel } from '@/lib/workflow';
 import type { CaseListItem } from '@/types/models';
 import { useAuth } from '@/hooks/use-auth';
 import { PERMISSIONS } from '@/lib/permissions';
@@ -12,8 +12,7 @@ import { SlaBar } from './sla';
 
 /** Queue card from the prototype: case id, patient, status pill, service, SLA bar, next actor, actions. */
 export function CaseCard({ c }: { c: CaseListItem }) {
-  const { user, can } = useAuth();
-  const meta = STATUS_META[c.status];
+  const { can } = useAuth();
   const showMoney = can([PERMISSIONS.INVOICES_VIEW, PERMISSIONS.PAYMENTS_VIEW], 'any');
   return (
     <article className="flex min-w-0 flex-col gap-3 rounded-md border border-line bg-card p-4 shadow-sm">
@@ -56,8 +55,7 @@ export function CaseCard({ c }: { c: CaseListItem }) {
       <SlaBar c={c} />
 
       <p className="text-[12.5px] text-ink-2">
-        {meta.nextActor ? <>Next action: <b className="font-semibold text-ink">{meta.nextActor === 'Technician' && c.technician ? c.technician.name : meta.nextActor}</b></> : 'Closed — no further action.'}
-        {user?.role === 'super_admin' && meta.open && ' · read-only oversight'}
+        {nextActorLabel(c) ? <>Next action: <b className="font-semibold text-ink">{nextActorLabel(c)}</b></> : 'Closed — no further action.'}
       </p>
 
       <div className="mt-auto flex flex-wrap items-center gap-2">

@@ -24,7 +24,7 @@ npm run dev               # http://localhost:5173
 | `npm run preview` | Serve the production build |
 | `npm run typecheck` | TypeScript only |
 | `npm run lint` | ESLint (typescript-eslint + react-hooks) |
-| `npm test` | Vitest suite (57 tests) |
+| `npm test` | Vitest suite (95 tests) |
 
 ### Demo accounts (mock mode only)
 
@@ -66,9 +66,9 @@ src/
 ├── types/                     # models.ts (entities), api.ts (payloads, filters, responses)
 ├── lib/                       # pure domain logic — shared by UI and mock backend
 │   ├── permissions.ts         # permission catalogue + default role matrix
-│   ├── workflow.ts            # statuses, stages, workflow actions, canPerformAction()
+│   ├── workflow.ts            # statuses, stages, workflow actions, canPerformAction(), validateActionInput()
 │   ├── sla.ts                 # 48-hour deadline engine (due_at, states, formatting)
-│   ├── billing.ts             # pricing, invoice status, payment validation
+│   ├── billing.ts             # pricing, invoice status, payment validation (Total − Paid = Remaining)
 │   ├── teeth.ts               # universal-numbering arch geometry (from the prototype)
 │   ├── constants.ts, validation.ts, query-client.ts, query-keys.ts
 ├── services/                  # API layer — the only place that talks to the backend
@@ -80,18 +80,21 @@ src/
 │       reportService (reports, dashboard, search), notificationService, adminService
 ├── mocks/                     # removable mock backend (see §6)
 ├── hooks/                     # use-auth, use-now (shared clock), use-sla, use-list-state (URL-backed table state),
-│                              # use-url-state, use-debounce, use-page-title…
+│                              # use-url-state, use-debounce, use-page-title, use-unsaved-changes (route + tab-close guard),
+│                              # use-return-focus (focus back to the opener after a dialog)…
 │   └── api/                   # TanStack Query hooks per domain
 ├── stores/                    # Zustand: auth-store (session), ui-store (drawer, search, page title)
 ├── components/
 │   ├── ui/                    # Button, Input/Select/Textarea, Badge, ActiveBadge, Card/Field, Dialog, ConfirmDialog,
 │   │                          # Menu, Tabs, SegmentedControl, Checkbox/Switch, Popover, Tooltip, SimpleTable,
-│   │                          # PageToolbar, feedback (Spinner, Skeleton, EmptyState, ErrorState, Alert, ProgressBar)
+│   │                          # PageToolbar, QueryError (403/404/retry), useConfirmedDelete,
+│   │                          # feedback (Spinner, Skeleton, EmptyState, ErrorState, Alert, ProgressBar)
 │   ├── forms/                 # FormField, Text/Select/Date/Checkbox/Switch fields, Combobox, MultiSelect
 │   ├── tables/                # DataTable (sorting, pagination, selection, column toggle, states), RowActions,
 │   │                          # toolbar (SearchInput, FilterSelect, DateFilter, CollapsibleFilters), Pagination
 │   ├── files/                 # dropzone, upload queue with progress, preview dialog
-│   ├── cases/                 # badges, SLA countdowns, tooth chart, timeline, action dialogs, attachments
+│   ├── cases/                 # badges, SLA countdowns, tooth chart, timeline, attachments, useCaseWorkflow
+│   │                          # (CaseActions buttons + CaseRowActions menu share one runner and dialog)
 │   ├── dashboard/, directory/, payments/, notifications/
 │   ├── layout/                # Sidebar, Header, Breadcrumbs, GlobalSearch, brand wordmark
 ├── layouts/                   # AppLayout (sidebar + header), AuthLayout (split login)
@@ -142,16 +145,16 @@ Components never call `fetch`. The chain is **page → TanStack Query hook (`hoo
 | --- | --- |
 | `POST /auth/login` · `POST /auth/logout` · `GET /auth/me` | Session |
 | `POST /auth/forgot-password` · `POST /auth/reset-password` | Password reset |
-| `GET /cases` (filters: `search, status[], priority[], technicianId, doctorId, clinicId, patientId, caseType, paymentStatus, sla, from, to, openOnly, sort, dir, page, perPage`) | Paginated list `{ data, meta: { page, perPage, total, lastPage } }` |
+| `GET /cases` (filters: `search, status[], priority[], technicianId, doctorId, clinicId, patientId, caseType, paymentStatus, sla, from, to, dueFrom, dueTo, openOnly, sort, dir, page, perPage`) | Paginated list `{ data, meta: { page, perPage, total, lastPage } }` |
 | `GET /cases/counts` | Sidebar badges |
 | `POST /cases` · `GET/PATCH/DELETE /cases/:id` | CRUD |
 | `POST /cases/:id/actions` `{ action, note, technicianId?, payment?, qc?, delivery? }` | **All status changes** (accept, request_correction, resubmit, reject, start_review, assign, start_production, submit_qc, qc_pass, qc_fail, start_rework, dispatch, deliver, confirm_receipt, cancel) |
 | `POST /cases/:id/notes` | Production notes |
 | `POST /cases/:id/attachments` (multipart `file`, `category`) · `DELETE …/:attachmentId` · `GET …/:attachmentId/download` | Files |
-| `GET/POST /patients`, `GET/PUT/DELETE /patients/:id` (same for `/doctors`, `/clinics`; `/technicians` without delete) | Directory |
+| `GET/POST /patients`, `GET/PUT/DELETE /patients/:id` (same for `/doctors`, `/clinics`, `/technicians`; delete returns 422 while records are linked) | Directory |
 | `GET /invoices` · `GET /invoices/:id` · `POST /invoices/:id/payments` · `GET /payments` | Finance |
 | `GET /quality-checks` · `GET /deliveries` | QC & delivery history |
-| `GET /dashboard` · `GET /reports` · `GET /search?q=` | Aggregates & global search |
+| `GET /dashboard?period=today\|7d\|30d\|month` · `GET /reports` · `GET /search?q=` | Aggregates & global search |
 | `GET /notifications` · `POST /notifications/:id/read` · `POST /notifications/read-all` | Notification center |
 | `GET/POST /users`, `PUT/DELETE /users/:id`, `PATCH /users/:id/status` · `GET /roles`, `PUT /roles/:key`, `GET /permissions` | Access control |
 | `GET/POST /services`, `PUT/DELETE /services/:id` · `GET/PUT /settings` · `GET /activity` | Administration |
@@ -177,12 +180,12 @@ Any open stage → Cancelled
 
 ## 8. Feature map
 
-Dashboard (role-specific: operations, technician, client) · Cases list (search, 10 filters, sort, pagination, column toggle, bulk CSV export, mobile cards) · New case (clinic/doctor/patient comboboxes, service cards, interactive tooth chart, shade, material, files with progress, priority/emergency fee, live summary, sticky mobile total) · Case detail (live countdown, stepper, information, production + notes, QC, delivery, payment, attachments with preview/download/delete, audit timeline, edit, print) · Production board · QC queue & history · Delivery queue & history · Patients / Doctors / Clinics / Technicians with detail pages and statistics · Invoices (printable) & payments · Reports with filters, charts and CSV exports · Notification center · Global search (Ctrl/⌘ K) · Users · Roles matrix · Activity log · Settings (lab profile, SLA rules, price list, demo reset).
+Dashboard (role-specific: operations, technician, client; period filter today / 7 days / 30 days / this month, operations KPIs link to their filtered lists) · Cases list (search, 10 filters, sort, pagination, column toggle, bulk CSV export, mobile cards) · New case (clinic/doctor/patient comboboxes, service cards, interactive tooth chart, shade, material, files with progress, priority/emergency fee, live summary, sticky mobile total) · Case detail (live countdown, stepper, information, production + notes, QC, delivery, payment, attachments with preview/download/delete, audit timeline, edit, print) · Production board · QC queue & history · Delivery queue & history · Patients / Doctors / Clinics / Technicians with detail pages and statistics · Invoices (printable) & payments · Reports with filters, charts and CSV exports · Notification center · Global search (Ctrl/⌘ K) · Users · Roles matrix · Activity log · Settings (lab profile, SLA rules, price list, demo reset).
 
 ## 9. Testing
 
 ```bash
-npm test          # 57 tests, ~6 s
+npm test          # 95 tests, ~6 s
 ```
 
 | Suite | Covers |
@@ -194,6 +197,8 @@ npm test          # 57 tests, ~6 s
 | `http.test.ts` | real HTTP transport: bearer token, query arrays, 422 parsing, network errors, key casing |
 | `ui.test.tsx` | login form, redirect after login, protected route, permission gate, tooth chart, create-case validation |
 | `layout.test.tsx` | breadcrumbs (incl. permission-aware links), row actions, simple table, due-date filter |
+| `audit.test.ts` | time-travel SLA through the API (on track → at risk → overdue, listed, counted, notified; delivered on time vs late), every workflow action × role permission matrix, persisted history, accept integrity (a rejected payment leaves the case untouched), action input validation, unpaid → partial → paid → overdue, dashboard periods, financial KPIs hidden without `reports.financial`, session expiry, technician delete guards |
+| `modules.test.ts` | report filters (date, status, technician, doctor, clinic, case type), directory search/filter/sort/pagination/delete guards, global search for case ID, patient, doctor, clinic, phone and invoice with scope, notification read/unread and ownership, invoice scope |
 
 ### Browser audit
 
@@ -202,6 +207,11 @@ Checked in Chromium with Playwright and axe-core (WCAG 2 A/AA):
 - **Route crawl:** signed in as each of the 8 roles and followed every nav and in-page link — 109 page visits at 1366 px, 28 at 390 px. It found 0 console errors, 0 crashes, 0 broken links, 0 unlabeled controls and 0 axe violations.
 - **Workflow run** (client → reception → manager → technician → QC fail → rework → QC pass → dispatch → deliver → client confirm → final payment), plus logout, filters, sorting, cancel with reason, revoking a permission live, user creation and first sign-in, clinic creation, SLA settings validation and notifications.
 - **Tablet widths** (768 / 1024 px): no horizontal page overflow.
+- **Responsive:** login, dashboard, cases, case detail, patients, payments and reports at 390 / 768 / 1366 px — no page overflow, no element outside the viewport, mobile drawer opens, navigates and closes.
+- **Permissions:** 387 checks across all roles — sidebar, breadcrumbs, page and row actions, and direct URLs (blocked with "Access restricted"; the API answers 403).
+- **Keyboard:** 20 checks — skip link, keyboard sign-in, focus trap and focus return for dialogs and row menus, arrow keys in segmented controls and menus, tooth chart with Space.
+- **Forms:** 57 checks — required/invalid errors wired with `aria-invalid` + `aria-describedby`, busy state, success toast, server 422 mapped to fields, Cancel, unsaved-changes prompt.
+- **Deadline run:** the browser clock is fast-forwarded 49 h — the session expires and returns to the same page after sign-in, the case shows Overdue, appears under the overdue filter and a "Case overdue" notification arrives.
 
 The full UI workflow (client submits → reception accepts with deposit → manager assigns → technician produces → QC fails → rework → QC passes → dispatch → deliver → client confirms → remaining payment) was also verified end-to-end in Chromium at desktop and 390 px mobile widths with no console errors.
 

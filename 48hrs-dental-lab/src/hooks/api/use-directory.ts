@@ -73,3 +73,8 @@ export function useSaveTechnician() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.technicians.all }),
   });
 }
+
+export function useDeleteTechnician() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => technicianService.remove(id), onSuccess: () => void qc.invalidateQueries({ queryKey: qk.technicians.all }) });
+}

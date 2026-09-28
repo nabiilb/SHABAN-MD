@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/cn';
 import { DELIVERY_METHOD_LABELS, PAYMENT_METHOD_LABELS, QC_ISSUE_LABELS } from '@/lib/constants';
 import { PERMISSIONS } from '@/lib/permissions';
-import { CASE_ACTIONS } from '@/lib/workflow';
+import { CASE_ACTIONS, validateActionInput } from '@/lib/workflow';
+import { paymentReferenceRequired } from '@/lib/billing';
 import { useCaseAction } from '@/hooks/api/use-cases';
 import { useTechnicians } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
@@ -43,7 +44,17 @@ const schema = z.object({
 });
 type Values = z.infer<typeof schema>;
 
-const FIELDS = ['note', 'technicianId', 'issues', 'payAmount', 'payReference', 'courierName', 'receivedBy', 'deliveryMethod'] as const;
+/** API payload paths (422 keys) -> form fields. */
+const API_TO_FIELD: Record<string, keyof Values> = {
+  note: 'note',
+  technicianId: 'technicianId',
+  'qc.issues': 'issues',
+  'payment.amount': 'payAmount',
+  'payment.reference': 'payReference',
+  'delivery.method': 'deliveryMethod',
+  'delivery.courierName': 'courierName',
+  'delivery.receivedBy': 'receivedBy',
+};
 
 const TITLES: Record<ActionDialogKind, string> = {
   accept: 'Accept case',
@@ -97,34 +108,24 @@ export function CaseActionDialog({ kind, c, onClose, onDone }: Props) {
   const run = async (action: CaseActionKey, v: Values) => {
     const def = CASE_ACTIONS[action];
     const note = v.note?.trim() ?? '';
-    if (action === 'qc_fail' && !v.issues?.length) {
-      setError('issues', { message: 'Select at least one issue.' });
-      if (!note) setError('note', { message: 'Describe what must be reworked.' });
-      return;
-    }
-    if (def.noteRequired && !note) {
-      setError('note', { message: action === 'qc_fail' ? 'Describe what must be reworked.' : 'Please give a reason.' });
-      return;
-    }
     const payload: CaseActionPayload = { action, note: note || undefined };
-    if (action === 'assign') {
-      if (!v.technicianId) return setError('technicianId', { message: 'Choose a technician.' });
-      payload.technicianId = v.technicianId;
-    }
+    if (action === 'assign') payload.technicianId = v.technicianId;
     if (action === 'accept' && canTakePayment && v.payMode && v.payMode !== 'none') {
-      const amount = v.payMode === 'full' ? c.total : Number(v.payAmount);
-      if (!Number.isFinite(amount) || amount <= 0) return setError('payAmount', { message: 'Enter an amount greater than zero.' });
-      if (amount > c.total) return setError('payAmount', { message: `Cannot exceed the case total of ${formatMoney(c.total)}.` });
-      if (v.payMethod !== 'cash' && !v.payReference?.trim()) return setError('payReference', { message: 'Enter the transaction reference.' });
-      payload.payment = { amount, method: v.payMethod as PaymentMethod, reference: v.payReference?.trim() };
+      payload.payment = { amount: v.payMode === 'full' ? c.total : Number(v.payAmount), method: v.payMethod as PaymentMethod, reference: v.payReference?.trim() };
     }
     if (action === 'qc_pass' || action === 'qc_fail') {
       payload.qc = { issues: (v.issues ?? []) as QcIssue[], notes: note, reworkRequired: action === 'qc_fail' };
     }
     if (action === 'dispatch' || action === 'deliver') {
-      if (action === 'dispatch' && v.deliveryMethod !== 'clinic_pickup' && !v.courierName?.trim()) return setError('courierName', { message: 'Enter the courier name.' });
-      if (action === 'deliver' && !v.receivedBy?.trim()) return setError('receivedBy', { message: 'Enter who received the case.' });
       payload.delivery = { method: v.deliveryMethod as DeliveryMethod, courierName: v.courierName, deliveredTo: v.deliveredTo, receivedBy: v.receivedBy, notes: note };
+    }
+
+    // Same rules the API enforces (lib/workflow.validateActionInput).
+    // Only submitted cases are accepted and they have no invoice yet, so the cap is the case total.
+    const invalid = validateActionInput(payload, { maxPayment: c.total });
+    if (Object.keys(invalid).length) {
+      Object.entries(invalid).forEach(([path, message]) => setError(API_TO_FIELD[path] ?? 'note', { message }));
+      return;
     }
     try {
       await mutation.mutateAsync({ id: c.id, payload });
@@ -132,7 +133,7 @@ export function CaseActionDialog({ kind, c, onClose, onDone }: Props) {
       onClose();
       onDone?.();
     } catch (err) {
-      const msg = applyApiErrors(err, setError, FIELDS);
+      const msg = applyApiErrors(err, (path, e) => setError(API_TO_FIELD[path as string] ?? (path as keyof Values), e), Object.keys(API_TO_FIELD));
       if (msg) toast.error(msg);
     }
   };
@@ -210,7 +211,7 @@ export function CaseActionDialog({ kind, c, onClose, onDone }: Props) {
                           </NativeSelect>
                         )}
                       </FormField>
-                      {values.payMethod !== 'cash' && (
+                      {paymentReferenceRequired(values.payMethod) && (
                         <FormField label="Reference" error={err.payReference?.message} required>
                           {(a) => <Input id={a.id} aria-invalid={a.invalid} aria-describedby={a.describedBy} placeholder="TX123456" {...register('payReference')} />}
                         </FormField>

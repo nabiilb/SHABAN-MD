@@ -53,11 +53,13 @@
   /* Status */
   --color-success: #1c7c44; /* design-system green, one step darker for 4.5:1 on its tint */
   --color-success-bg: #e7f5ec;
+  --color-success-bg-hover: #d3eedd;
   --color-warning: #986211; /* design-system amber, one step darker for 4.5:1 on its tint */
   --color-warning-bg: #fdf3e0;
   --color-danger: #c53030;
   --color-danger-hover: #a92727;
   --color-danger-bg: #fbe9e9;
+  --color-danger-bg-hover: #f6d8d8;
   --color-info: #17498a;
   --color-info-bg: #f1f6fd;
 
@@ -89,6 +91,11 @@
   button:not(:disabled),
   [role='button']:not([aria-disabled='true']) {
     cursor: pointer;
+  }
+  /* Identifiers and amounts (DL-2026-00146, INV-…, $17.50) never break mid-code; tables scroll instead. */
+  td .font-mono,
+  td.font-mono {
+    white-space: nowrap;
   }
 }
 

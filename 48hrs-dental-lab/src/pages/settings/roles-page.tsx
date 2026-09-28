@@ -6,8 +6,9 @@ import { usePermissionCatalogue, useRoles, useUpdateRole } from '@/hooks/api/use
 import { usePageTitle } from '@/hooks/use-page-title';
 import { errorMessage } from '@/services/api/errors';
 import type { Role } from '@/types/models';
-import { Alert, ErrorState, PageLoader } from '@/components/ui/feedback';
+import { Alert, PageLoader } from '@/components/ui/feedback';
 
+import { QueryError } from '@/components/ui/query-error';
 export default function RolesPage() {
   usePageTitle('Roles & Permissions', 'Who can do what — enforced by the API, reflected in the UI');
   const roles = useRoles();
@@ -22,7 +23,7 @@ export default function RolesPage() {
   }, [perms]);
 
   if (roles.isLoading || catalogue.isLoading) return <PageLoader />;
-  if (roles.error || catalogue.error) return <ErrorState message={errorMessage(roles.error ?? catalogue.error)} onRetry={() => { void roles.refetch(); void catalogue.refetch(); }} />;
+  if (roles.error || catalogue.error) return <QueryError error={roles.error ?? catalogue.error} onRetry={() => { void roles.refetch(); void catalogue.refetch(); }} />;
 
   const toggle = async (role: Role, key: string) => {
     const has = role.permissions.includes(key);
@@ -86,7 +87,7 @@ function GroupRows({ group, perms, roles, onToggle, busy, colSpan }: { group: st
                   onClick={() => onToggle(r, p.key)}
                   aria-pressed={on}
                   aria-label={`${on ? 'Revoke' : 'Grant'} ${p.label} for ${r.name}`}
-                  className={cn('inline-flex h-[30px] w-[34px] items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed', on ? 'bg-success-bg text-success hover:bg-[#d3eedd]' : 'bg-gray-100 text-gray-400 hover:bg-gray-200', r.locked && 'opacity-70')}
+                  className={cn('inline-flex h-[30px] w-[34px] items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed', on ? 'bg-success-bg text-success hover:bg-success-bg-hover' : 'bg-gray-100 text-gray-400 hover:bg-gray-200', r.locked && 'opacity-70')}
                 >
                   {on ? <Check className="size-4" strokeWidth={3} /> : <Minus className="size-4" />}
                 </button>

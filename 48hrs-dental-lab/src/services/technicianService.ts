@@ -8,4 +8,5 @@ export const technicianService = {
   get: (id: string) => api.get<TechnicianDetail>(`/technicians/${id}`),
   create: (payload: TechnicianPayload) => api.post<Technician>('/technicians', payload),
   update: (id: string, payload: TechnicianPayload) => api.put<Technician>(`/technicians/${id}`, payload),
+  remove: (id: string) => api.delete<null>(`/technicians/${id}`),
 };

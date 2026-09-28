@@ -3,10 +3,10 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Pencil, Printer, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { DENTURE_TYPES } from '@/lib/billing';
-import { CASE_TYPE_LABELS, DELIVERY_METHOD_LABELS, QC_ISSUE_LABELS } from '@/lib/constants';
+import { CASE_TYPE_LABELS, DELIVERY_METHOD_LABELS, DELIVERY_STATUS_LABELS, QC_ISSUE_LABELS } from '@/lib/constants';
 import { PERMISSIONS } from '@/lib/permissions';
 import { formatDuration } from '@/lib/sla';
-import { STATUS_META, WORKFLOW_STAGES } from '@/lib/workflow';
+import { STATUS_META, nextActorLabel, stageLabel } from '@/lib/workflow';
 import { useAddCaseNote, useCase } from '@/hooks/api/use-cases';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
@@ -24,8 +24,9 @@ import { RecordPaymentDialog } from '@/components/payments/record-payment-dialog
 import { Badge } from '@/components/ui/badge';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
-import { Alert, EmptyState, ErrorState, PageLoader, ProgressBar } from '@/components/ui/feedback';
+import { Alert, EmptyState, PageLoader, ProgressBar } from '@/components/ui/feedback';
 import { Textarea } from '@/components/ui/input';
 
 export default function CaseDetailPage() {
@@ -38,7 +39,7 @@ export default function CaseDetailPage() {
     if (error instanceof ApiError && error.isNotFound) {
       return <EmptyState title="Case not found" description="It may have been deleted, or it is outside your access." action={<Button asChild variant="outline"><Link to="/cases">Back to cases</Link></Button>} />;
     }
-    return <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />;
+    return <QueryError error={error} onRetry={() => void refetch()} />;
   }
   if (!c) return null;
   return <CaseDetailView c={c} />;
@@ -88,14 +89,16 @@ function CaseDetailView({ c }: { c: CaseDetail }) {
                 {canMoney && <PaymentBadge status={c.paymentStatus} />}
               </div>
             </div>
-            <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Field label="Service">{c.restorationType}</Field>
+            <dl className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              <Field label="Case type">{CASE_TYPE_LABELS[c.caseType]} · {c.restorationType}</Field>
               <Field label="Units" mono>{c.units}</Field>
-              <Field label="Received">{c.receivedAt ? formatDateTime(c.receivedAt) : 'Awaiting intake'}</Field>
+              <Field label="Current stage">{stageLabel(c.status)}</Field>
               <Field label="Technician">{c.technician?.name ?? 'Not assigned'}</Field>
+              <Field label="Received">{c.receivedAt ? formatDateTime(c.receivedAt) : 'Awaiting intake'}</Field>
+              <Field label="Deadline">{c.dueAt ? formatDateTime(c.dueAt) : 'Starts on acceptance'}</Field>
             </dl>
             <div className="rounded-md border border-navy-100 bg-navy-50 px-3.5 py-2.5 text-[13px] text-navy-700">
-              {meta.nextActor ? <>Next action: <b>{meta.nextActor === 'Technician' && c.technician ? c.technician.name : meta.nextActor}</b></> : 'Closed — no further action.'}
+              {nextActorLabel(c) ? <>Next action: <b>{nextActorLabel(c)}</b></> : 'Closed — no further action.'}
             </div>
             <div className="no-print">
               <CaseActions c={c} size="md" includeDestructive />
@@ -158,7 +161,7 @@ function CaseDetailView({ c }: { c: CaseDetail }) {
             <CardBody className="flex flex-col gap-4">
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <Field label="Assigned technician">{c.technician ? (can(PERMISSIONS.TECHNICIANS_VIEW) ? <Link className="hover:underline" to={`/technicians/${c.technician.id}`}>{c.technician.name}</Link> : c.technician.name) : 'Not assigned'}</Field>
-                <Field label="Current stage">{meta.stage >= 0 ? WORKFLOW_STAGES[meta.stage].label : meta.label}</Field>
+                <Field label="Current stage">{stageLabel(c.status)}</Field>
                 <Field label="Started">{c.productionStartedAt ? formatDateTime(c.productionStartedAt) : '—'}</Field>
                 <Field label="Completed">{c.productionCompletedAt ? formatDateTime(c.productionCompletedAt) : '—'}</Field>
                 <Field label="Production time" mono>{prodMs !== null ? formatDuration(prodMs) : '—'}</Field>
@@ -244,8 +247,9 @@ function CaseDetailView({ c }: { c: CaseDetail }) {
                 <p className="text-[13px] text-ink-3">Delivery is recorded after quality control passes.</p>
               ) : (
                 <dl className="grid grid-cols-2 gap-3">
-                  <Field label="Status">{delivery.status === 'out_for_delivery' ? 'Out for delivery' : delivery.status === 'delivered' ? 'Delivered' : 'Ready'}</Field>
+                  <Field label="Status">{DELIVERY_STATUS_LABELS[delivery.status]}</Field>
                   <Field label="Method">{DELIVERY_METHOD_LABELS[delivery.method]}</Field>
+                  <Field label="Delivered by">{delivery.recordedByName}</Field>
                   <Field label="Courier">{delivery.courierName || '—'}</Field>
                   <Field label="Dispatched">{delivery.dispatchedAt ? formatDateTime(delivery.dispatchedAt) : '—'}</Field>
                   <Field label="Delivered to">{delivery.deliveredTo || '—'}</Field>

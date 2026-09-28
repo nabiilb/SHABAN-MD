@@ -5,15 +5,15 @@ import { PERMISSIONS } from '@/lib/permissions';
 import { useClinic } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { errorMessage } from '@/services/api/errors';
 import { DetailHeader } from '@/components/directory/detail-header';
 import { ClinicFormDialog, DoctorFormDialog } from '@/components/directory/directory-forms';
 import { CaseMiniTable, RelationStatsGrid } from '@/components/directory/relation-summary';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { ActiveBadge } from '@/components/ui/record-badges';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
-import { ErrorState, PageLoader } from '@/components/ui/feedback';
+import { PageLoader } from '@/components/ui/feedback';
 
 export default function ClinicDetailPage() {
   const { id } = useParams();
@@ -24,7 +24,7 @@ export default function ClinicDetailPage() {
   usePageTitle(k?.name ?? 'Clinic', k?.address);
 
   if (isLoading) return <PageLoader />;
-  if (error || !k) return <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />;
+  if (error || !k) return <QueryError error={error} onRetry={() => void refetch()} />;
 
   return (
     <div className="flex flex-col gap-4">

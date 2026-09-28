@@ -5,16 +5,16 @@ import { PERMISSIONS } from '@/lib/permissions';
 import { useTechnician } from '@/hooks/api/use-directory';
 import { useAuth } from '@/hooks/use-auth';
 import { usePageTitle } from '@/hooks/use-page-title';
-import { errorMessage } from '@/services/api/errors';
 import { formatPercent } from '@/utils/format';
 import { DetailHeader } from '@/components/directory/detail-header';
 import { TechnicianFormDialog } from '@/components/directory/directory-forms';
 import { CaseMiniTable } from '@/components/directory/relation-summary';
 import { StatCard, StatGrid } from '@/components/dashboard/stat-card';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { ActiveBadge } from '@/components/ui/record-badges';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
-import { ErrorState, PageLoader } from '@/components/ui/feedback';
+import { PageLoader } from '@/components/ui/feedback';
 
 export default function TechnicianDetailPage() {
   const { id } = useParams();
@@ -24,7 +24,7 @@ export default function TechnicianDetailPage() {
   usePageTitle(t?.name ?? 'Technician', t ? `${t.specialty} · performance` : undefined);
 
   if (isLoading) return <PageLoader />;
-  if (error || !t) return <ErrorState message={errorMessage(error)} onRetry={() => void refetch()} />;
+  if (error || !t) return <QueryError error={error} onRetry={() => void refetch()} />;
 
   return (
     <div className="flex flex-col gap-4">

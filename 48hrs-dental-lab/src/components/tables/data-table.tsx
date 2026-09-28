@@ -13,9 +13,9 @@ import { cn } from '@/lib/cn';
 import type { PageMeta, SortDir } from '@/types/api';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { EmptyState, ErrorState, Skeleton } from '@/components/ui/feedback';
+import { EmptyState, Skeleton } from '@/components/ui/feedback';
+import { QueryError } from '@/components/ui/query-error';
 import { Menu, MenuCheckboxItem, MenuContent, MenuLabel, MenuTrigger } from '@/components/ui/menu';
-import { errorMessage } from '@/services/api/errors';
 import { Pagination } from './pagination';
 
 declare module '@tanstack/react-table' {
@@ -181,7 +181,7 @@ export function DataTable<T>({
 
         {error ? (
           <div className="p-4">
-            <ErrorState message={errorMessage(error)} onRetry={onRetry} />
+            <QueryError error={error} onRetry={onRetry} />
           </div>
         ) : !isLoading && rows.length === 0 ? (
           <div className="p-4">

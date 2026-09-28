@@ -18,11 +18,6 @@ export function formatMoney(value: number | null | undefined, opts: { compact?: 
   }).format(value);
 }
 
-export function formatNumber(value: number | null | undefined) {
-  if (value === null || value === undefined) return '—';
-  return new Intl.NumberFormat('en-US').format(value);
-}
-
 export function formatPercent(value: number | null | undefined, digits = 0) {
   if (value === null || value === undefined) return '—';
   return `${(value * 100).toFixed(digits)}%`;
