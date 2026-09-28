@@ -10,6 +10,7 @@ use App\Services\AuditLogger;
 use App\Services\DashboardService;
 use App\Services\NoAttendanceService;
 use App\Services\StudentPaymentService;
+use App\Services\StudentProgressService;
 use App\Services\StudentTransferService;
 use App\Support\DocumentNumber;
 use Illuminate\Database\QueryException;
@@ -228,11 +229,17 @@ class StudentController extends Controller
         ]);
     }
 
-    public function update(StudentRequest $request, Student $student): RedirectResponse
+    public function update(StudentRequest $request, Student $student, StudentProgressService $progress): RedirectResponse
     {
         $this->authorize('update', $student);
 
-        DB::transaction(function () use ($request, $student) {
+        // What the form showed the admin when it was drawn. The correction
+        // fires only if they typed something else over it, so leaving the
+        // field alone while changing the course length lets the balance go on
+        // being worked out the way it always was.
+        $remainingOnScreen = $student->remaining_days;
+
+        DB::transaction(function () use ($request, $student, $progress, $remainingOnScreen) {
             $original = $student->getOriginal();
             // studentData(), not validated(): an edit never carries payment
             // fields, and changing the Total Fee moves what is owed without
@@ -257,6 +264,25 @@ class StudentController extends Controller
             }
 
             AuditLogger::updated($student, "Student {$student->full_name} updated", $original);
+
+            // Then the balance, through the one service both screens use. It
+            // runs after the ordinary update so the course length it checks
+            // against is the one just saved, and it writes no column of its
+            // own: it moves the opening balance the figure is derived from.
+            $corrected = $request->correctedRemainingDays();
+
+            if ($corrected !== null && $corrected !== $remainingOnScreen) {
+                $progress->correctRemaining(
+                    $student->refresh(),
+                    $corrected,
+                    $request->user(),
+                    source: 'admin student edit',
+                    // An administrator putting the record right may reopen a
+                    // student the school had finished with; an instructor at
+                    // the console may not.
+                    mayReopenCompleted: true,
+                );
+            }
         });
 
         return redirect()

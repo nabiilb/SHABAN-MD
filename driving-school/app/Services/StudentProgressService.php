@@ -79,10 +79,25 @@ class StudentProgressService
      * as it was — correcting a balance is not a decision about whether
      * somebody has finished.
      *
+     * Two screens call this and there is one calculation behind both: the
+     * instructor's queue dialog and the admin's student form. They differ only
+     * in what they are allowed to do about a student the school has finished
+     * with — an instructor cannot reopen one, and an administrator correcting
+     * the record deliberately can, because leaving somebody marked finished
+     * with five days left is a worse record than either.
+     *
+     * @param  string  $source  where the correction came from, for the audit trail
+     * @param  bool  $mayReopenCompleted  whether a finished student may be set back to active
+     *
      * @throws InvalidArgumentException when the figure is not one this course can have
      */
-    public function correctRemaining(Student $student, int $remaining, User $actor): Student
-    {
+    public function correctRemaining(
+        Student $student,
+        int $remaining,
+        User $actor,
+        string $source = 'training queue correction',
+        bool $mayReopenCompleted = false,
+    ): Student {
         $required = (int) $student->required_training_days;
 
         if ($remaining < 0) {
@@ -95,12 +110,22 @@ class StudentProgressService
             ]));
         }
 
-        return DB::transaction(function () use ($student, $remaining, $actor) {
+        return DB::transaction(function () use ($student, $remaining, $actor, $source, $mayReopenCompleted) {
             $student = Student::query()->lockForUpdate()->findOrFail($student->getKey());
 
             $original = $student->getOriginal();
             $before = $student->remaining_days;
+            $beforeStatus = $student->status;
             $baseline = today()->toDateString();
+
+            // A finished student reads as nought remaining whatever the balance
+            // says, so a correction to a positive figure would be stored and
+            // never shown. Rather than leave that quietly impossible, the
+            // student is set back to active — but only where the caller has the
+            // standing to do it.
+            $reopening = $remaining > 0
+                && $student->hasCompletedTraining()
+                && $mayReopenCompleted;
 
             $trainedSince = (int) Attendance::query()
                 ->where('student_id', $student->getKey())
@@ -112,28 +137,31 @@ class StudentProgressService
             $student->forceFill([
                 'opening_remaining_days' => $remaining + $trainedSince,
                 'opening_remaining_from' => $baseline,
-            ])->save();
+            ] + ($reopening ? ['status' => Student::ACTIVE, 'completion_date' => null] : []))->save();
 
             $student->refresh();
 
             AuditLogger::log(
                 'student.remaining_corrected',
                 $student,
-                __(':name — remaining days corrected from :before to :after by :actor (training queue correction)', [
+                __(':name — remaining days corrected from :before to :after by :actor (:source)', [
                     'name' => $student->full_name,
                     'before' => $before,
                     'after' => $student->remaining_days,
                     'actor' => $actor->name,
-                ]),
-                ['remaining_days' => $before] + array_intersect_key($original, array_flip([
-                    'opening_remaining_days', 'opening_remaining_from',
-                ])),
+                    'source' => $source,
+                ]).($reopening ? ' '.__('Reopened from completed to active.') : ''),
+                [
+                    'remaining_days' => $before,
+                    'opening_remaining_days' => $original['opening_remaining_days'] ?? null,
+                    'opening_remaining_from' => $original['opening_remaining_from'] ?? null,
+                ] + ($reopening ? ['status' => $beforeStatus] : []),
                 [
                     'remaining_days' => $student->remaining_days,
                     'opening_remaining_days' => $student->opening_remaining_days,
                     'opening_remaining_from' => $student->opening_remaining_from?->toDateString(),
-                    'source' => 'training queue correction',
-                ],
+                    'source' => $source,
+                ] + ($reopening ? ['status' => $student->status] : []),
             );
 
             return $student;

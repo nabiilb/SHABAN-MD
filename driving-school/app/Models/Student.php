@@ -20,6 +20,9 @@ class Student extends Model
     /** The status that declares a student's training finished. */
     public const COMPLETED = 'completed';
 
+    /** And the one it goes back to when the school finds days still to run. */
+    public const ACTIVE = 'active';
+
     protected $fillable = [
         'student_number',
         'user_id',

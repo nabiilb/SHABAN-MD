@@ -92,6 +92,21 @@
                                value="{{ old('required_training_days', $student->required_training_days ?: 24) }}" class="input">
                     </x-field>
 
+                    {{-- Only on an edit. A student being registered has not
+                         trained yet, so the whole course is what is left and
+                         there is nothing to put right. --}}
+                    @if ($student->exists)
+                        <x-field name="remaining_training_days" :label="__('Remaining Training Days')" required>
+                            <input id="remaining_training_days" name="remaining_training_days" type="number"
+                                   inputmode="numeric" min="0" max="365" required
+                                   value="{{ old('remaining_training_days', $student->remaining_days) }}"
+                                   class="input @error('remaining_training_days') input-error @enderror">
+                            <p class="mt-1 text-xs text-slate-500">
+                                {{ __('Changing this corrects the student\'s current remaining balance. It does not create attendance records.') }}
+                            </p>
+                        </x-field>
+                    @endif
+
                     <x-field name="current_instructor_id" :label="__('Current Instructor')">
                         <select id="current_instructor_id" name="current_instructor_id" class="input">
                             <option value="">{{ __('Unassigned') }}</option>

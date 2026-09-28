@@ -52,6 +52,24 @@ class StudentRequest extends FormRequest
             'required_training_days' => ['required', 'integer', 'min:1', 'max:365'],
             'current_instructor_id' => ['nullable', 'integer', Rule::exists('instructors', 'id')->whereNull('deleted_at')],
             'status' => ['required', Rule::in(Student::STATUSES)],
+
+            // Only on an edit: a student being registered has not trained yet,
+            // so the whole course is what is left and there is nothing to put
+            // right. Checked against the Required Training Days submitted on
+            // this form, not the one on file, because an admin may be changing
+            // both at once and the new course length is what the balance has
+            // to fit inside.
+            ...$this->isRegistration() ? [] : [
+                'remaining_training_days' => [
+                    // 'sometimes' so that only the form which offers the field
+                    // has to carry it: the edit screen always sends it, and a
+                    // caller that never showed it is not made to invent one.
+                    // Sent empty it still fails, which is what a cleared box
+                    // should do.
+                    'sometimes', 'required', 'integer', 'min:0',
+                    'max:'.max((int) $this->input('required_training_days'), 0),
+                ],
+            ],
             'total_fee' => ['nullable', 'numeric', 'min:0', 'max:9999999.99'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'profile_photo' => ['nullable', 'image', 'max:2048'],
@@ -77,7 +95,21 @@ class StudentRequest extends FormRequest
     /** The student's own columns, with the payment fields taken out. */
     public function studentData(): array
     {
-        return array_diff_key($this->validated(), array_flip(self::PAYMENT_FIELDS));
+        // Remaining days is not a column and never was: it is calculated, and
+        // correcting it means moving the opening balance it is calculated
+        // from. The controller hands it to StudentProgressService instead.
+        return array_diff_key(
+            $this->validated(),
+            array_flip([...self::PAYMENT_FIELDS, 'remaining_training_days']),
+        );
+    }
+
+    /** The figure the admin typed into Remaining Training Days, if any. */
+    public function correctedRemainingDays(): ?int
+    {
+        return $this->isRegistration() || ! $this->has('remaining_training_days')
+            ? null
+            : (int) $this->validated('remaining_training_days');
     }
 
     /**
