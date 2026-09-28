@@ -2,7 +2,7 @@
  * The only code path that records money. Runs inside the caller's transaction:
  * locks the invoice row (SELECT … FOR UPDATE) so two cashiers cannot both take
  * the last balance, validates with the shared rules (remaining = total − paid,
- * amount > 0 and ≤ remaining, reference for non-cash) and keeps
+ * amount > 0 and ≤ remaining, reference for non-cash and never reused) and keeps
  * invoices.amount_paid equal to the sum of its payments.
  */
 import { paymentReferenceRequired, round2, validatePaymentAmount } from '@48hrs/shared/billing';
@@ -33,6 +33,14 @@ export async function recordPaymentTx(tx: Tx, invoiceId: string, input: PaymentI
   if (amountError) errors[`${prefix}amount`] = [amountError];
   if (paymentReferenceRequired(input.method) && !input.reference?.trim()) errors[`${prefix}reference`] = ['Enter the transaction reference.'];
   if (input.paidAt && input.paidAt.getTime() > now + 60_000) errors[`${prefix}paidAt`] = ['Payment date cannot be in the future.'];
+  // A transaction reference identifies one real payment: recording it twice is a double entry.
+  // The advisory lock serialises concurrent attempts with the same reference until commit.
+  const reference = input.reference?.trim() ?? '';
+  if (reference && !errors[`${prefix}reference`]) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`payment-reference:${reference}`}))`;
+    const duplicate = await tx.payment.findFirst({ where: { reference }, select: { invoice: { select: { invoiceNumber: true } } } });
+    if (duplicate) errors[`${prefix}reference`] = [`This reference is already recorded on ${duplicate.invoice.invoiceNumber}.`];
+  }
   throwIfErrors(errors);
 
   const amount = round2(input.amount);
@@ -41,7 +49,7 @@ export async function recordPaymentTx(tx: Tx, invoiceId: string, input: PaymentI
       invoiceId,
       amount,
       method: input.method,
-      reference: input.reference?.trim() ?? '',
+      reference,
       notes: input.notes?.trim() ?? '',
       receivedById,
       paidAt: input.paidAt ?? new Date(now),

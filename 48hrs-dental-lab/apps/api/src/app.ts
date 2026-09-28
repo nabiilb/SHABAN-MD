@@ -28,7 +28,8 @@ export function createApp() {
       pinoHttp({
         logger,
         autoLogging: { ignore: (req) => req.url === '/api/health' },
-        serializers: { req: (req: { id: unknown; method: string; url: string }) => ({ id: req.id, method: req.method, url: req.url }), res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }) },
+        // Paths only: query strings carry search terms (patient names, phone numbers).
+        serializers: { req: (req: { id: unknown; method: string; url: string }) => ({ id: req.id, method: req.method, url: req.url.split('?')[0] }), res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }) },
       }),
     );
   }

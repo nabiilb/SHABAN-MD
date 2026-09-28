@@ -222,3 +222,36 @@ test('session expiration: silent refresh, then sign-out and return after the ses
   await page.click('button[type=submit]');
   await page.waitForURL(/\/payments$/);
 });
+
+test('global search finds cases and patients from PostgreSQL, within the user\'s scope', async ({ page }) => {
+  watchConsole(page);
+  await signIn(page, 'sagal@48hrs.lab');
+  const patient = `Searchable Warsame ${Date.now().toString(36)}`;
+  const c = await registerCase(page, { patient });
+
+  const search = async (term: string) => {
+    await page.getByRole('button', { name: 'Search cases, patients, doctors, clinics and invoices' }).click();
+    await page.getByPlaceholder('Case ID, patient, doctor, clinic, phone or invoice…').fill(term);
+  };
+  const results = () => page.getByRole('dialog', { name: 'Global search' });
+
+  await search(c.caseNumber);
+  await results().getByRole('group', { name: 'Cases' }).getByRole('option', { name: new RegExp(c.caseNumber) }).click();
+  await page.waitForURL(`**/cases/${c.id}`);
+
+  await search(patient);
+  await expect(results().getByRole('group', { name: 'Cases' }).getByRole('option', { name: new RegExp(c.caseNumber) })).toBeVisible();
+  await results().getByRole('group', { name: 'Patients' }).getByRole('option', { name: new RegExp(patient) }).click();
+  await page.waitForURL(/\/patients\/[\w-]+$/);
+
+  await search('zzqx-no-such-thing');
+  await expect(results().getByText('No results for “zzqx-no-such-thing”.')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // A clinic user never finds another clinic's case, even by its exact number.
+  const { rows: [foreign] } = await db.query(`SELECT "caseNumber" FROM cases WHERE "clinicId" <> 'cln_smile' ORDER BY "createdAt" DESC LIMIT 1`);
+  await signIn(page, 'amina@smiledental.so');
+  await search(foreign.caseNumber);
+  await expect(results().getByText(`No results for “${foreign.caseNumber}”.`)).toBeVisible();
+  expect(consoleErrors).toEqual([]);
+});

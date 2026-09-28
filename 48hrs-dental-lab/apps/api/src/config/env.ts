@@ -82,14 +82,18 @@ const schema = z
       if (!v.COOKIE_SECURE) ctx.addIssue({ code: 'custom', path: ['COOKIE_SECURE'], message: 'Cookies must be Secure in production' });
       if (!v.CORS_ORIGINS.length) ctx.addIssue({ code: 'custom', path: ['CORS_ORIGINS'], message: 'Set the allowed web origin(s) in production' });
       if (v.MAIL_TRANSPORT === 'log') ctx.addIssue({ code: 'custom', path: ['MAIL_TRANSPORT'], message: 'Configure SMTP in production so reset links are e-mailed, not logged' });
+      if (!/^https:\/\//.test(v.APP_URL) || /localhost|127\.0\.0\.1/.test(v.APP_URL)) ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'Set APP_URL to the public https:// address of the web app' });
+      if (v.CORS_ORIGINS.some((o) => !o.startsWith('https://'))) ctx.addIssue({ code: 'custom', path: ['CORS_ORIGINS'], message: 'Production origins must be https://' });
+      if (/localhost/.test(v.MAIL_FROM)) ctx.addIssue({ code: 'custom', path: ['MAIL_FROM'], message: 'Set MAIL_FROM to a real sender address' });
     }
     if (v.COOKIE_SAMESITE === 'none' && !v.COOKIE_SECURE) ctx.addIssue({ code: 'custom', path: ['COOKIE_SAMESITE'], message: 'SameSite=None requires COOKIE_SECURE=true' });
   });
 
 export type Env = z.infer<typeof schema>;
 
-function load(): Env {
-  const parsed = schema.safeParse(process.env);
+/** Validates a configuration source; throws with every problem listed. Exported for the config tests. */
+export function parseEnv(source: Record<string, string | undefined>): Env {
+  const parsed = schema.safeParse(source);
   if (!parsed.success) {
     const lines = parsed.error.issues.map((i) => `  - ${i.path.join('.') || 'env'}: ${i.message}`);
     throw new Error(`Invalid configuration:\n${lines.join('\n')}`);
@@ -97,6 +101,6 @@ function load(): Env {
   return parsed.data;
 }
 
-export const env = load();
+export const env = parseEnv(process.env);
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';

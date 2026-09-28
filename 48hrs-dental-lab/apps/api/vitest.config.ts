@@ -42,6 +42,7 @@ export default defineConfig({
       SESSION_TTL_MINUTES: '480',
       LOGIN_MAX_ATTEMPTS: '5',
       LOGIN_LOCK_MINUTES: '15',
+      MAX_UPLOAD_MB: '1', // small, so the size limit is exercised cheaply
     },
   },
 });

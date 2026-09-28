@@ -628,6 +628,7 @@ model Payment {
   @@index([invoiceId])
   @@index([paidAt])
   @@index([method])
+  @@index([reference])
   @@map("payments")
 }
 

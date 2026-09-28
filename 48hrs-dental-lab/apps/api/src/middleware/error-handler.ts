@@ -56,6 +56,6 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
       return;
     }
   }
-  logger.error({ err, method: req.method, url: req.originalUrl }, 'unhandled error');
+  logger.error({ err, method: req.method, url: req.originalUrl.split('?')[0] }, 'unhandled error');
   res.status(500).json({ message: API_ERRORS.server });
 };
