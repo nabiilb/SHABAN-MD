@@ -3,11 +3,15 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
+import { resolveApiBase } from './src/config/api-base';
 
 export default defineConfig(({ mode }) => {
   // /api is proxied to the Node API in dev and preview, so the SPA and the API
   // share one origin and the session cookies stay first-party.
-  const apiTarget = loadEnv(mode, process.cwd(), '').API_PROXY_TARGET || 'http://localhost:4000';
+  const fileEnv = loadEnv(mode, process.cwd(), '');
+  const apiTarget = fileEnv.API_PROXY_TARGET || 'http://localhost:4000';
+  // Fail the dev server / build on a VITE_API_URL that does not end in /api.
+  resolveApiBase(process.env.VITE_API_URL ?? fileEnv.VITE_API_URL);
   const proxy = { '/api': { target: apiTarget, changeOrigin: false } };
 
   return {
