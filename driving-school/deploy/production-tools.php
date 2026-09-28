@@ -55,6 +55,13 @@ const ALLOWED = [
     'student-import-dry-run' => ['alpha-school:import', ['--dry-run' => true],
         'Register import — report only, writes nothing', false],
 
+    'alpha-school-sync-dry-run' => ['alpha-school:sync',
+        ['--file' => LARAVEL_PATH.'/storage/app/imports/ALPHA SCHOOL 2.xlsx', '--dry-run' => true, '--details' => 0],
+        'ALPHA SCHOOL 2 — what a newer register would change. Writes nothing.', false],
+    'alpha-school-sync' => ['alpha-school:sync',
+        ['--file' => LARAVEL_PATH.'/storage/app/imports/ALPHA SCHOOL 2.xlsx', '--confirm' => true, '--details' => 0],
+        'ALPHA SCHOOL 2 — REAL. Updates and creates students. Never deletes.', 'YES_SYNC_ALPHA_SCHOOL_2'],
+
     'alpha-expenses-import-dry-run' => ['alpha:import-expenses', ['--dry-run' => true, '--preview' => 0],
         'Expense ledger — report only, writes nothing', false],
     'alpha-expenses-import' => ['alpha:import-expenses', ['--confirm' => true, '--preview' => 0],
@@ -74,6 +81,12 @@ const SOURCE_FILES = [
     'progress-repair' => 'storage/app/imports/ALPHA SCHOOL.xlsx',
     'alpha-expenses-import-dry-run' => 'storage/app/imports/DEYNTA BISHI AAN ISTICMAALNAY ALPHA DRIVING SCHOOL.docx',
     'alpha-expenses-import' => 'storage/app/imports/DEYNTA BISHI AAN ISTICMAALNAY ALPHA DRIVING SCHOOL.docx',
+
+    // The sync reads the NEW book and only the new book. Named here as well as
+    // in the command's options so the page can say which file it is about to
+    // read, and refuse if that file is not the one on the server.
+    'alpha-school-sync-dry-run' => 'storage/app/imports/ALPHA SCHOOL 2.xlsx',
+    'alpha-school-sync' => 'storage/app/imports/ALPHA SCHOOL 2.xlsx',
 ];
 
 /** Refused no matter how they arrive. */
@@ -123,10 +136,18 @@ if ($key !== null) {
 
         if (isset(SOURCE_FILES[$key])) {
             $file = LARAVEL_PATH.'/'.SOURCE_FILES[$key];
-            $log[] = 'Source file:  '.SOURCE_FILES[$key];
-            $log[] = '  present:    '.(is_readable($file)
-                ? 'yes, '.number_format(filesize($file)).' bytes, sha256 '.substr(hash_file('sha256', $file), 0, 16).'…'
-                : 'NO — the command will report this and do nothing');
+            $log[] = 'Source file:  '.$file;
+
+            if (is_readable($file)) {
+                $log[] = '  size:       '.number_format(filesize($file)).' bytes';
+                $log[] = '  modified:   '.date('Y-m-d H:i:s', filemtime($file));
+                $log[] = '  SHA-256:    '.hash_file('sha256', $file);
+            } else {
+                // Never quietly fall back to another workbook: a sync that
+                // reads last month's book would undo this month's corrections.
+                $error = 'Refused: '.SOURCE_FILES[$key].' is not on the server. Upload it first.';
+                $log = [];
+            }
         }
 
         $log[] = $writes
