@@ -1,0 +1,673 @@
+// 48HRS Dental Lab — PostgreSQL schema.
+// Money is DECIMAL(12,2); timestamps are timestamptz. Business rules (workflow,
+// SLA, billing) live in packages/shared and are enforced by apps/api services.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../apps/api/src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/* ------------------------------------------------------------------ */
+/* Enums                                                               */
+/* ------------------------------------------------------------------ */
+
+enum RecordStatus {
+  active
+  inactive
+}
+
+enum Gender {
+  male
+  female
+}
+
+enum CaseType {
+  crown
+  bridge
+  veneer
+  implant
+  denture
+  appliance
+}
+
+enum ServiceUnitMode {
+  tooth
+  denture
+  arch
+}
+
+/// Declared in workflow order so ORDER BY status follows the production line.
+enum CaseStatus {
+  submitted
+  correction
+  received
+  review
+  assigned
+  in_production
+  rework
+  quality_control
+  ready
+  out_for_delivery
+  delivered
+  completed
+  cancelled
+  rejected
+}
+
+/// Declared by severity so ORDER BY priority sorts normal → urgent.
+enum CasePriority {
+  normal
+  high
+  urgent
+}
+
+enum DentureType {
+  full_upper
+  full_lower
+  upper_lower
+  partial
+}
+
+enum AttachmentCategory {
+  photo
+  scan
+  xray
+  prescription
+  document
+  production
+  qc
+}
+
+enum QcResult {
+  passed
+  failed
+}
+
+enum QcIssueKind {
+  fit
+  margins
+  occlusion
+  contacts
+  shade
+  contour
+  finish
+  other
+}
+
+enum DeliveryMethod {
+  clinic_pickup
+  lab_courier
+  third_party
+}
+
+enum DeliveryStatus {
+  ready
+  out_for_delivery
+  delivered
+}
+
+enum PaymentMethod {
+  cash
+  bank_transfer
+  mobile_money
+  card
+  other
+}
+
+enum NotificationType {
+  case_submitted
+  case_received
+  case_assigned
+  deadline_approaching
+  case_overdue
+  qc_required
+  qc_failed
+  case_ready
+  case_dispatched
+  case_delivered
+  correction_requested
+  payment_received
+}
+
+/* ------------------------------------------------------------------ */
+/* Access control                                                      */
+/* ------------------------------------------------------------------ */
+
+model Role {
+  key         String           @id
+  name        String
+  description String
+  /// Super Admin: always every permission, not editable.
+  locked      Boolean          @default(false)
+  permissions RolePermission[]
+  users       User[]
+  createdAt   DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime         @updatedAt @db.Timestamptz(3)
+
+  @@map("roles")
+}
+
+model Permission {
+  key         String           @id
+  label       String
+  group       String
+  description String?
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleKey       String
+  permissionKey String
+  role          Role       @relation(fields: [roleKey], references: [key], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+
+  @@id([roleKey, permissionKey])
+  @@index([permissionKey])
+  @@map("role_permissions")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  /// Stored lower-case.
+  email        String    @unique
+  phone        String    @default("")
+  /// scrypt hash (see apps/api/src/lib/password.ts). Never plain text.
+  passwordHash String
+  roleKey      String
+  role         Role      @relation(fields: [roleKey], references: [key])
+  active       Boolean   @default(true)
+  /// Client-portal users: the clinic whose cases they may see.
+  clinicId     String?
+  clinic       Clinic?   @relation(fields: [clinicId], references: [id], onDelete: SetNull)
+  /// Doctors who log into the client portal.
+  doctorId     String?
+  doctor       Doctor?   @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  lastLoginAt  DateTime? @db.Timestamptz(3)
+  /// Consecutive failed sign-ins; reset on success. Stored here so lockout works across API instances.
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  technician         Technician?
+  sessions           Session[]
+  resetTokens        PasswordResetToken[]
+  notifications      Notification[]
+  activity           ActivityLog[]
+  createdCases       DentalCase[]         @relation("CaseCreatedBy")
+  statusChanges      CaseStatusHistory[]
+  notes              CaseNote[]
+  uploads            CaseAttachment[]
+  qualityChecks      QualityCheck[]
+  deliveriesRecorded Delivery[]
+  paymentsReceived   Payment[]
+  assignmentsMade    CaseAssignment[]
+
+  @@index([roleKey])
+  @@index([clinicId])
+  @@map("users")
+}
+
+/// One row per sign-in. The refresh token is stored only as a SHA-256 hash and rotated on every refresh.
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  /// Absolute end of the session; refreshing never extends it.
+  expiresAt        DateTime  @db.Timestamptz(3)
+  revokedAt        DateTime? @db.Timestamptz(3)
+  lastUsedAt       DateTime  @default(now()) @db.Timestamptz(3)
+  userAgent        String?
+  ip               String?
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+/* ------------------------------------------------------------------ */
+/* Directory                                                           */
+/* ------------------------------------------------------------------ */
+
+model Clinic {
+  id            String       @id @default(cuid())
+  name          String
+  contactPerson String       @default("")
+  phone         String
+  email         String       @default("")
+  address       String       @default("")
+  status        RecordStatus @default(active)
+  notes         String       @default("")
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(3)
+
+  doctors  Doctor[]
+  patients Patient[]
+  cases    DentalCase[]
+  invoices Invoice[]
+  users    User[]
+
+  @@index([name])
+  @@index([status])
+  @@map("clinics")
+}
+
+model Doctor {
+  id        String       @id @default(cuid())
+  name      String
+  clinicId  String
+  clinic    Clinic       @relation(fields: [clinicId], references: [id], onDelete: Restrict)
+  phone     String
+  email     String       @default("")
+  specialty String       @default("")
+  status    RecordStatus @default(active)
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime     @updatedAt @db.Timestamptz(3)
+
+  cases    DentalCase[]
+  invoices Invoice[]
+  users    User[]
+
+  @@index([clinicId])
+  @@index([name])
+  @@index([status])
+  @@map("doctors")
+}
+
+model Patient {
+  id          String    @id @default(cuid())
+  /// Human-readable reference, e.g. PT-1024.
+  code        String    @unique
+  name        String
+  phone       String    @default("")
+  email       String    @default("")
+  gender      Gender?
+  dateOfBirth DateTime? @db.Date
+  clinicId    String?
+  clinic      Clinic?   @relation(fields: [clinicId], references: [id], onDelete: SetNull)
+  notes       String    @default("")
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  cases    DentalCase[]
+  invoices Invoice[]
+
+  @@index([name])
+  @@index([phone])
+  @@index([clinicId])
+  @@map("patients")
+}
+
+model Technician {
+  id        String   @id @default(cuid())
+  userId    String?  @unique
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name      String
+  email     String   @unique
+  phone     String
+  specialty String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  cases       DentalCase[]
+  assignments CaseAssignment[]
+
+  @@index([name])
+  @@map("technicians")
+}
+
+/* ------------------------------------------------------------------ */
+/* Catalogue & settings                                                */
+/* ------------------------------------------------------------------ */
+
+model LabService {
+  id              String          @id @default(cuid())
+  name            String
+  caseType        CaseType
+  unitMode        ServiceUnitMode
+  unitPrice       Decimal         @db.Decimal(12, 2)
+  defaultMaterial String
+  active          Boolean         @default(true)
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @db.Timestamptz(3)
+
+  cases DentalCase[]
+
+  @@map("lab_services")
+}
+
+/// Key/value settings; the "lab" key holds LabSettings (validated by the API).
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("settings")
+}
+
+/// Atomic counters for human-readable numbers (case, invoice, patient).
+model Sequence {
+  name  String @id
+  value Int
+
+  @@map("sequences")
+}
+
+/* ------------------------------------------------------------------ */
+/* Cases                                                               */
+/* ------------------------------------------------------------------ */
+
+model DentalCase {
+  id              String        @id @default(cuid())
+  /// Display number, e.g. DL-2026-00126.
+  caseNumber      String        @unique
+  patientId       String
+  patient         Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctorId        String
+  doctor          Doctor        @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  clinicId        String
+  clinic          Clinic        @relation(fields: [clinicId], references: [id], onDelete: Restrict)
+  serviceId       String
+  service         LabService    @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  caseType        CaseType
+  restorationType String
+  material        String
+  shade           String
+  /// Universal numbering 1–32.
+  teeth           Int[]
+  dentureType     DentureType?
+  units           Int
+  unitPrice       Decimal       @db.Decimal(12, 2)
+  emergencyFee    Decimal       @db.Decimal(12, 2)
+  total           Decimal       @db.Decimal(12, 2)
+  priority        CasePriority  @default(normal)
+  status          CaseStatus
+  technicianId    String?
+  technician      Technician?   @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+  instructions    String        @default("")
+  reworkCount     Int           @default(0)
+
+  submittedAt           DateTime? @db.Timestamptz(3)
+  /// When the lab accepted the case — the SLA clock starts here (server time).
+  receivedAt            DateTime? @db.Timestamptz(3)
+  /// receivedAt + SLA hours.
+  dueAt                 DateTime? @db.Timestamptz(3)
+  assignedAt            DateTime? @db.Timestamptz(3)
+  productionStartedAt   DateTime? @db.Timestamptz(3)
+  productionCompletedAt DateTime? @db.Timestamptz(3)
+  qcCompletedAt         DateTime? @db.Timestamptz(3)
+  readyAt               DateTime? @db.Timestamptz(3)
+  deliveredAt           DateTime? @db.Timestamptz(3)
+  completedAt           DateTime? @db.Timestamptz(3)
+  cancelledAt           DateTime? @db.Timestamptz(3)
+  /// Set by the deadline worker so each alert is raised once.
+  atRiskNotifiedAt      DateTime? @db.Timestamptz(3)
+  overdueNotifiedAt     DateTime? @db.Timestamptz(3)
+
+  createdById String
+  createdBy   User     @relation("CaseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  notes         CaseNote[]
+  history       CaseStatusHistory[]
+  assignments   CaseAssignment[]
+  attachments   CaseAttachment[]
+  qualityChecks QualityCheck[]
+  deliveries    Delivery[]
+  invoice       Invoice?
+  notifications Notification[]
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([clinicId])
+  @@index([technicianId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueAt])
+  @@index([receivedAt])
+  @@index([createdAt])
+  @@index([status, dueAt])
+  @@map("cases")
+}
+
+model CaseNote {
+  id        String     @id @default(cuid())
+  caseId    String
+  case      DentalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  text      String
+  authorId  String
+  author    User       @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  createdAt DateTime   @default(now()) @db.Timestamptz(3)
+
+  @@index([caseId, createdAt])
+  @@map("case_notes")
+}
+
+/// Every status transition, with who made it and why.
+model CaseStatusHistory {
+  id         String      @id @default(cuid())
+  caseId     String
+  case       DentalCase  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  fromStatus CaseStatus?
+  toStatus   CaseStatus
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  /// Role at the time of the change (roles can change later).
+  userRole   String
+  note       String?
+  createdAt  DateTime    @default(now()) @db.Timestamptz(3)
+
+  @@index([caseId, createdAt])
+  @@index([userId])
+  @@map("case_status_history")
+}
+
+/// Technician assignments over time (reassignments close the previous row).
+model CaseAssignment {
+  id           String     @id @default(cuid())
+  caseId       String
+  case         DentalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  technicianId String
+  technician   Technician @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+  assignedById String
+  assignedBy   User       @relation(fields: [assignedById], references: [id], onDelete: Restrict)
+  note         String?
+  assignedAt   DateTime   @default(now()) @db.Timestamptz(3)
+  unassignedAt DateTime?  @db.Timestamptz(3)
+
+  @@index([caseId])
+  @@index([technicianId])
+  @@map("case_assignments")
+}
+
+/// File metadata; the bytes live in UPLOAD_DIR under an opaque storage key.
+model CaseAttachment {
+  id           String             @id @default(cuid())
+  caseId       String
+  case         DentalCase         @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  /// Original file name, for display and download only.
+  name         String
+  /// Random server-side name; never derived from user input and never exposed.
+  storageKey   String             @unique
+  mimeType     String
+  extension    String
+  size         Int
+  category     AttachmentCategory
+  uploadedById String
+  uploadedBy   User               @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@index([caseId])
+  @@map("case_attachments")
+}
+
+model QualityCheck {
+  id             String         @id @default(cuid())
+  caseId         String
+  case           DentalCase     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  result         QcResult
+  reworkRequired Boolean
+  notes          String         @default("")
+  checkedById    String
+  checkedBy      User           @relation(fields: [checkedById], references: [id], onDelete: Restrict)
+  checkedAt      DateTime       @default(now()) @db.Timestamptz(3)
+  issues         QualityIssue[]
+
+  @@index([caseId])
+  @@index([checkedAt])
+  @@index([result])
+  @@map("quality_checks")
+}
+
+model QualityIssue {
+  id             String       @id @default(cuid())
+  qualityCheckId String
+  qualityCheck   QualityCheck @relation(fields: [qualityCheckId], references: [id], onDelete: Cascade)
+  issue          QcIssueKind
+
+  @@unique([qualityCheckId, issue])
+  @@map("quality_issues")
+}
+
+model Delivery {
+  id           String         @id @default(cuid())
+  caseId       String
+  case         DentalCase     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  status       DeliveryStatus @default(ready)
+  method       DeliveryMethod
+  courierName  String?
+  deliveredTo  String?
+  receivedBy   String?
+  notes        String?
+  dispatchedAt DateTime?      @db.Timestamptz(3)
+  deliveredAt  DateTime?      @db.Timestamptz(3)
+  /// Who last recorded a step (dispatch / hand-over): "delivered by".
+  recordedById String
+  recordedBy   User           @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime       @updatedAt @db.Timestamptz(3)
+
+  @@index([caseId])
+  @@index([status])
+  @@map("deliveries")
+}
+
+/* ------------------------------------------------------------------ */
+/* Finance                                                             */
+/* ------------------------------------------------------------------ */
+
+model Invoice {
+  id            String     @id @default(cuid())
+  invoiceNumber String     @unique
+  caseId        String     @unique
+  case          DentalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  patientId     String
+  patient       Patient    @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctorId      String
+  doctor        Doctor     @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  clinicId      String
+  clinic        Clinic     @relation(fields: [clinicId], references: [id], onDelete: Restrict)
+  subtotal      Decimal    @db.Decimal(12, 2)
+  emergencyFee  Decimal    @db.Decimal(12, 2)
+  discount      Decimal    @default(0) @db.Decimal(12, 2)
+  total         Decimal    @db.Decimal(12, 2)
+  /// Sum of payments, maintained in the same transaction as each payment.
+  amountPaid    Decimal    @default(0) @db.Decimal(12, 2)
+  issuedAt      DateTime   @default(now()) @db.Timestamptz(3)
+  dueDate       DateTime   @db.Timestamptz(3)
+  createdAt     DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime   @updatedAt @db.Timestamptz(3)
+
+  payments Payment[]
+
+  @@index([clinicId])
+  @@index([doctorId])
+  @@index([patientId])
+  @@index([issuedAt])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+model Payment {
+  id           String        @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amount       Decimal       @db.Decimal(12, 2)
+  method       PaymentMethod
+  reference    String        @default("")
+  notes        String        @default("")
+  receivedById String
+  receivedBy   User          @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+  paidAt       DateTime      @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@index([invoiceId])
+  @@index([paidAt])
+  @@index([method])
+  @@map("payments")
+}
+
+/* ------------------------------------------------------------------ */
+/* Notifications & audit                                               */
+/* ------------------------------------------------------------------ */
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  caseId    String?
+  case      DentalCase?      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  readAt    DateTime?        @db.Timestamptz(3)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@index([caseId])
+  @@map("notifications")
+}
+
+model ActivityLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Kept so the trail survives user deletion.
+  userName     String
+  action       String
+  description  String
+  subjectType  String
+  subjectId    String?
+  subjectLabel String?
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@index([subjectType, subjectId])
+  @@index([userId])
+  @@map("activity_log")
+}

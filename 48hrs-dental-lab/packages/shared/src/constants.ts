@@ -4,6 +4,7 @@ import type {
   CaseType,
   DeliveryMethod,
   DeliveryStatus,
+  LabSettings,
   NotificationType,
   PaymentMethod,
   PaymentStatus,
@@ -126,3 +127,17 @@ export function validateFile(file: { name: string; size: number }): string | nul
   if (file.size > MAX_FILE_MB * 1_048_576) return `Larger than the ${MAX_FILE_MB} MB limit.`;
   return null;
 }
+
+/** Settings used until an administrator saves their own (Settings → Lab profile & SLA). */
+export const DEFAULT_LAB_SETTINGS: LabSettings = {
+  labName: '48HRS Dental Lab',
+  phone: '',
+  email: '',
+  address: '',
+  currency: 'USD',
+  slaHours: 48,
+  atRiskHours: 12,
+  criticalHours: 4,
+  emergencyFeePerUnit: 5,
+  invoiceDueDays: 14,
+};

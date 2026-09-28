@@ -6,3 +6,8 @@ dist
 !.env.example
 coverage
 *.tsbuildinfo
+apps/api/src/generated
+apps/api/storage
+storage
+playwright-report
+test-results

@@ -27,6 +27,7 @@ import type {
   InvoiceRecord,
   User,
 } from './types';
+import { DEFAULT_LAB_SETTINGS } from './constants';
 import { DEFAULT_ROLES } from './permissions';
 import { HOUR_MS } from './sla';
 import { round2 } from './billing';
@@ -48,16 +49,10 @@ function mulberry32(seed: number) {
 }
 
 export const SEED_SETTINGS: LabSettings = {
-  labName: '48HRS Dental Lab',
+  ...DEFAULT_LAB_SETTINGS,
   phone: '+252 61 000 4848',
   email: 'lab@48hrs.lab',
   address: 'Maka Al-Mukarama Road, Mogadishu',
-  currency: 'USD',
-  slaHours: 48,
-  atRiskHours: 12,
-  criticalHours: 4,
-  emergencyFeePerUnit: 5,
-  invoiceDueDays: 14,
 };
 
 const SERVICES: LabService[] = [
