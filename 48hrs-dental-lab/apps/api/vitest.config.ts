@@ -44,6 +44,7 @@ export default defineConfig({
       LOGIN_MAX_ATTEMPTS: '5',
       LOGIN_LOCK_MINUTES: '15',
       MAX_UPLOAD_MB: '1', // small, so the size limit is exercised cheaply
+      AUTH_RATE_LIMIT: '1000', // the suites sign in often; auth-rate-limit.test.ts runs with a low limit
     },
   },
 });

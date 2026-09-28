@@ -11,7 +11,7 @@ const handler = { message: API_ERRORS.rateLimited };
  */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60_000,
-  limit: isTest ? 1_000 : env.AUTH_RATE_LIMIT,
+  limit: env.AUTH_RATE_LIMIT,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: handler,

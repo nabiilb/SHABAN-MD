@@ -5,6 +5,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { API_ERRORS } from '@48hrs/shared/errors';
 import { parseEnv } from '../src/config/env.ts';
 import { storageRoot } from '../src/lib/storage.ts';
 import { app, Client, createReceivedCase, login, prisma, resetDb, USERS } from './helpers.ts';
@@ -213,6 +214,68 @@ describe('files', () => {
       expect(res.status).toBe(404);
     }
   });
+  it('STL (ASCII and binary) is accepted and served back byte-for-byte as model/stl', async () => {
+    const reception = await login(USERS.reception);
+    const c = await prisma.dentalCase.findFirstOrThrow({ where: { status: 'in_production' } });
+    const binary = Buffer.alloc(84 + 50);
+    binary.write('binary stl header', 0);
+    binary.writeUInt32LE(1, 80);
+    for (const [name, bytes] of [['ascii.stl', Buffer.from('solid t\nendsolid t\n')], ['binary.stl', binary]] as const) {
+      const up = await upload(reception, c.id).attach('file', bytes, name);
+      expect(up.status, JSON.stringify(up.body)).toBe(201);
+      expect(up.body).toMatchObject({ extension: 'stl', mimeType: 'model/stl', category: 'scan', size: bytes.length });
+      const dl = await reception.agent.get(`/api/cases/${c.id}/attachments/${up.body.id}/download`).buffer(true).parse((r, cb) => {
+        const chunks: Buffer[] = [];
+        r.on('data', (d: Buffer) => chunks.push(d));
+        r.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+      expect(Buffer.compare(dl.body as Buffer, bytes)).toBe(0);
+      expect(dl.headers['content-type']).toBe('model/stl');
+    }
+  });
+
+  it('the client-declared MIME type is never trusted: stored and served by verified content/extension', async () => {
+    const reception = await login(USERS.reception);
+    const c = await prisma.dentalCase.findFirstOrThrow({ where: { status: 'in_production' } });
+    const png = await upload(reception, c.id).attach('file', PNG, { filename: 'photo.png', contentType: 'text/html' });
+    expect(png.status).toBe(201);
+    expect(png.body.mimeType).toBe('image/png');
+    const dl = await reception.get(`/cases/${c.id}/attachments/${png.body.id}/download`);
+    expect(dl.headers['content-type']).toBe('image/png');
+    expect(dl.headers['content-disposition']).toMatch(/^attachment;/); // never rendered inline by the browser
+    expect(dl.headers['x-content-type-options']).toBe('nosniff');
+
+    const html = await upload(reception, c.id).attach('file', Buffer.from('<!DOCTYPE html><script>alert(1)</script>'), { filename: 'scan.stl', contentType: 'model/stl' });
+    expect(html.status).toBe(422);
+    const exe = await upload(reception, c.id).attach('file', Buffer.from('MZ\x90\x00\x03'), { filename: 'upper.stl', contentType: 'model/stl' });
+    expect(exe.status).toBe(422);
+  });
+
+  it('extensions outside the allow-list are refused, including double extensions', async () => {
+    const reception = await login(USERS.reception);
+    const c = await prisma.dentalCase.findFirstOrThrow({ where: { status: 'in_production' } });
+    for (const name of ['scan.stl.exe', 'page.html', 'image.svg', 'script.js', 'archive.zip', 'noextension']) {
+      const res = await upload(reception, c.id).attach('file', Buffer.from('solid x\nendsolid x\n'), name);
+      expect(res.status, name).toBe(422);
+      expect(res.body.errors.file[0], name).toMatch(/not accepted/);
+    }
+    expect(await prisma.caseAttachment.count({ where: { caseId: c.id, name: { in: ['scan.stl.exe', 'page.html', 'image.svg'] } } })).toBe(0);
+  });
+
+  it('users outside the case cannot list, download or delete its files', async () => {
+    const reception = await login(USERS.reception);
+    const c = await prisma.dentalCase.findFirstOrThrow({ where: { status: 'in_production', technicianId: { not: 'tec_fatima' }, clinicId: { not: 'cln_smile' } } });
+    const up = await upload(reception, c.id).attach('file', PNG, 'private.png');
+    expect(up.status).toBe(201);
+    const tech = await login(USERS.technician); // not assigned to this case
+    const client = await login(USERS.client); // another clinic
+    for (const outsider of [tech, client]) {
+      expect((await outsider.get(`/cases/${c.id}`)).status).toBe(404);
+      expect((await outsider.get(`/cases/${c.id}/attachments/${up.body.id}/download`)).status).toBe(404);
+      expect([403, 404]).toContain((await outsider.del(`/cases/${c.id}/attachments/${up.body.id}`)).status);
+    }
+    expect(await prisma.caseAttachment.count({ where: { id: up.body.id } })).toBe(1);
+  });
 });
 
 describe('payments: duplicates, completed invoices and all-or-nothing', () => {
@@ -229,15 +292,40 @@ describe('payments: duplicates, completed invoices and all-or-nothing', () => {
     expect(inv.payments).toHaveLength(0);
   });
 
-  it('the same reference submitted twice at once is recorded once', async () => {
+  it('the same reference submitted twice at once: one payment, the other 422; ledger and case stay consistent in PostgreSQL', async () => {
     const reception = await login(USERS.reception);
     const admin = await login(USERS.admin);
     const a = await createReceivedCase(reception);
     const body = { invoiceId: a.invoice!.id, amount: 10, method: 'mobile_money', reference: 'EVC-DOUBLE-TAP' };
     const [r1, r2] = await Promise.all([reception.post('/payments', body), admin.post('/payments', body)]);
     expect([r1.status, r2.status].sort()).toEqual([201, 422]);
-    expect(await prisma.payment.count({ where: { reference: 'EVC-DOUBLE-TAP' } })).toBe(1);
-    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: a.invoice!.id } })).amountPaid.toNumber()).toBe(10);
+    const loser = r1.status === 422 ? r1 : r2;
+    expect(loser.body).toEqual({ message: API_ERRORS.validation, errors: { reference: [expect.stringMatching(/^This reference is already recorded on INV-/)] } });
+
+    const [ledger] = await prisma.$queryRaw<{ n: number; sum: number; paid: number; total: number }[]>`
+      SELECT (SELECT count(*)::int FROM payments p WHERE p.reference = 'EVC-DOUBLE-TAP') AS n,
+             (SELECT coalesce(sum(p.amount), 0)::float FROM payments p WHERE p."invoiceId" = i.id) AS sum,
+             i."amountPaid"::float AS paid, i.total::float AS total
+      FROM invoices i WHERE i.id = ${a.invoice!.id}`;
+    expect(ledger).toEqual({ n: 1, sum: 10, paid: 10, total: a.total });
+    const row = await prisma.dentalCase.findUniqueOrThrow({ where: { id: a.id } });
+    expect(row.status).toBe('received'); // payments never move the workflow
+    expect((await reception.get(`/cases/${a.id}`)).body.paymentStatus).toBe('partial');
+  });
+
+  it('the same reference raced onto two different invoices is still recorded once', async () => {
+    const reception = await login(USERS.reception);
+    const admin = await login(USERS.admin);
+    const [a, b] = [await createReceivedCase(reception), await createReceivedCase(reception)];
+    const [r1, r2] = await Promise.all([
+      reception.post('/payments', { invoiceId: a.invoice!.id, amount: 5, method: 'bank_transfer', reference: 'BANK-RACE-1' }),
+      admin.post('/payments', { invoiceId: b.invoice!.id, amount: 5, method: 'bank_transfer', reference: 'BANK-RACE-1' }),
+    ]);
+    expect([r1.status, r2.status].sort()).toEqual([201, 422]);
+    const [{ n, paid }] = await prisma.$queryRaw<{ n: number; paid: number }[]>`
+      SELECT (SELECT count(*)::int FROM payments WHERE reference = 'BANK-RACE-1') AS n,
+             (SELECT sum("amountPaid")::float FROM invoices WHERE id IN (${a.invoice!.id}, ${b.invoice!.id})) AS paid`;
+    expect({ n, paid }).toEqual({ n: 1, paid: 5 });
   });
 
   it('a fully paid invoice takes no more money', async () => {
