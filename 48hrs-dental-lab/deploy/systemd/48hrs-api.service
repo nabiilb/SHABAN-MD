@@ -1,0 +1,21 @@
+# /etc/systemd/system/48hrs-api.service — systemctl enable --now 48hrs-api
+[Unit]
+Description=48HRS Dental Lab API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lab
+WorkingDirectory=/srv/48hrs-dental-lab
+# Production settings (from deploy/production.env.example), readable by root only.
+EnvironmentFile=/etc/48hrs/api.env
+ExecStart=/usr/bin/node apps/api/dist/server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/48hrs
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+# 48HRS Dental Lab — nginx reverse proxy with HTTPS (single origin: the API also serves the SPA).
+# Install as /etc/nginx/sites-available/48hrs-lab, link into sites-enabled, then: nginx -t && systemctl reload nginx
+# Certificates: e.g. certbot --nginx -d lab.example.com (Let's Encrypt), or your own CA.
+# API environment to match: CORS_ORIGINS=https://lab.example.com APP_URL=https://lab.example.com
+#                           TRUST_PROXY=1 COOKIE_SECURE=true WEB_DIST_DIR=../web/dist PORT=4000
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name lab.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name lab.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/lab.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/lab.example.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+
+    # Case files up to MAX_UPLOAD_MB (default 50) plus multipart overhead; the API enforces the real limit.
+    client_max_body_size 55m;
+
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        # Overwrite (do not append) so a client cannot inject addresses; the API trusts exactly one proxy (TRUST_PROXY=1).
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_request_buffering off; # stream uploads to the API instead of buffering them on disk
+    }
+}
