@@ -12,7 +12,10 @@ export class ApiError extends Error {
   }
 
   static fromBody(status: number, body: Partial<ValidationErrorBody> | null | undefined) {
-    return new ApiError(status, body?.message || defaultMessage(status), body?.errors ?? {});
+    const message = body?.message || defaultMessage(status);
+    // 409: say what the case is now ("Invalid workflow transition. The case is currently "In review".").
+    const detail = status === 409 ? body?.errors?.status?.[0] : undefined;
+    return new ApiError(status, detail ? `${message} ${detail}` : message, body?.errors ?? {});
   }
 
   get isUnauthorized() {
@@ -29,6 +32,10 @@ export class ApiError extends Error {
 
   get isValidation() {
     return this.status === 422;
+  }
+
+  get isConflict() {
+    return this.status === 409;
   }
 }
 

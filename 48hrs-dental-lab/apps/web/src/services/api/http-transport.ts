@@ -1,5 +1,6 @@
 import { env } from '@/config/env';
 import { ApiError } from './errors';
+import { serverClock } from './server-clock';
 import type { ApiRequest, QueryParams, Transport } from './types';
 
 /**
@@ -71,12 +72,14 @@ export const httpTransport: Transport = async (req) => {
   }
 
   let res: Response;
+  const sentAt = Date.now();
   try {
     res = await fetch(url, { method: req.method, headers, body, signal: req.signal, credentials: 'include' });
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e;
     throw new ApiError(0, '');
   }
+  serverClock.observe(res.headers.get('X-Server-Time'), sentAt, Date.now());
 
   if (!res.ok) throw await parseError(res);
   if (req.responseType === 'blob') return res.blob();

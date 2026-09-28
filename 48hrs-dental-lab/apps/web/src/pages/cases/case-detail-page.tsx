@@ -28,6 +28,7 @@ import { QueryError } from '@/components/ui/query-error';
 import { Card, CardBody, CardHeader, Field } from '@/components/ui/card';
 import { Alert, EmptyState, PageLoader, ProgressBar } from '@/components/ui/feedback';
 import { Textarea } from '@/components/ui/input';
+import { serverClock } from '@/services/api/server-clock';
 
 export default function CaseDetailPage() {
   const { id } = useParams();
@@ -55,7 +56,7 @@ function CaseDetailView({ c }: { c: CaseDetail }) {
   const canMoney = !!c.invoice;
   const lastQc = c.qualityChecks[c.qualityChecks.length - 1];
   const delivery = c.deliveries[c.deliveries.length - 1];
-  const prodMs = c.productionStartedAt ? (c.productionCompletedAt ? new Date(c.productionCompletedAt).getTime() : Date.now()) - new Date(c.productionStartedAt).getTime() : null;
+  const prodMs = c.productionStartedAt ? (c.productionCompletedAt ? new Date(c.productionCompletedAt).getTime() : serverClock.now()) - new Date(c.productionStartedAt).getTime() : null;
 
   return (
     <div className="flex flex-col gap-4">

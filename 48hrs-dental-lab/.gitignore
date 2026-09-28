@@ -11,3 +11,4 @@ apps/api/storage
 storage
 playwright-report
 test-results
+dist-e2e

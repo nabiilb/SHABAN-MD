@@ -67,6 +67,8 @@ const schema = z
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     WORKER_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(3600).default(60),
     LOGIN_MAX_ATTEMPTS: z.coerce.number().int().min(3).max(50).default(5),
+    /** Sign-in attempts per client IP per 15 minutes (a whole clinic may share one IP). */
+    AUTH_RATE_LIMIT: z.coerce.number().int().min(5).max(100_000).default(100),
     LOGIN_LOCK_MINUTES: z.coerce.number().int().min(1).max(120).default(15),
   })
   .superRefine((v, ctx) => {

@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { qk } from '@/lib/query-keys';
+import { ApiError } from '@/services/api/errors';
 import { caseService } from '@/services/caseService';
 import type { CaseActionPayload, CaseListParams, CreateCasePayload, UpdateCasePayload } from '@48hrs/shared/types';
 import type { CaseDetail } from '@48hrs/shared/types';
@@ -66,6 +67,10 @@ export function useCaseAction() {
   return useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: CaseActionPayload }) => caseService.action(id, payload),
     onSuccess: invalidate,
+    // Someone else moved the case first: show its real state instead of stale buttons.
+    onError: (err) => {
+      if (err instanceof ApiError && err.isConflict) invalidate();
+    },
   });
 }
 

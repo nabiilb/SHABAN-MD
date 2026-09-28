@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from 'react';
+import { serverClock } from '@/services/api/server-clock';
 
 /**
  * Shared clock for live countdowns. One interval per tick size drives every
- * subscriber, so 50 timers on a page do not create 50 intervals.
+ * subscriber, so 50 timers on a page do not create 50 intervals. Time is the
+ * server's (device clock corrected by the API's X-Server-Time).
  */
 interface Clock {
   now: number;
@@ -18,18 +20,18 @@ function clockFor(intervalMs: number): Clock {
   const existing = clocks.get(intervalMs);
   if (existing) return existing;
   const clock: Clock = {
-    now: Date.now(),
+    now: serverClock.now(),
     listeners: new Set(),
     subscribe(listener) {
       clock.listeners.add(listener);
       if (!clock.timer) {
         const tick = () => {
-          clock.now = Date.now();
+          clock.now = serverClock.now();
           clock.listeners.forEach((l) => l());
         };
         clock.timer = setInterval(tick, intervalMs);
         // The clock may have been idle: refresh once, asynchronously (never during subscribe).
-        if (Date.now() - clock.now > 1000) setTimeout(tick, 0);
+        if (serverClock.now() - clock.now > 1000) setTimeout(tick, 0);
       }
       return () => {
         clock.listeners.delete(listener);

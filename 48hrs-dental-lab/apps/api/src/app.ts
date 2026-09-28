@@ -88,6 +88,8 @@ function serveWeb(app: express.Express, dir: string) {
           baseUri: ["'self'"],
           formAction: ["'self'"],
           frameAncestors: ["'none'"],
+          // Only on HTTPS deployments: on plain-http LAN installs it would block the app's own assets.
+          upgradeInsecureRequests: env.COOKIE_SECURE ? [] : null,
         },
       },
     }),

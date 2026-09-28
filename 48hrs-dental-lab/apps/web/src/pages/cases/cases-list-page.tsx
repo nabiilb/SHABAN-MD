@@ -25,6 +25,7 @@ import { DataTable } from '@/components/tables/data-table';
 import { ClearFiltersButton, CollapsibleFilters, DateFilter, FilterSelect, SearchInput, ToolbarRow } from '@/components/tables/toolbar';
 import { Button } from '@/components/ui/button';
 import { SegmentedControl } from '@/components/ui/segmented-control';
+import { serverClock } from '@/services/api/server-clock';
 
 const DEFAULTS = {
   view: 'all',
@@ -172,7 +173,7 @@ export default function CasesListPage() {
   );
 
   const exportRows = (rows: CaseListItem[]) => {
-    const now = Date.now();
+    const now = serverClock.now();
     downloadCsv(
       `cases-${new Date().toISOString().slice(0, 10)}.csv`,
       ['Case ID', 'Patient', 'Patient ref', 'Doctor', 'Clinic', 'Service', 'Units', 'Shade', 'Priority', 'Received', 'Due', 'SLA', 'Status', 'Technician', ...(showMoney ? ['Total', 'Payment'] : [])],

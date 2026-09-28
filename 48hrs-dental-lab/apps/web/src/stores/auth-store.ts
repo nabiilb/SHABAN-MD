@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { authService } from '@/services/authService';
 import { ApiError } from '@/services/api/errors';
 import { setSessionRefreshedHandler, setUnauthorizedHandler } from '@/services/api/client';
+import { serverClock } from '@/services/api/server-clock';
 import { tokenStore } from '@/services/api/token-store';
 import type { AuthSession, User } from '@48hrs/shared/types';
 import type { LoginPayload } from '@48hrs/shared/types';
@@ -27,7 +28,7 @@ let expiryTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleExpiry(expiresAt: string, onExpire: () => void) {
   clearTimeout(expiryTimer);
   // setTimeout overflows above ~24.8 days; sessions are much shorter, but clamp anyway.
-  const ms = Math.min(new Date(expiresAt).getTime() - Date.now(), 2_000_000_000);
+  const ms = Math.min(new Date(expiresAt).getTime() - serverClock.now(), 2_000_000_000);
   expiryTimer = setTimeout(onExpire, Math.max(0, ms));
 }
 

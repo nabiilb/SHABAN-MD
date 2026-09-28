@@ -4,6 +4,8 @@
  * themselves live in HTTP-only cookies and are never visible here; only the
  * mock backend (VITE_USE_MOCKS=true) passes a bearer token through this store.
  */
+import { serverClock } from './server-clock';
+
 const KEY = '48hrs.session';
 
 export interface StoredSession {
@@ -19,7 +21,7 @@ export const tokenStore = {
       if (!raw) return null;
       const s = JSON.parse(raw) as StoredSession;
       if (!s.expiresAt) return null;
-      if (new Date(s.expiresAt).getTime() <= Date.now()) {
+      if (new Date(s.expiresAt).getTime() <= serverClock.now()) {
         localStorage.removeItem(KEY);
         return null;
       }
