@@ -1,0 +1,276 @@
+@import 'tailwindcss';
+
+@source '../../app/**/*.php';
+@source '../../resources/views/**/*.blade.php';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+
+/* ------------------------------------------------------------------
+   Alpha Driving School design tokens
+   ------------------------------------------------------------------ */
+@theme {
+    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+    --color-brand-50: #eef4ff;
+    --color-brand-100: #d9e6ff;
+    --color-brand-200: #bcd3ff;
+    --color-brand-300: #8eb6ff;
+    --color-brand-400: #598eff;
+    --color-brand-500: #3366f2;
+    --color-brand-600: #2049e0;
+    --color-brand-700: #1b39b5;
+    --color-brand-800: #1c3390;
+    --color-brand-900: #1c3072;
+    --color-brand-950: #141f45;
+
+    --color-shell-800: #1b2436;
+    --color-shell-900: #141b29;
+    --color-shell-950: #0d121c;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    @apply bg-slate-100 text-slate-800 antialiased;
+}
+
+/* Alpine hides these on init; without this they flash on every page load —
+   the backdrop, the user menu, every dialog. */
+[x-cloak] {
+    display: none !important;
+}
+
+/* Nothing may push the page wider than the phone it is on. A table or a
+   chart that needs more room scrolls inside its own container instead. */
+html,
+body {
+    overflow-x: hidden;
+}
+
+/* While the navigation drawer is open, the page behind it stays put. */
+body.drawer-open {
+    overflow: hidden;
+}
+
+/* ------------------------------------------------------------------
+   Reusable UI primitives — the shared vocabulary of every screen
+   ------------------------------------------------------------------ */
+@layer components {
+    .card {
+        @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+    }
+
+    .card-header {
+        @apply flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4;
+    }
+
+    .card-title {
+        @apply text-sm font-semibold uppercase tracking-wide text-slate-500;
+    }
+
+    .btn,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger,
+    .btn-ghost {
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition
+               focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2
+               disabled:cursor-not-allowed disabled:opacity-60;
+    }
+
+    .btn-primary {
+        @apply bg-brand-600 text-white hover:bg-brand-700;
+    }
+
+    .btn-secondary {
+        @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+    }
+
+    .btn-danger {
+        @apply bg-rose-600 text-white hover:bg-rose-700;
+    }
+
+    .btn-ghost {
+        @apply text-slate-600 hover:bg-slate-100;
+    }
+
+    .btn-sm {
+        @apply px-3 py-1.5 text-xs;
+    }
+
+    /* Touch targets. A thumb is about 44px across, so every button clears
+       that on a phone and relaxes back to the tighter desktop sizing above
+       the `sm` breakpoint. */
+    .btn,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger,
+    .btn-ghost {
+        @apply max-sm:min-h-11;
+    }
+
+    .btn-sm {
+        @apply max-sm:min-h-10 max-sm:px-3 max-sm:text-xs;
+    }
+
+    .label {
+        @apply mb-1.5 block text-sm font-medium text-slate-700;
+    }
+
+    .input {
+        @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800
+               shadow-sm placeholder:text-slate-400
+               focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500
+               disabled:bg-slate-100;
+    }
+
+    .input-error {
+        @apply border-rose-400 focus:border-rose-500 focus:ring-rose-500;
+    }
+
+    .field-error {
+        @apply mt-1 text-xs font-medium text-rose-600;
+    }
+
+    /* A table too wide for the screen scrolls inside its card rather than
+       stretching the page. Momentum scrolling on iOS, and the scroll area
+       bleeds to the card's edge on phones so the first column is not
+       needlessly cramped. */
+    .table-wrap {
+        @apply -mx-px overflow-x-auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /*
+     * Table on desktop, cards on a phone — the same markup, read two ways.
+     *
+     * Add `table-cards` to a table and `data-label` to each cell, and below
+     * the `md` breakpoint every row becomes a card with its column headings
+     * repeated down the left. Nothing is hidden: a phone shows exactly the
+     * columns a desktop does, stacked instead of side by side.
+     *
+     *     <table class="table table-cards">
+     *         <td data-label="{{ __('Phone') }}">…</td>
+     */
+    .table-cards thead {
+        @apply max-md:hidden;
+    }
+
+    .table-cards tbody {
+        @apply max-md:block;
+    }
+
+    .table-cards tbody tr {
+        @apply max-md:mb-3 max-md:block max-md:rounded-xl max-md:border max-md:border-slate-200
+               max-md:bg-white max-md:p-4 max-md:shadow-sm max-md:last:mb-0 max-md:hover:bg-white;
+    }
+
+    .table-cards tbody td {
+        @apply max-md:flex max-md:items-start max-md:justify-between max-md:gap-4
+               max-md:border-0 max-md:px-0 max-md:py-1.5 max-md:text-right;
+    }
+
+    /* The column heading, repeated beside the value on a phone. */
+    .table-cards tbody td[data-label]::before {
+        content: attr(data-label);
+        @apply hidden max-md:block max-md:shrink-0 max-md:text-left max-md:text-xs
+               max-md:font-semibold max-md:uppercase max-md:tracking-wide max-md:text-slate-400;
+    }
+
+    /* The row's headline — a name, usually — spans the card on its own. */
+    .table-cards tbody td.cell-title {
+        @apply max-md:mb-2 max-md:block max-md:border-b max-md:border-slate-100 max-md:pb-2 max-md:text-left;
+    }
+
+    /* Actions sit together at the foot of the card, big enough to tap. */
+    .table-cards tbody td.cell-actions {
+        @apply max-md:mt-2 max-md:flex-wrap max-md:justify-start max-md:gap-2
+               max-md:border-t max-md:border-slate-100 max-md:pt-3 max-md:text-left;
+    }
+
+    /* A card that carries no table at all — used where a page builds its own
+       mobile representation rather than reusing the table markup. */
+    .stack-card {
+        @apply rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+    }
+
+    /*
+     * Filters: inline where there is room, stacked and full-width on a phone,
+     * with the buttons on their own row so neither is ever half a thumb wide.
+     */
+    .filter-bar {
+        @apply grid gap-3;
+    }
+
+    .filter-actions {
+        @apply flex flex-wrap gap-2 max-sm:[&>*]:flex-1;
+    }
+
+    /* A dialog that fits the phone it opens on, and scrolls inside itself
+       rather than pushing its own buttons off the bottom of the screen. */
+    .modal-panel {
+        @apply flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-xl bg-white shadow-xl;
+    }
+
+    .modal-body {
+        @apply min-h-0 flex-1 overflow-y-auto;
+    }
+
+    .table {
+        @apply min-w-full divide-y divide-slate-200 text-sm;
+    }
+
+    /* Long words — an email, a reference, a run-together name — wrap rather
+       than widening the table past the screen. */
+    .table tbody td {
+        @apply break-words;
+    }
+
+    .table thead th {
+        @apply whitespace-nowrap bg-slate-50 px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500;
+    }
+
+    .table tbody tr {
+        @apply border-b border-slate-100 last:border-0 hover:bg-slate-50/70;
+    }
+
+    .table tbody td {
+        @apply px-5 py-3 align-middle text-slate-700;
+    }
+
+    .badge,
+    .badge-green,
+    .badge-blue,
+    .badge-amber,
+    .badge-rose,
+    .badge-slate {
+        @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap;
+    }
+
+    .badge { @apply bg-slate-100 text-slate-600 ring-1 ring-slate-200; }
+    .badge-green { @apply bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200; }
+    .badge-blue  { @apply bg-brand-50 text-brand-700 ring-1 ring-brand-200; }
+    .badge-amber { @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200; }
+    .badge-rose  { @apply bg-rose-50 text-rose-700 ring-1 ring-rose-200; }
+    .badge-slate { @apply bg-slate-100 text-slate-600 ring-1 ring-slate-200; }
+
+    .nav-link {
+        @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-300
+               transition hover:bg-white/10 hover:text-white;
+    }
+
+    .nav-link-active {
+        @apply bg-brand-600 text-white shadow-sm hover:bg-brand-600 hover:text-white;
+    }
+
+    .nav-heading {
+        @apply px-3 pb-1 pt-5 text-[11px] font-bold uppercase tracking-widest text-slate-500;
+    }
+}
+
+@media print {
+    .no-print { display: none !important; }
+    body { @apply bg-white; }
+    .card { @apply border-slate-300 shadow-none; }
+}
