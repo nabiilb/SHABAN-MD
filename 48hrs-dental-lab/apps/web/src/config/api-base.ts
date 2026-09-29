@@ -1,5 +1,5 @@
 /**
- * The API is mounted at /api (apps/api). VITE_API_URL may point at another
+ * The Laravel API is mounted at /api (backend/routes/api.php). VITE_API_URL may point at another
  * origin, but its path must still end in /api — otherwise every call would go
  * to e.g. https://api.example.com/cases and fail. Checked when Vite starts or
  * builds (vite.config.ts) and again at runtime.

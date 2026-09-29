@@ -1,5 +1,5 @@
 /**
- * Core entities — exactly what the REST API (apps/api) returns and the mock
+ * Core entities — exactly what the REST API (backend/, Laravel) returns and the mock
  * backend mirrors. IDs are strings; timestamps are ISO-8601 strings in UTC.
  */
 
@@ -54,7 +54,7 @@ export interface User {
 }
 
 export interface AuthSession {
-  /** Mock backend only. The Node API keeps its tokens in HTTP-only cookies. */
+  /** Mock backend only. The Laravel API keeps the session in an HTTP-only cookie. */
   token?: string;
   /** When the session ends (absolute); access tokens are refreshed silently until then. */
   expiresAt: ISODate;

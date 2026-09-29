@@ -6,9 +6,8 @@ dist
 !.env.example
 coverage
 *.tsbuildinfo
-apps/api/src/generated
-apps/api/storage
-storage
 playwright-report
 test-results
 dist-e2e
+release
+# Laravel keeps its storage/ skeleton in git; each folder ignores its own contents.

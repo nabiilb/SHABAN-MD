@@ -1,0 +1,38 @@
+# 48HRS Dental Lab — web root of the app (public_html/48hrs_lab on Hostinger).
+# The React build lives here; /48hrs_lab/api/* is handed to Laravel, which lives
+# OUTSIDE public_html (see laravel.php). Tested on Apache 2.4; Hostinger's LiteSpeed
+# reads the same directives.
+
+Options -Indexes -MultiViews
+DirectoryIndex index.html
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # The folder this app is served from (the build sets it from VITE_BASE_PATH).
+    RewriteBase __BASE_PATH__
+
+    # Never serve dotfiles (.htaccess, .env copies, .git…).
+    RewriteRule (^|/)\. - [F,L]
+
+    # The API: every /api request goes to the Laravel front controller.
+    RewriteRule ^api(/.*)?$ laravel.php [L,QSA]
+
+    # Real files (JS, CSS, images) are served as they are…
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
+
+    # …everything else is a route of the single-page app.
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    # Laravel sets its own (stricter) values on API responses; these fill in the rest.
+    Header setifempty X-Content-Type-Options "nosniff"
+    Header setifempty X-Frame-Options "DENY"
+    Header setifempty Referrer-Policy "strict-origin-when-cross-origin"
+
+    <FilesMatch "\.html$">
+        Header set Cache-Control "no-cache"
+        Header set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    </FilesMatch>
+</IfModule>

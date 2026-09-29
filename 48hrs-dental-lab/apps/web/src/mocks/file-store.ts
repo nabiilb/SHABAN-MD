@@ -1,7 +1,7 @@
 /**
  * Blob storage for uploaded case files in mock mode. Uses IndexedDB (so files
  * survive a reload) and falls back to memory where IndexedDB is unavailable.
- * The Node API stores files under UPLOAD_DIR and streams them back.
+ * The Laravel API stores files on its private disk (UPLOAD_DIR) and streams them back.
  */
 import { del, get, set } from 'idb-keyval';
 import { samplePrescriptionPdf, sampleStlText } from '@48hrs/shared/demo-files';

@@ -4,11 +4,44 @@ import { serverClock } from './server-clock';
 import type { ApiRequest, QueryParams, Transport } from './types';
 
 /**
- * Transport for the Node API (apps/api). Authentication rides on HTTP-only
- * cookies set by the API, so requests are sent with credentials and no token
- * is ever readable from JavaScript. The X-Requested-With header is required by
- * the API's CSRF guard on every state-changing request.
+ * Transport for the Laravel API (backend/). Authentication rides on the
+ * HTTP-only session cookie set by the API, so requests are sent with
+ * credentials and no session token is ever readable from JavaScript.
+ *
+ * CSRF: Laravel sets a readable XSRF-TOKEN cookie; every state-changing
+ * request echoes it in the X-XSRF-TOKEN header. Before the first write (no
+ * cookie yet) the transport fetches one from GET /auth/csrf, and when the API
+ * answers 419 (token rotated or expired) it fetches a fresh one and retries once.
  */
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** The XSRF-TOKEN cookie Laravel sets (URL-encoded), or null. */
+export function readXsrfCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+let csrfPromise: Promise<void> | null = null;
+
+/** Asks the API for a CSRF cookie (once, however many requests need it together). */
+function fetchCsrfCookie(): Promise<void> {
+  csrfPromise ??= fetch(`${env.apiUrl}/auth/csrf`, { method: 'GET', credentials: 'include', headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
+      csrfPromise = null;
+    });
+  return csrfPromise;
+}
+
+async function csrfHeader(method: string): Promise<Record<string, string>> {
+  if (SAFE_METHODS.has(method)) return {};
+  if (!readXsrfCookie()) await fetchCsrfCookie();
+  const token = readXsrfCookie();
+  return token ? { 'X-XSRF-TOKEN': token } : {};
+}
 
 /** Arrays are sent as repeated keys: ?status=received&status=assigned */
 export function buildQuery(params?: QueryParams) {
@@ -59,11 +92,10 @@ function xhrUpload(url: string, req: ApiRequest, headers: Record<string, string>
   });
 }
 
-export const httpTransport: Transport = async (req) => {
-  const url = `${env.apiUrl}${req.path}${buildQuery(req.params)}`;
-  const headers: Record<string, string> = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
+async function send(req: ApiRequest, url: string): Promise<{ res?: Response; upload?: unknown }> {
+  const headers: Record<string, string> = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...(await csrfHeader(req.method)) };
 
-  if (req.formData) return xhrUpload(url, req, headers);
+  if (req.formData) return { upload: await xhrUpload(url, req, headers) };
 
   let body: BodyInit | undefined;
   if (req.body !== undefined) {
@@ -80,9 +112,27 @@ export const httpTransport: Transport = async (req) => {
     throw new ApiError(0, '');
   }
   serverClock.observe(res.headers.get('X-Server-Time'), sentAt, Date.now());
+  return { res };
+}
 
+async function finish(req: ApiRequest, res: Response) {
   if (!res.ok) throw await parseError(res);
   if (req.responseType === 'blob') return res.blob();
   if (res.status === 204) return null;
   return res.json();
+}
+
+export const httpTransport: Transport = async (req) => {
+  const url = `${env.apiUrl}${req.path}${buildQuery(req.params)}`;
+  try {
+    const first = await send(req, url);
+    if (!first.res) return first.upload;
+    if (first.res.status !== 419 || SAFE_METHODS.has(req.method)) return await finish(req, first.res);
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 419) throw err;
+  }
+  // 419: the CSRF token expired or was rotated (e.g. after signing in elsewhere). Get a fresh one and retry once.
+  await fetchCsrfCookie();
+  const retry = await send(req, url);
+  return retry.res ? finish(req, retry.res) : retry.upload;
 };

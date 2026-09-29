@@ -1,6 +1,6 @@
 /**
- * Demo dataset used by both the in-browser mock backend and the Prisma seed
- * (prisma/seed.ts). Timestamps are generated relative to "now" so the 48-hour
+ * Demo dataset used by both the in-browser mock backend and the Laravel demo
+ * seed (exported to backend/database/data/demo.json by npm run contract:export). Timestamps are generated relative to "now" so the 48-hour
  * board always shows a realistic mix of on-track, at-risk and overdue work.
  * Users carry no passwords: each consumer hashes its own.
  */

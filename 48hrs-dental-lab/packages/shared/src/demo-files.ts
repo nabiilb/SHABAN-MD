@@ -1,7 +1,7 @@
 /**
  * Content for the demo dataset's attachments (the dataset has file metadata
- * only). The mock serves these on download; the Prisma seed writes them to
- * UPLOAD_DIR so seeded files open like real uploads.
+ * only). The mock serves these on download; the Laravel demo seed writes the
+ * same files to UPLOAD_DIR so seeded files open like real uploads.
  */
 
 function pdfEscape(s: string) {

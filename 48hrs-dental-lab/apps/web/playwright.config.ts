@@ -4,8 +4,9 @@ import { BASE_URL, initStackEnv, stackEnv } from './e2e/stack-env';
 initStackEnv();
 
 /**
- * Full-stack end-to-end tests: the built web app, the Node API and PostgreSQL,
- * exactly as deployed on a single origin. Run with `npm run e2e`.
+ * Full-stack end-to-end tests: the production web build, Laravel and MySQL,
+ * served by Apache with the Hostinger layout (public_html/48hrs_lab + .htaccess
+ * + laravel.php). No Node backend, no mocks. Run with `npm run e2e`.
  */
 export default defineConfig({
   testDir: 'e2e',
@@ -21,10 +22,10 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npx tsx ../api/src/server.ts',
+    command: 'node e2e/serve-apache.mjs',
     url: `${BASE_URL}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
-    env: stackEnv(),
+    env: { E2E_PORT: new URL(BASE_URL).port, E2E_LARAVEL_ENV: JSON.stringify(stackEnv()) },
   },
 });

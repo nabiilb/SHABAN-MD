@@ -1,7 +1,7 @@
 /**
  * Remembers that a session exists and when it ends, so the app knows whether
- * to restore it on load and when to sign out. With the Node API the tokens
- * themselves live in HTTP-only cookies and are never visible here; only the
+ * to restore it on load and when to sign out. With the Laravel API the session
+ * itself lives in an HTTP-only cookie and are never visible here; only the
  * mock backend (VITE_USE_MOCKS=true) passes a bearer token through this store.
  */
 import { serverClock } from './server-clock';

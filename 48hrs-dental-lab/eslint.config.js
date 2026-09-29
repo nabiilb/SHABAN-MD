@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/dist', '**/node_modules', '**/generated', '**/playwright-report', '**/test-results'] },
+  { ignores: ['**/dist', '**/dist-e2e', '**/node_modules', '**/playwright-report', '**/test-results', 'backend/**', 'release/**'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -24,7 +24,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/api/**/*.ts', 'packages/**/*.ts', 'prisma/**/*.ts', '*.ts', 'apps/web/e2e/**/*.ts', 'apps/web/*.ts'],
+    files: ['packages/**/*.ts', '*.ts', 'apps/web/e2e/**/*.{ts,mjs}', 'apps/web/*.ts', 'scripts/**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
 );

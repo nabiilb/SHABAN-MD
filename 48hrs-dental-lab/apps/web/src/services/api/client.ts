@@ -8,7 +8,7 @@ let transportPromise: Promise<Transport> | null = null;
 
 /**
  * Picks the transport once. The mock backend is code-split and only loaded when
- * VITE_USE_MOCKS=true, so production bundles talking to the Node API never ship it.
+ * VITE_USE_MOCKS=true, so production bundles talking to the Laravel API never ship it.
  */
 function getTransport(): Promise<Transport> {
   if (!transportPromise) {

@@ -4,17 +4,22 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
 import { resolveApiBase } from './src/config/api-base';
+import { resolveBasePath } from './src/config/base-path';
 
 export default defineConfig(({ mode }) => {
-  // /api is proxied to the Node API in dev and preview, so the SPA and the API
-  // share one origin and the session cookies stay first-party.
+  // /api is proxied to the Laravel API (php artisan serve) in dev and preview, so
+  // the SPA and the API share one origin and the session cookie stays first-party.
   const fileEnv = loadEnv(mode, process.cwd(), '');
-  const apiTarget = fileEnv.API_PROXY_TARGET || 'http://localhost:4000';
-  // Fail the dev server / build on a VITE_API_URL that does not end in /api.
-  resolveApiBase(process.env.VITE_API_URL ?? fileEnv.VITE_API_URL);
-  const proxy = { '/api': { target: apiTarget, changeOrigin: false } };
+  const apiTarget = fileEnv.API_PROXY_TARGET || 'http://127.0.0.1:8000';
+  // Fail the dev server / build on a VITE_API_URL that does not end in /api, or a bad base path.
+  const apiBase = resolveApiBase(process.env.VITE_API_URL ?? fileEnv.VITE_API_URL);
+  const base = resolveBasePath(process.env.VITE_BASE_PATH ?? fileEnv.VITE_BASE_PATH);
+  // Under a base path (e.g. /48hrs_lab/api) the proxy strips the prefix: Laravel serves /api.
+  const apiPath = apiBase.startsWith('/') ? apiBase : '/api';
+  const proxy = { [apiPath]: { target: apiTarget, changeOrigin: false, rewrite: (p: string) => p.replace(apiPath, '/api') } };
 
   return {
+    base,
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },

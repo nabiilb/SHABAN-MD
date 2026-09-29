@@ -66,7 +66,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
       try {
         apply(await authService.me());
       } catch (err) {
-        clear(err instanceof ApiError && err.isUnauthorized ? 'expired' : null);
+        if (err instanceof ApiError && err.isUnauthorized) {
+          clear('expired');
+          return;
+        }
+        // Network error, server hiccup or a navigation that aborted the request: the session may
+        // well be alive, so it is kept for the next load; this page shows the sign-in form.
+        clearTimeout(expiryTimer);
+        set({ status: 'anonymous', user: null, permissions: [], expiresAt: null, endedReason: null });
       }
     },
 

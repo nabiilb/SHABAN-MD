@@ -22,7 +22,7 @@ import { ATTACHMENT_CATEGORY_LABELS, CASE_TYPE_LABELS, DELIVERY_METHOD_LABELS, P
 import { DENTURE_TYPES } from './billing';
 import { ROLE_ORDER } from './permissions';
 import { ALL_STATUSES } from './workflow';
-import { DAY_PATTERN } from './dates';
+import { isDay } from './dates';
 import { passwordSchema } from './validation';
 
 const keys = <K extends string>(o: Record<K, unknown>) => Object.keys(o) as [K, ...K[]];
@@ -59,7 +59,8 @@ const optionalEmail = z.union([z.literal(''), z.string().trim().toLowerCase().em
 const phone = required('Phone', 40).regex(PHONE, 'Enter a valid phone number.');
 const optionalPhone = z.union([z.literal(''), z.string().trim().regex(PHONE, 'Enter a valid phone number.')]).optional().default('');
 const isoDateTime = z.string().datetime({ offset: true, message: 'Use an ISO-8601 date and time.' });
-const day = z.string().regex(DAY_PATTERN, 'Use a date in YYYY-MM-DD format.');
+/** A real calendar day (1990-13-40 matches the pattern but is not a date). */
+const day = z.string().refine(isDay, 'Use a date in YYYY-MM-DD format.');
 const note = text(1000).optional();
 const choice = <T extends string>(values: [T, ...T[]], message: string) => z.enum(values, { errorMap: () => ({ message }) });
 

@@ -1,5 +1,6 @@
 import { lazy, type ReactNode } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { routerBasename } from '@/config/base-path';
 import { PERMISSIONS as P } from '@48hrs/shared/permissions';
 import { AppLayout } from '@/layouts/app-layout';
 import { AuthLayout } from '@/layouts/auth-layout';
@@ -90,4 +91,4 @@ export const routes = [
   },
 ];
 
-export const router = createBrowserRouter(routes);
+export const router = createBrowserRouter(routes, { basename: routerBasename(import.meta.env.BASE_URL) });

@@ -2,7 +2,7 @@ import type { Permission, Role, RoleKey } from './models';
 
 /**
  * Permission catalogue. Keys are the contract with the backend: the API must
- * check the same keys (apps/api authorize middleware). The UI only uses them to
+ * check the same keys (the Laravel permission middleware, gates and policies). The UI only uses them to
  * hide what the server refuses anyway.
  */
 export const PERMISSIONS = {

@@ -1,7 +1,8 @@
 /**
  * Aggregations behind the dashboard, reports and directory statistics. Pure
- * functions over already-scoped rows, so the API (rows from PostgreSQL) and
- * the mock backend (rows from localStorage) produce identical numbers.
+ * functions over already-scoped rows. The Laravel API ports them to PHP
+ * (backend/app/Domain/Analytics.php, parity-tested against these), so the API
+ * (rows from MySQL) and the mock backend (localStorage) produce identical numbers.
  */
 import type {
   CaseReport,

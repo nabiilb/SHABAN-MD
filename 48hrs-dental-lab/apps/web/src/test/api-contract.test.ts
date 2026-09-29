@@ -1,12 +1,14 @@
 /**
- * The web app ↔ Node API contract in API mode (independent of the mock backend):
- * the base URL always ends in /api, the HTTP transport builds URLs under it,
- * and every endpoint the services call exists on the API router.
+ * The web app ↔ Laravel API contract in API mode (independent of the mock backend):
+ * the base URL always ends in /api, the HTTP transport builds URLs under it, the
+ * app can live in a sub-folder, and every endpoint the services call exists on the
+ * API router (backend/routes/api-manifest.json, kept current by a PHP test).
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_API_BASE, resolveApiBase } from '@/config/api-base';
+import { resolveBasePath, routerBasename } from '@/config/base-path';
 
 const root = join(__dirname, '..', '..');
 
@@ -24,11 +26,29 @@ describe('API base URL', () => {
     expect(resolveApiBase('/api/')).toBe('/api');
     expect(resolveApiBase('https://api.example.com/api')).toBe('https://api.example.com/api');
     expect(resolveApiBase('https://lab.example.com/backend/api//')).toBe('https://lab.example.com/backend/api');
+    expect(resolveApiBase('/48hrs_lab/api')).toBe('/48hrs_lab/api'); // Hostinger sub-folder deployment
   });
 
   it('refuses a base that would send requests outside /api (e.g. /cases on the API root)', () => {
-    for (const bad of ['https://api.example.com', 'https://api.example.com/', '/', '/v1', 'http://localhost:4000', 'ftp://x/api', '/apis']) {
+    for (const bad of ['https://api.example.com', 'https://api.example.com/', '/', '/v1', 'http://127.0.0.1:8000', 'ftp://x/api', '/apis']) {
       expect(() => resolveApiBase(bad), bad).toThrow(/VITE_API_URL/);
+    }
+  });
+});
+
+describe('base path (VITE_BASE_PATH)', () => {
+  it('serves from the root by default or from a sub-folder such as /48hrs_lab/', () => {
+    expect(resolveBasePath(undefined)).toBe('/');
+    expect(resolveBasePath('/')).toBe('/');
+    expect(resolveBasePath('/48hrs_lab')).toBe('/48hrs_lab/');
+    expect(resolveBasePath('/48hrs_lab/')).toBe('/48hrs_lab/');
+    expect(routerBasename('/')).toBe('');
+    expect(routerBasename('/48hrs_lab/')).toBe('/48hrs_lab');
+  });
+
+  it('refuses relative or URL-like base paths', () => {
+    for (const bad of ['48hrs_lab', 'https://x.com/lab/', '/a//b', '/lab?x=1', '/lab lab']) {
+      expect(() => resolveBasePath(bad), bad).toThrow(/VITE_BASE_PATH/);
     }
   });
 });
@@ -43,7 +63,14 @@ async function transportWith(base: string | undefined) {
 }
 
 describe('HTTP transport (VITE_USE_MOCKS=false)', () => {
+  it('a sub-folder API base is used for every request', async () => {
+    const { httpTransport, fetchMock } = await transportWith('/48hrs_lab/api');
+    await httpTransport({ method: 'GET', path: '/cases/c1' });
+    expect((fetchMock.mock.calls as unknown as [string][])[0][0]).toBe('/48hrs_lab/api/cases/c1');
+  });
+
   it('without VITE_API_URL every request goes to /api/…, with cookies and the CSRF header', async () => {
+    document.cookie = 'XSRF-TOKEN=tok; path=/';
     const { httpTransport, fetchMock } = await transportWith(undefined);
     await httpTransport({ method: 'GET', path: '/cases', params: { status: ['received', 'assigned'], search: 'DL-1', empty: '' } });
     await httpTransport({ method: 'POST', path: '/cases/c1/status', body: { status: 'review' } });
@@ -55,6 +82,9 @@ describe('HTTP transport (VITE_USE_MOCKS=false)', () => {
       expect((init.headers as Record<string, string>)['X-Requested-With']).toBe('XMLHttpRequest');
     }
     expect(init2.body).toBe(JSON.stringify({ status: 'review' }));
+    expect((init2.headers as Record<string, string>)['X-XSRF-TOKEN']).toBe('tok');
+    expect((init1.headers as Record<string, string>)['X-XSRF-TOKEN']).toBeUndefined();
+    document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   });
 
   it('a configured VITE_API_URL on another origin is used as-is', async () => {
@@ -83,8 +113,8 @@ describe('every endpoint the web app calls exists on the API router', () => {
   }
 
   function apiRoutes() {
-    const src = readFileSync(join(root, '..', 'api', 'src', 'routes', 'index.ts'), 'utf8');
-    return [...src.matchAll(/\br\.(get|post|put|patch|delete)\('([^']+)'/g)].map((m) => ({ method: m[1].toUpperCase(), path: m[2] }));
+    const manifest = readFileSync(join(root, '..', '..', 'backend', 'routes', 'api-manifest.json'), 'utf8');
+    return JSON.parse(manifest) as { method: string; path: string }[];
   }
 
   it('checks every api.* call in the services (all use a literal path) and the whole router', () => {

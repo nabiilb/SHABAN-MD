@@ -1,47 +1,60 @@
 # 48HRS Dental Lab Management System
 
-Operations system for **48HRS Dental Lab** — case intake, production, quality control, delivery, invoicing and reporting, built around a live **48-hour commitment** on every case. Built from the `48hrs lab.zip` prototype (design tokens, screenshots, logo, tooth-numbering chart).
-
-A full-stack TypeScript system:
+**48HRS Dental Lab** is the operations system for a dental lab, built around a live **48-hour commitment** on every case. It covers case intake, production, quality control, delivery, invoicing and reporting. The design comes from the `48hrs lab.zip` prototype: design tokens, screenshots, logo and the tooth-numbering chart.
 
 ```
-React 19 SPA (apps/web)                       Vite · Tailwind 4 · React Router 7 · TanStack Query/Table · React Hook Form · Zod
-        │  REST + JSON, HTTP-only cookie session
+React 19 SPA (apps/web)                 Vite · Tailwind 4 · React Router 7 · TanStack Query/Table · React Hook Form · Zod
+        │  REST + JSON · HTTP-only session cookie · XSRF token
         ▼
-Node.js API (apps/api)                        Express 5 · Zod · jose (JWT) · helmet · multer · pino
-        │  route → controller → service → repository
+Laravel 13 API (backend/)               Eloquent · form requests · session guard · gates & policies · queue · scheduler
+        │  controllers → services (transactions, row locks) → Eloquent
         ▼
-Prisma ORM 7 (prisma/)  ──►  PostgreSQL       migrations · seed · transactions · row locks
-        ▲
-Deadline worker (apps/api/src/jobs)           at-risk / overdue alerts, credential purge
+MySQL 8                                  31 tables · foreign keys · unique indexes · InnoDB · utf8mb4
 
-Shared domain (packages/shared)               types · enums · permissions · workflow · SLA · billing · analytics · Zod schemas
+Shared domain (packages/shared)          types · permissions · workflow · SLA · billing · analytics · Zod schemas
 ```
 
-The browser, the API and the in-browser mock backend use **the same** types, permission catalogue, workflow rules, SLA engine, billing rules, validation schemas and report aggregations from `packages/shared`, so the three can never disagree. **PostgreSQL behind the Node API is the source of truth**; the mock backend is an optional development tool.
+Hosting target: **Hostinger shared hosting**, which provides PHP, MySQL, git and cron, but no Node.js and no daemons.
+- The React build is uploaded as static files.
+- Laravel runs from a folder outside `public_html`.
+- One cron entry drives the scheduler and the queue.
+
+The browser app and the optional in-browser mock backend share the TypeScript rules in `packages/shared`. The Laravel API implements the same rules in PHP (`backend/app/Domain`). Parity tests run the PHP rules against fixtures generated from the TypeScript ones, so the three can't silently disagree. **MySQL behind Laravel is the source of truth.**
 
 ---
 
-## 1. Quick start (development)
+## 1. Local development
 
-Prerequisites: **Node.js 22+** and **PostgreSQL 14+** (16 recommended).
+Prerequisites:
+- **PHP 8.3+** with `pdo_mysql`, `mbstring`, `xml`, `curl`, `intl`, `bcmath` and `zip`;
+- **Composer 2**;
+- **MySQL 8**;
+- **Node.js 22+**, for the React app and the web tests only.
 
 ```bash
 cd 48hrs-dental-lab
-cp .env.example .env                    # backend settings — replace every CHANGE_ME
-cp apps/web/.env.example apps/web/.env  # frontend settings (public, no secrets)
+npm install                                   # web + shared workspaces
 
-# create a database user and the three databases (dev, tests, e2e)
-createuser --createdb --pwprompt lab
-createdb -O lab dental_lab && createdb -O lab dental_lab_test && createdb -O lab dental_lab_e2e
+# MySQL: a user and three databases (development, PHP tests, end-to-end tests)
+mysql -uroot -e "CREATE USER 'lab'@'localhost' IDENTIFIED BY '…'; CREATE USER 'lab'@'127.0.0.1' IDENTIFIED BY '…';
+  CREATE DATABASE dental_lab; CREATE DATABASE dental_lab_test; CREATE DATABASE dental_lab_e2e;
+  GRANT ALL ON dental_lab.* TO 'lab'@'localhost', 'lab'@'127.0.0.1';
+  GRANT ALL ON dental_lab_test.* TO 'lab'@'localhost', 'lab'@'127.0.0.1';
+  GRANT ALL ON dental_lab_e2e.* TO 'lab'@'localhost', 'lab'@'127.0.0.1';"
 
-npm install            # installs every workspace and generates the Prisma client
-npm run db:migrate     # applies prisma/migrations to DATABASE_URL
-npm run db:seed        # demo lab data; every demo account gets SEED_USER_PASSWORD
-npm run dev            # API :4000 + worker + web :5173 (the web dev server proxies /api)
+cd backend
+composer install
+cp .env.example .env                          # set DB_PASSWORD and SEED_USER_PASSWORD (replace every CHANGE_ME)
+php artisan key:generate
+php artisan migrate                           # every table, from an empty database
+SEED_MODE=demo php artisan db:seed            # the demo lab; every demo account gets SEED_USER_PASSWORD
+cd ..
+
+cp apps/web/.env.example apps/web/.env        # public front-end settings (no secrets)
+npm run dev                                   # Laravel :8000 + queue worker + scheduler + web :5173
 ```
 
-Open http://localhost:5173 and sign in with a demo account below and your `SEED_USER_PASSWORD`.
+Open http://localhost:5173 and sign in with a demo account below, using your `SEED_USER_PASSWORD`. The Vite dev server proxies `/api` to `php artisan serve`, so everything stays on one origin.
 
 | Role | Demo account |
 | --- | --- |
@@ -55,112 +68,119 @@ Open http://localhost:5173 and sign in with a demo account below and your `SEED_
 | Client (Smile Dental Clinic) | amina@smiledental.so |
 | Client — disabled account | layla@horizondental.so |
 
+Demo accounts exist only after an explicit `SEED_MODE=demo` seed. The default (`base`) seed never creates them, and production refuses demo data unless `ALLOW_DEMO_SEED=true`.
+
 ### Scripts (repository root)
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | API (watch) + deadline worker + web dev server, one terminal |
-| `npm run dev:api` / `npm run dev:web` / `npm run worker` | One process each |
-| `npm run build` | Web (`tsc -b` + Vite → `apps/web/dist`) and API (esbuild → `apps/api/dist/server.js`, `worker.js`) |
-| `npm start` / `npm run start:worker` | Run the built API / worker |
-| `npm run start:worker:once` (dev: `npm run worker:once`) | One worker pass, then exit (cron / systemd timer) |
-| `npm run typecheck` · `npm run lint` | TypeScript in every workspace · ESLint for the whole repo |
-| `npm test` | Unit and integration tests of every workspace (see §9) |
-| `npm run test:e2e` | Full-stack browser tests (web + API + PostgreSQL) |
-| `npm run db:migrate` · `db:deploy` · `db:seed` · `db:reset` · `db:generate` | Prisma: dev migration · apply migrations · seed · reset · regenerate client |
+| `npm run dev` | `php artisan serve` + `queue:work` + `schedule:work` + the Vite dev server |
+| `npm run build` | Production web build (`apps/web/dist`) |
+| `npm run release` | Hostinger release: the web build for `/48hrs_lab/`, `.htaccess`, `laravel.php`, and Laravel with a `--no-dev` vendor, packed as `release/48hrs-lab-release.tar.gz` (§8) |
+| `npm run typecheck` · `npm run lint` | TypeScript in every workspace · ESLint |
+| `npm test` | shared + web unit tests (Vitest) |
+| `npm run test:api` | Laravel tests (PHPUnit on MySQL) |
+| `npm run test:e2e` | Playwright, running browser → Apache (Hostinger layout) → Laravel → MySQL |
+| `npm run contract:export` | Regenerates `backend/database/data/demo.json` and `backend/tests/Fixtures/shared-rules.json` from `packages/shared` |
 
 ## 2. Project structure
 
 ```
-48hrs-dental-lab/
-├── apps/
-│   ├── web/                     React SPA (unchanged UI; talks to the API through services/)
-│   │   ├── src/
-│   │   │   ├── services/        the only code that talks to the backend
-│   │   │   │   └── api/         client (refresh-and-retry on 401), http-transport (cookies + CSRF header), server-clock
-│   │   │   ├── mocks/           optional in-browser backend with the same REST contract (VITE_USE_MOCKS=true)
-│   │   │   ├── hooks/api/       TanStack Query hooks per domain
-│   │   │   ├── components/ pages/ layouts/ routes/ stores/ …
-│   │   │   └── test/            Vitest (UI + mock backend)
-│   │   └── e2e/                 Playwright full-stack tests
-│   └── api/                     Node.js REST API
-│       ├── src/
-│       │   ├── config/          validated environment (refuses to start with weak or missing settings)
-│       │   ├── routes/          every endpoint and its permission guard
-│       │   ├── controllers/     parse request → call service → respond
-│       │   ├── services/        business rules, transactions (cases, workflow, SLA, payments, …)
-│       │   ├── repositories/    Prisma queries, SQL filters, row → DTO mappers
-│       │   ├── policies/        row-level scope (own clinic / assigned technician)
-│       │   ├── middleware/      authentication, authorization, CSRF, validation, rate limits, uploads, errors
-│       │   ├── notifications/   recipient resolution + notification writes
-│       │   ├── jobs/            deadline scan + worker process
-│       │   ├── lib/             prisma, password hashing, tokens, cookies, storage, mailer, logger
-│       │   ├── db/seed.ts       base + demo seeding (used by prisma/seed.ts and the tests)
-│       │   └── generated/       Prisma client (generated, not committed)
-│       └── test/                Vitest + Supertest against a real PostgreSQL database
-├── packages/shared/src/         types, permissions, workflow, sla, billing, analytics, notifications,
-│                                case-requests (REST contract), schemas (Zod), dates, demo-data
-├── prisma/                      schema.prisma · migrations/ · seed.ts
-├── deploy/                      staging / production env templates · nginx.conf.example (HTTPS proxy) · systemd/ units
-└── scripts/dev.mjs              runs the whole stack for development
+apps/web/                 React app (pages, components, services, mock backend, Vitest, Playwright e2e)
+  src/services/api/       HTTP transport: credentials, XSRF header, 419 retry, server clock
+  e2e/                    full-stack Playwright suite; serve-apache.mjs builds the Hostinger layout
+backend/                  Laravel API — see backend/README.md (every endpoint)
+  app/Domain/             business rules (PHP ports of packages/shared)
+  app/Services/           use cases: workflow, payments, files, analytics, notifications…
+  database/migrations/    MySQL schema · database/seeders/ base + demo seeds
+  routes/api.php          the REST API · routes/console.php commands + schedule
+  tests/Unit|Feature|Http parity, API and real-server tests
+packages/shared/          TypeScript domain shared by the web app and the mock backend
+deploy/hostinger/         public_html/48hrs_lab templates: .htaccess, .user.ini, laravel.php
+deploy/production.env.example   Laravel .env template for Hostinger
+scripts/                  dev.mjs (local stack) · build-release.mjs (Hostinger release)
 ```
 
 ## 3. Environment variables
 
-Backend variables live in the root `.env` (template: `.env.example`; staging/production templates in `deploy/`). **Never commit `.env` files**, database passwords, JWT secrets or real credentials — `.gitignore` excludes them. The API validates its configuration at start-up and refuses to run with a short `JWT_SECRET` or one still holding a template `CHANGE_ME` placeholder, or an unknown time zone; in production it also refuses non-secure cookies, a missing or non-`https://` allowed origin, a non-`https://` or localhost `APP_URL`, `CHANGE_ME` in `DATABASE_URL`/`SMTP_URL`, a localhost `MAIL_FROM` and the log mail transport. The seed refuses `CHANGE_ME` passwords and, in production, demo data.
+The Laravel settings are in `backend/.env`; templates are `backend/.env.example` (development) and `deploy/production.env.example` (Hostinger). **Never commit `.env`.** In production the app refuses to boot or run commands while any of these holds:
+- a `CHANGE_ME` placeholder;
+- `APP_DEBUG=true`;
+- an `http://` or localhost `APP_URL`/`FRONTEND_URL`;
+- non-Secure cookies;
+- the log mailer or a sync queue;
+- an empty `DB_PASSWORD`;
+- an unknown time zone.
+
+`php artisan lab:check-config` lists every problem. Only the setup commands (`key:generate`, `lab:check-config`, `config:clear`…) run while the configuration is invalid.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | — | PostgreSQL connection (API, worker, Prisma) |
-| `TEST_DATABASE_URL`, `E2E_DATABASE_URL` | — | Disposable databases for `npm test` / `npm run test:e2e` (wiped each run) |
-| `PORT` | `4000` | API port |
-| `CORS_ORIGINS` | — | Web origins allowed to call the API with cookies (comma-separated) |
-| `TRUST_PROXY` | `0` | Reverse proxies in front of the API (client IPs, secure cookies) |
-| `JWT_SECRET` | — | ≥ 32 characters (`openssl rand -base64 48`) |
-| `ACCESS_TOKEN_TTL_MINUTES` | `15` | Access-token lifetime (silently refreshed) |
-| `SESSION_TTL_MINUTES` | `480` | Absolute session length (8 h); refresh never extends it |
-| `COOKIE_SECURE` / `COOKIE_SAMESITE` / `COOKIE_DOMAIN` | `true` / `lax` / — | Cookie attributes (`false` only for http://localhost) |
-| `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCK_MINUTES` | `5` / `15` | Per-account lockout after wrong passwords |
-| `AUTH_RATE_LIMIT` | `100` | Sign-in requests per IP per 15 min |
-| `LAB_TIMEZONE` | `UTC` | The lab's working day (due today, reports, dashboard periods) |
-| `UPLOAD_DIR` / `MAX_UPLOAD_MB` | `./storage/uploads` / `50` | Case-file storage (relative to `apps/api`) and size limit |
-| `APP_URL` | `http://localhost:5173` | Web URL used in password-reset links |
-| `MAIL_TRANSPORT` / `SMTP_URL` / `MAIL_FROM` | `log` | `smtp` in staging/production; `log` prints links (development only) |
-| `WEB_DIST_DIR` | — | Serve the built SPA from the API (single origin), e.g. `../web/dist` |
-| `WORKER_INTERVAL_SECONDS` | `60` | Deadline-scan interval |
-| `LOG_LEVEL` | `info` | pino log level |
-| `SEED_MODE`, `SEED_USER_PASSWORD`, `SEED_ADMIN_*`, `ALLOW_DEMO_SEED` | — | Seeding (§4) |
+| `APP_ENV`, `APP_KEY`, `APP_DEBUG`, `APP_URL` | — | Laravel basics (`APP_KEY` via `php artisan key:generate`) |
+| `FRONTEND_URL` | `APP_URL` | The React app's address (password-reset links) |
+| `LAB_TIMEZONE` | `UTC` | The lab's working day: due today, reports, dashboard periods, case-number year |
+| `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | — | MySQL 8 |
+| `SESSION_DRIVER` | `database` | Revocable sessions (required in production) |
+| `SESSION_TTL_MINUTES` | 480 | Absolute end of a sign-in (activity never extends it) |
+| `SESSION_LIFETIME` | = TTL | Idle limit |
+| `SESSION_PATH` | `/` | Cookie path. Hostinger: `/48hrs_lab/` |
+| `SESSION_SECURE_COOKIE` | — | `true` in production (HTTPS) |
+| `SESSION_SAME_SITE` | `lax` | |
+| `LOGIN_MAX_ATTEMPTS`, `LOGIN_LOCK_MINUTES` | 5, 15 | Per-account lockout |
+| `AUTH_RATE_LIMIT`, `PASSWORD_RESET_RATE_LIMIT`, `API_RATE_LIMIT` | 100 / 15 min, 10 / h, 600 / min | Per-IP limits |
+| `TRUSTED_PROXIES` | — | Proxies whose `X-Forwarded-*` headers count (`*` behind a CDN) |
+| `CORS_ALLOWED_ORIGINS` | — | Extra browser origins allowed to call the API with cookies |
+| `UPLOAD_DIR`, `MAX_UPLOAD_MB` | `storage/app/private/cases`, 50 | Private case files |
+| `QUEUE_CONNECTION`, `CACHE_STORE` | `database` | Queue and cache in MySQL |
+| `MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_SCHEME`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS` | `log` | SMTP for password-reset mail |
+| `SEED_MODE`, `SEED_USER_PASSWORD`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_NAME`, `SEED_ADMIN_PASSWORD`, `ALLOW_DEMO_SEED` | `base` | Seeding (§4). Pass them on the command line, not in `.env` |
 
-Frontend variables (`apps/web/.env`, compiled into the public bundle — no secrets):
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `VITE_API_URL` | `/api` | API base URL, **must end in `/api`** (e.g. `/api` or `https://api.example.com/api`; the dev server and the build fail otherwise). Same origin by default; the dev server proxies `/api` → `API_PROXY_TARGET` (default `http://localhost:4000`) |
-| `VITE_USE_MOCKS` | `false` | `true` runs the UI against the in-browser mock backend, without API or database |
-| `VITE_MOCK_LATENCY_MS`, `VITE_SESSION_TIMEOUT_MINUTES` | `250`, `480` | Mock backend only |
+The front-end settings (`apps/web/.env`) are public and baked in at build time:
+- `VITE_API_URL`: default `/api`; Hostinger uses `/48hrs_lab/api`.
+- `VITE_BASE_PATH`: default `/`; Hostinger uses `/48hrs_lab/`.
+- `VITE_USE_MOCKS`: `true` runs the in-browser mock backend instead of the API.
 
 ## 4. Database
 
-- **Schema:** `prisma/schema.prisma` — `users, roles, permissions, role_permissions, sessions, password_reset_tokens, clinics, doctors, patients, technicians, lab_services, settings, sequences, cases, case_notes, case_status_history, case_assignments, case_attachments, quality_checks, quality_issues, deliveries, invoices, payments, notifications, activity_log`. Foreign keys everywhere (`RESTRICT` for business records, `CASCADE` for a case's own history/files/QC/deliveries/invoice), indexes on case number, patient, doctor, clinic, technician, status, priority, `due_at`, `received_at`, `created_at` and invoice number; money is `DECIMAL(12,2)`; timestamps are `timestamptz`.
-- **Migrations:** `npm run db:migrate` (development: creates and applies), `npm run db:deploy` (staging/production: applies committed migrations only).
-- **Seeding:** `npm run db:seed`
-  - `SEED_MODE=demo` (default outside production) replaces all data with the demo lab — the same dataset the mock backend uses, with sample files written to storage.
-  - `SEED_MODE=base` (default in production) creates the permission catalogue, default roles, lab settings and number sequences, and the first Super Admin from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_NAME` / `SEED_ADMIN_PASSWORD`. It is idempotent and never touches existing business data.
-- Case, invoice and patient numbers come from row-locked sequences, so concurrent requests never collide.
+- **Schema:** `backend/database/migrations` builds all 31 tables from an empty database. Details:
+  - lower-case ULID string keys;
+  - `DATETIME(3)` in UTC;
+  - enums in workflow order;
+  - foreign keys with explicit `ON DELETE` rules;
+  - unique indexes on case, invoice and patient numbers, e-mails, storage keys and **payment references**;
+  - indexes for every list filter.
+- **Rollback:** `php artisan migrate:reset` removes everything.
+- **Seeding:** `php artisan db:seed` with `SEED_MODE`:
+  - `base` (the default) creates the permission catalogue, the default roles, lab settings, number sequences and the first Super Admin from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_NAME` / `SEED_ADMIN_PASSWORD`. It is idempotent, and it refuses weak or placeholder passwords. The price list (Services) is managed in the app afterwards, as with the Node version.
+  - `demo` replaces **all** data with the demo lab: the same dataset the mock backend uses, with sample files written to `UPLOAD_DIR`.
 
 ## 5. Authentication and security
 
-- **Passwords** are hashed with scrypt (salted, memory-hard, parameters stored with the hash). Nothing stores or logs plain-text passwords.
-- **Sessions:** `POST /api/auth/login` creates a `sessions` row with an absolute expiry and sets two **HTTP-only** cookies: `lab_access` (HS256 JWT, 15 min, path `/api`, carries the session id) and `lab_refresh` (opaque random token, stored only as a SHA-256 hash, path `/api/auth`). JavaScript never sees either token.
-- **Refresh:** on a 401 the web client calls `POST /api/auth/refresh` once (shared by concurrent requests) and retries. The refresh token is **rotated** on every use (a replayed old token is refused); the session's end never moves.
-- **Expiry and revocation:** every request re-checks the session row — logout, a password reset, disabling a user or reaching the 8-hour end kills all of that session's tokens at once; role changes apply on the next request. The UI signs out at the session end and returns the user to the same page after signing in again (`/login?next=…`, same-origin paths only).
-- **Clock:** deadlines and session ends are server time. Each response carries `X-Server-Time`; the web app corrects its countdowns and session checks with it, so a wrong device clock can neither fake an SLA state nor end a session early.
-- **Protections:** helmet security headers (strict CSP for the API and, when served, the SPA), CORS allow-list with credentials, CSRF guard (state-changing requests need `X-Requested-With`; a foreign `Origin` is refused), per-account lockout in the database plus per-IP rate limits on sign-in and reset, 1 MB JSON limit, Zod validation of every body and query filter, uploads limited by size/extension **and content signature** (renamed executables or HTML are rejected), files stored under random keys outside the web root and served with `Content-Disposition: attachment` and `nosniff`, SQL only through Prisma or parameterised queries.
-- **Password reset:** `POST /api/auth/forgot-password` answers identically whether or not the account exists; the one-hour token is stored as a hash, single-use, and resetting ends every session of that user.
+- **Sessions:** Laravel's session guard with the database driver. The session id travels in an HTTP-only, SameSite=Lax cookie that is Secure in production and scoped to `SESSION_PATH`; no token is readable from JavaScript.
+  - Each sign-in ends `SESSION_TTL_MINUTES` after it started (absolute).
+  - Logout, a password reset or disabling the user deletes the session rows.
+  - Role and permission changes apply on the next request.
+  - The UI signs out at the session end and returns to the same page after signing in again.
+- **CSRF:** every state-changing request carries `X-XSRF-TOKEN`, echoed from Laravel's `XSRF-TOKEN` cookie. Without it the API answers 419; the web app fetches a new token (`GET /api/auth/csrf`) and retries once. A cross-site `Origin` is refused.
+- **Passwords:** bcrypt, with a policy of at least 8 characters, letters and numbers. After repeated wrong passwords the account is locked, and the lock is stored in the database.
+- **Rate limits:** per IP on sign-in, password reset and the whole API. Every 429 carries `Retry-After`.
+- **Password reset:** the same answer whether or not the account exists. The token is hashed, single-use and expires after 60 minutes, and the mail is sent through the queue.
+- **Clock:** deadlines and session ends use server time. Responses carry `X-Server-Time`, and the web app corrects its countdowns with it, so a wrong device clock can neither fake an SLA state nor end a session early.
+- **Protections:**
+  - security headers on the API and the SPA (strict CSP, `nosniff`, `DENY` framing, HSTS over HTTPS);
+  - `no-store` API responses;
+  - validation of every body and query filter, with the web app's messages;
+  - SQL only through Eloquent or bound parameters, with LIKE wildcards escaped;
+  - errors never expose internals (`APP_DEBUG=false`);
+  - logs carry ids and paths, not request bodies or search terms.
+- **Uploads:**
+  - an allow-list of extensions, `MAX_UPLOAD_MB`, and the content signature (renamed executables or HTML are refused; `.stl` must be a real ASCII or binary STL); the client's MIME type is ignored;
+  - files are stored under random keys on a private disk outside any web root;
+  - files are served only through the authorised download endpoint, as attachments.
 
 ## 6. Roles and permissions
 
-Eight roles — Super Admin, Admin, Lab Manager, Reception, Technician, Quality Control, Delivery, Client (clinic portal) — over a granular permission catalogue (`packages/shared/src/permissions.ts`, stored in the `permissions` table). Defaults:
+There are eight roles: Super Admin, Admin, Lab Manager, Reception, Technician, Quality Control, Delivery and Client (the clinic portal). They share a granular permission catalogue (`packages/shared/src/permissions.ts`, stored in the `permissions` table). Defaults:
 
 | Permission | SA | Adm | Mgr | Rec | Tech | QC | Del | Cli |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
@@ -213,9 +233,11 @@ Eight roles — Super Admin, Admin, Lab Manager, Reception, Technician, Quality 
 | `settings.manage` | ● | ● |  |  |  |  |  |  |
 | `audit.view` | ● | ● |  |  |  |  |  |  |
 
-- **The backend enforces everything.** Each route declares its permission (`apps/api/src/routes/index.ts`); services add **row-level scope** (technicians see only cases assigned to them, clinic users only their clinic's cases, invoices and directory records — anything else answers 404). The UI uses the same keys only to hide what the API would refuse.
-- Workflow steps additionally require the right person: production steps only the assigned technician (or someone who can assign), client steps only the owning clinic — one function, `canPerformAction()`, shared by UI and API.
-- **Roles & Permissions** (Super Admin) edits the matrix live; Super Admin is locked to the full catalogue.
+- **The backend enforces everything.** Each route declares its permission (`permission:` middleware backed by gates, `backend/routes/api.php`).
+  - Policies and `App\Support\Scope` add **row-level scope**: technicians see only cases assigned to them; clinic users see only their clinic's cases, invoices and directory records. Anything else answers 404.
+  - The UI uses the same keys only to hide what the API would refuse.
+- Workflow steps also require the right person: production steps need the assigned technician (or someone who can assign), and client steps the owning clinic. One rule decides this, `canPerformAction()`, in TypeScript and PHP, and it is parity-tested.
+- **Roles & Permissions** (Super Admin) edits the matrix live. Super Admin is locked to the full catalogue.
 
 ## 7. The 48-hour workflow
 
@@ -226,115 +248,191 @@ Lab:            Received → Review → Assigned → In production → Quality c
 Any open stage → Cancelled
 ```
 
-- **The server starts the clock:** `received_at` is the server time when reception registers a case or accepts a portal submission; `due_at = received_at + SLA hours` (48 by default, set in Settings). `CaseSlaService` classifies cases as on time, at risk, overdue, completed on time or completed late — from stored timestamps at server time, never the browser clock.
-- **Every transition is validated on the backend:** a step that is not valid from the current status is `409 Invalid workflow transition.`; the status update is conditional on the status that was validated, so two people acting at once cannot both succeed (the second gets 409, and the UI reloads the case). Input rules (QC issues and notes, courier, receiver, payment) come from the shared `validateActionInput()`; nothing is written when any rule fails.
-- Each step writes, in one transaction: the status and its timestamp, `case_status_history` (from, to, user, role, note), the assignment log, QC checks with their issues, delivery records (who delivered, when, to whom, received by, notes), the invoice on receipt, an optional deposit, the activity log and the notifications.
-- **Deadline worker** (`npm run worker`, or `npm run start:worker` in production): every `WORKER_INTERVAL_SECONDS` it finds cases entering the at-risk window or passing their deadline and notifies the technician, lab managers and admins (plus reception when overdue). Each alert is claimed with a conditional update, so it is sent **exactly once per case** even with several workers running. `npm run start:worker:once` (development: `npm run worker:once`) runs a single pass and exits, for cron-style scheduling.
+- **The server starts the clock.** `received_at` is the server time when reception registers a case or accepts a portal submission. `due_at = received_at + SLA hours` (48 by default, set in Settings). States come from the stored timestamps at server time: on track, at risk, overdue, completed on time or late.
+- **Every transition is validated on the server.**
+  - A step that is not valid from the current status gets `409 Invalid workflow transition.`, with the current status.
+  - The status update is conditional on the validated status, so two people acting at once can't both succeed.
+  - The input rules (QC issues and notes, courier, receiver, payment) are the shared `validateActionInput()`. When any rule fails, nothing is written.
+- **Each step writes everything in one transaction:**
+  - the status and its timestamp;
+  - `case_status_history` (from, to, user, role, note);
+  - the assignment log;
+  - QC checks and their issues;
+  - delivery records (who, when, to whom, received by, notes);
+  - the invoice on receipt, plus an optional deposit;
+  - the activity log and the notifications.
+- **Payments:**
+  - Partial and final payments are recorded against the invoice, which is locked with `SELECT … FOR UPDATE`, so concurrent payments can never exceed the total.
+  - Transaction references are required for non-cash payments and can be recorded only once, enforced by a locking check plus a unique index.
+  - `paid`, `remaining` and the invoice status are computed on the server.
+- **Deadline alerts** (the scheduler, every minute) notify the technician, lab managers and admins when a case enters the at-risk window or passes its deadline; reception is added when overdue. Each alert is claimed with a conditional update, so it is sent **exactly once per case**.
 
-## 8. REST API
+## 8. Deploying to Hostinger
 
-Base path `/api`. JSON in, JSON out, camelCase. Lists are paginated: `?page=1&perPage=20` → `{ data, meta: { page, perPage, total, lastPage } }`; sort with `?sort=<key>&dir=asc|desc`; array filters repeat the key (`?status=received&status=assigned`); dates are `YYYY-MM-DD` in the lab's time zone.
+Target layout (`sooryoscan.com`, home `~` = `/home/u123456789`):
 
-| Area | Endpoints |
-| --- | --- |
-| Health | `GET /health` · `GET /health/ready` (checks the database) |
-| Auth | `POST /auth/login` · `GET /auth/me` · `POST /auth/logout` · `POST /auth/refresh` · `POST /auth/forgot-password` · `POST /auth/reset-password` |
-| Cases | `GET /cases` (search, status[], priority[], technicianId, doctorId, clinicId, patientId, caseType, paymentStatus, sla, from, to, dueFrom, dueTo, openOnly, sort, dir, page, perPage) · `GET /cases/counts` · `POST /cases` · `GET /cases/:id` · `PATCH /cases/:id` · `DELETE /cases/:id` |
-| Workflow | `POST /cases/:id/status` `{ status, note?, payment? }` · `POST /cases/:id/assign` `{ technicianId, note? }` · `POST /cases/:id/qc` `{ result: pass\|fail, issues, notes }` · `POST /cases/:id/rework` `{ note? }` · `POST /cases/:id/delivery` `{ status: out_for_delivery\|delivered, method, courierName?, deliveredTo?, receivedBy?, notes? }` |
-| Case notes & files | `POST /cases/:id/notes` · `POST /cases/:id/attachments` (multipart `file`, `category`) · `GET /cases/:id/attachments/:attachmentId/download` · `DELETE /cases/:id/attachments/:attachmentId` |
-| Directory | `GET/POST /patients`, `GET/PUT/DELETE /patients/:id` — same for `/doctors`, `/clinics`, `/technicians` |
-| Finance | `GET /invoices` · `POST /invoices` `{ caseId }` · `GET /invoices/:id` · `GET /payments` · `POST /payments` `{ invoiceId, amount, method, reference?, notes?, paidAt? }` |
-| Lab history | `GET /quality-control` · `GET /deliveries` |
-| Dashboard & reports | `GET /dashboard?period=today\|7d\|30d\|month` · `GET /reports/cases` · `/reports/production` · `/reports/technicians` · `/reports/clinics` · `/reports/financial` (all take from, to, technicianId, doctorId, clinicId, status, caseType) |
-| Search | `GET /search?q=` — cases, patients, doctors, clinics (phone numbers match on digits), invoices, within the caller's scope |
-| Notifications | `GET /notifications?unreadOnly=` · `POST /notifications/:id/read` · `POST /notifications/read-all` |
-| Administration | `GET/POST /users`, `PUT/DELETE /users/:id`, `PATCH /users/:id/status` · `GET /roles`, `PUT /roles/:key`, `GET /permissions` · `GET/POST /services`, `PUT/DELETE /services/:id` · `GET/PUT /settings` · `GET /activity` |
+```
+~/domains/sooryoscan.com/
+├── public_html/
+│   └── 48hrs_lab/            ← web root of the app: https://sooryoscan.com/48hrs_lab/
+│       ├── index.html, assets/     React build (base /48hrs_lab/, API /48hrs_lab/api)
+│       ├── .htaccess               SPA fallback · /api → laravel.php · dotfiles denied · headers
+│       ├── .user.ini               upload limits for PHP
+│       └── laravel.php             front controller: boots Laravel from ../../48hrs_lab_app
+└── 48hrs_lab_app/            ← Laravel (backend/): code, vendor, .env, storage, case files
+                                NOT under public_html: never reachable by URL
+```
 
-**Errors** always have the same shape:
+`/48hrs_lab/api/*` is rewritten to `laravel.php`, which runs Laravel exactly as its own `public/index.php` would. Laravel therefore still sees `/api/...`, and the rest of `public_html` is untouched.
 
-| Status | Body |
-| --- | --- |
-| 401 | `{ "message": "Please sign in to continue." }` (or "Your session has expired…") |
-| 403 | `{ "message": "Access restricted." }` |
-| 404 | `{ "message": "Resource not found." }` |
-| 409 | `{ "message": "Invalid workflow transition.", "currentStatus": "review", "errors": { "status": ["The case is currently \"In review\"."] } }` |
-| 422 | `{ "message": "Some fields need attention.", "errors": { "field": ["…"] } }` (business rules without a field: `errors: {}`) |
-| 429 | `{ "message": "Too many attempts. Wait a minute and try again." }` |
+### First deployment
 
-**Payments:** `remaining = total − paid`; status is `unpaid`, `partial`, `paid` or `overdue` (money owed after the due date), computed in one place. Every payment goes through one ledger function that locks the invoice row, validates the amount against the current balance (shared `validatePaymentAmount`, reference required for non-cash) and updates the paid total in the same transaction — two cashiers can never over-collect. A transaction **reference is recorded only once** across all invoices (bank / mobile-money receipts identify one real payment): a reused reference — including two identical submissions racing each other, serialised by a PostgreSQL advisory lock — is refused with `422 { "message": "Some fields need attention.", "errors": { "reference": ["This reference is already recorded on INV-…"] } }` (`payment.reference` when the payment is part of accepting a submission, in which case the whole acceptance is rolled back). The field-level 422 lets the form show the problem on the reference input; nothing is written.
+1. **hPanel** (settings in the Hostinger control panel):
+   - **Advanced → PHP Configuration:** PHP **8.3** or newer, with the `pdo_mysql`, `mbstring`, `intl`, `bcmath`, `fileinfo` and `zip` extensions.
+   - **Databases → MySQL:** create a database and a user; note the `u…_` names and the password.
+   - **Emails:** create `no-reply@sooryoscan.com` for the reset mails.
+   - **SSL:** make sure the domain is on HTTPS.
+2. **Build the release** on any machine with Node 22 and Composer 2. The server needs neither:
+   ```bash
+   npm ci && npm run release        # → release/48hrs-lab-release.tar.gz
+   ```
+3. **Upload and unpack** over SSH (hPanel → Advanced → SSH access), or with the File Manager:
+   ```bash
+   scp -P 65002 release/48hrs-lab-release.tar.gz u123456789@<server-ip>:~/
+   ssh -p 65002 u123456789@<server-ip>
+   cd ~/domains/sooryoscan.com && tar -xzf ~/48hrs-lab-release.tar.gz && rm ~/48hrs-lab-release.tar.gz
+   ```
+   *Alternative with git:*
+   - `git clone` the repository to `~/48hrs-src`;
+   - copy `backend/` to `~/domains/sooryoscan.com/48hrs_lab_app` and run `composer install --no-dev --optimize-autoloader` there (Hostinger includes Composer);
+   - upload only `release/public_html/48hrs_lab` from a release build, since the React build needs Node.
+4. **Configure Laravel:**
+   ```bash
+   cd ~/domains/sooryoscan.com/48hrs_lab_app
+   cp ~/48hrs-src/deploy/production.env.example .env    # or upload deploy/production.env.example as .env
+   nano .env            # DB_DATABASE / DB_USERNAME / DB_PASSWORD, MAIL_PASSWORD, domain URLs
+   chmod 600 .env
+   php artisan key:generate --force
+   php artisan lab:check-config                  # must say: Configuration OK for production.
+   ```
+5. **Create the database and the first Super Admin.** The password is typed, not stored in `.env` or the shell history:
+   ```bash
+   php artisan migrate --force
+   read -rsp 'Admin password: ' SEED_ADMIN_PASSWORD; echo; export SEED_ADMIN_PASSWORD
+   SEED_MODE=base SEED_ADMIN_EMAIL=owner@sooryoscan.com SEED_ADMIN_NAME="Lab Owner" php artisan db:seed --force
+   unset SEED_ADMIN_PASSWORD
+   ```
+6. **Optimise and protect:**
+   ```bash
+   php artisan config:cache && php artisan route:cache && php artisan event:cache
+   chmod -R u+rwX storage bootstrap/cache
+   ```
+7. **Cron** (hPanel → Advanced → Cron Jobs → Custom, every minute). One entry runs everything:
+   ```
+   * * * * * cd /home/u123456789/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+   ```
+   The scheduler runs:
 
-### Web app ↔ API
+   | Task | When |
+   | --- | --- |
+   | Deadline scan (queued job) | every minute |
+   | `queue:work --stop-when-empty --max-time=50` | every minute; sends reset mails and runs queued jobs |
+   | `lab:purge-expired`, `auth:clear-resets` | hourly |
+   | `queue:prune-failed` | daily |
 
-Components never call `fetch`: **page → TanStack Query hook → service (`apps/web/src/services`) → API client → transport**. With `VITE_USE_MOCKS=false` (the default) the transport sends credentials-included requests to `VITE_API_URL`; workflow actions are mapped to their REST sub-resource and 422 keys are mapped back to the form fields. With `VITE_USE_MOCKS=true` the same requests are answered by `src/mocks` (same contract, same shared rules) — useful for UI work without a database. API-mode production builds contain no mock code or demo credentials.
+   Use the PHP binary that `which php` shows over SSH, with the same version as the site. If the plan does not allow the scheduler to start sub-processes (`proc_open` disabled), use these two entries instead:
+   ```
+   * * * * * cd /home/u123456789/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan lab:scan-deadlines >> /dev/null 2>&1
+   * * * * * cd /home/u123456789/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan queue:work --stop-when-empty --max-time=50 --tries=3 >> /dev/null 2>&1
+   ```
+8. **Verify:**
+   ```bash
+   curl -fsS https://sooryoscan.com/48hrs_lab/api/health         # {"status":"ok"}
+   curl -fsS https://sooryoscan.com/48hrs_lab/api/health/ready   # {"status":"ready"}  (database reachable)
+   php artisan schedule:list && php artisan queue:failed         # the schedule; failed jobs (should be none)
+   ```
+   Then open https://sooryoscan.com/48hrs_lab/ and sign in as the Super Admin. Add the price list (Services), clinics, doctors, technicians and users.
+
+### Updates
+
+1. Build a new release.
+2. `php artisan down`.
+3. Unpack it over the two folders. `.env` and `storage/` are not part of the archive, so they are kept.
+4. Run `php artisan migrate --force && php artisan config:cache && php artisan route:cache && php artisan event:cache && php artisan up`.
+
+### Backups
+
+Back up the MySQL database (hPanel → Backups, or `mysqldump`) **together** with `48hrs_lab_app/storage/app/private/cases` (the case files).
+
+### Notes
+
+- **Behind a CDN or proxy** (Cloudflare, Hostinger CDN) that sets `X-Forwarded-*`, set `TRUSTED_PROXIES=*`, so rate limits see the real client IP and HTTPS is detected.
+- **Another folder or domain:** use `npm run release -- --base=/other/ --app=other_app`. Then set `APP_URL`, `FRONTEND_URL` and `SESSION_PATH` to match.
+- **Tested locally:** this exact layout was served by Apache 2.4 with mod_php 8.3, `.htaccess` and the shim, and the full browser suite and a production-mode smoke test were run against it (§9). Hostinger serves `.htaccess` with LiteSpeed, which reads the same directives but was not available for testing.
 
 ## 9. Testing
 
-Prerequisites: `TEST_DATABASE_URL` and `E2E_DATABASE_URL` in the root `.env` — two **disposable** PostgreSQL databases (both are wiped; the runners refuse to use `DATABASE_URL`). Playwright needs Chromium (`npx playwright install chromium` once, unless it is pre-installed).
-
 ```bash
-npm run typecheck && npm run lint     # TypeScript (every workspace, incl. e2e specs) · ESLint
-npm test                              # shared + web + API suites (API: real PostgreSQL)
-npm run test:e2e                      # builds the web app in API mode, starts the API on it, runs Playwright
-npm run build                         # production web + API builds
-npm audit --omit=dev                  # runtime dependency advisories
+npm run typecheck && npm run lint          # TypeScript · ESLint
+npm test                                   # packages/shared + apps/web (Vitest)
+npm run test:api                           # backend: PHPUnit on MySQL (dental_lab_test, wiped)
+npm run test:e2e                           # Playwright: browser → Apache (Hostinger layout) → Laravel → MySQL (dental_lab_e2e, wiped)
 ```
 
-| Command | Suite | Tests |
-| --- | --- | --- |
-| `npm test -w @48hrs/shared` | dates in any time zone, the REST request contract, analytics, schemas, deadline alerts | 15 |
-| `npm test -w @48hrs/web` | UI (login, guards, tooth chart, forms, tables), the mock backend end to end, and the **API contract** (base URL, transport URLs, every service call ↔ a route on the Node router) | 100 |
-| `npm test -w @48hrs/api` | **Vitest + Supertest on a real PostgreSQL database**, including `security.test.ts`, `auth-rate-limit.test.ts`, `worker.test.ts` (real worker processes) and `web-serving.test.ts` | 118 |
-| `npm run test:e2e` | **Playwright: built web app + Node API + PostgreSQL** (no mocks) | 8 |
+| Suite | What it covers |
+| --- | --- |
+| `packages/shared` (Vitest) | Dates in any time zone, the REST request contract, analytics, schemas, deadline alerts, and staleness of the generated backend fixtures |
+| `apps/web` (Vitest) | UI (login, guards, tooth chart, forms, tables), the mock backend end to end, the HTTP transport (credentials, XSRF token, 419 retry, base path), and the **API contract**: every service call must match a route in `backend/routes/api-manifest.json` |
+| `backend/tests/Unit` | **Parity:** the PHP workflow, SLA, billing, analytics, permissions, notification texts and request validation give the same results as the TypeScript rules (fixtures generated from `packages/shared`). Also the production configuration guard and the route manifest. |
+| `backend/tests/Feature` | See the breakdown below |
+| `backend/tests/Http` | A real `php -S` server with 8 workers and real artisan processes. See the breakdown below. |
+| `apps/web/e2e` (Playwright) | See the breakdown below |
 
-**Deterministic time.** Every Vitest suite runs on a fixed test clock (`packages/shared/test/fixed-clock.ts`: Monday 12:00 lab time, advancing in real time), so results never depend on the machine's date, time of day or zone. Override it to check an edge, e.g. `TEST_EPOCH=2026-06-15T20:59:00Z TZ=America/Los_Angeles npm test` (one minute before lab midnight). The suites pass at lab 23:59 and 00:00, on New Year's Eve, across a DST switch and in UTC, Los Angeles, Kiritimati, Kolkata and New York. Playwright deliberately uses the real server clock (it verifies server-time behaviour) and moves deadlines in the database instead.
+**Feature tests** (in-process HTTP on MySQL, fixed clock):
+- **Authentication:** cookies, session regeneration, lockout, disabled accounts, the absolute session end, logout, disabling a user, live permission changes, password reset and its expiry, queued reset mail.
+- **RBAC:** an RBAC matrix of every role against representative endpoints, and every workflow action against every role.
+- **Tampering:** scope-widening query parameters, server-owned body fields, privilege escalation, spoofed payment actor.
+- **Workflow:** the full lifecycle, QC fail → rework → pass, 409 and 422 rules, the SLA clock.
+- **Payments:** payments, overdue invoices, duplicate references, rollback.
+- **Files:** STL/PDF/PNG round trips, spoofed content, oversize files, path traversal, outsiders; storage is never served.
+- **Other areas:** directory, search, reports, dashboard, notifications and deadline scans, administration, SQL injection attempts, safe errors.
 
-API tests: authentication (login, lockout, disabled accounts, CSRF, refresh rotation and replay, access-token expiry, absolute session end, logout revocation, disabling a user, live permission changes, password reset, the per-IP `AUTH_RATE_LIMIT` incl. spoofed `X-Forwarded-For`); an **RBAC matrix** of every role × representative endpoints (allowed exactly where the role holds the permission, `403 Access restricted.` elsewhere, 401 without a session); request tampering (scope-widening query parameters, server-owned body fields, privilege escalation, a technician re-assigning, a spoofed payment actor); every workflow action × every role; the complete flow with QC fail → rework → pass and persisted history; 409 on invalid and on concurrent transitions, assignments and QC results; 422 input rules with nothing written; the SLA clock; case CRUD, filters, sorting, pagination and row scope; payments (unpaid → partial → paid, overdue, invalid input, fully paid invoices, over-payment and **duplicate-reference races checked in SQL**, all-or-nothing acceptance with payment); files (ASCII/binary STL round-trip, client MIME ignored, double extensions, executables/HTML refused, size limit, 401 without a session, outsiders 404, known storage keys never served); the worker as a process (`--once` with and without work, two at once, failure → non-zero exit, continuous until SIGTERM); dashboard/report figures against the database; search; administration; production configuration guards and placeholder secrets.
+**Http tests** (real server and artisan processes):
+- CSRF (419);
+- cookie flags;
+- the per-IP sign-in limit, including a spoofed `X-Forwarded-For`;
+- **truly parallel requests:** two transitions, two assignments, two QC results, concurrent payments, the same reference twice on one invoice and on two invoices, eight payments racing for one balance, and a test that holds the invoice row lock to prove payments wait for it;
+- the scheduler draining the queue;
+- concurrent deadline scans;
+- a failing job landing in `failed_jobs`.
 
-End-to-end (committed `apps/web/e2e/full-stack.spec.ts`): client-portal submission with an STL upload (bytes checked on disk and via download; 401 anonymously) → acceptance with a deposit → assignment → production → QC fail → rework → QC pass → ready → dispatch → delivered → invalid then final payment → client confirms → completed, with history, QC and ledger verified in PostgreSQL and no console errors; deadline exceeded → overdue from the server clock and the worker; device clock 9 h ahead and 9 h behind (fresh login, reload, SLA from the server, expired server session still ends); technician restrictions in the UI and the API; a stale page in a second browser gets 409, refetches and shows the server state; silent token refresh then session end with sign-in and return; global search within the user's scope.
+**Playwright end-to-end** (the production build, served through `.htaccess` and `laravel.php` under `/48hrs_lab`):
+- **The full journey:** client-portal submission with an STL upload → acceptance with a deposit → assignment → production → QC fail → rework → QC pass → ready → dispatch → delivered → final payment → completed. The file bytes are checked on disk, and the history, QC and ledger in MySQL.
+- **Deadlines:** a deadline passes → overdue, via the scheduled scan, with no duplicate alert.
+- **Device clock:** 9 h ahead and 9 h behind.
+- **Permissions:** blocked in the UI and by the API.
+- **Stale page:** a stale page gets 409 and refetches.
+- **Tokens:** CSRF token loss → renewed, and a forged request → 419.
+- **Session end:** sign-out, then return after signing in.
+- **Search:** global search within scope.
+- **Deep links:** deep links and reloads under the sub-folder, with the rest of the domain untouched.
 
-## 10. Deployment (Node.js, verified)
+## 10. Known limitations
 
-The path below was run end to end on an empty PostgreSQL database from a fresh clone: runtime-only install, migrations, base seed, API + worker as production processes behind nginx with TLS, then a browser sign-in and an 80-check API smoke test (auth, RBAC, portal submission with STL, full lifecycle, payments incl. a raced duplicate reference, search, reports, worker alerts). No Docker image is provided because none has been verified.
-
-1. **Provision** PostgreSQL 14+ (backups on), Node.js 22+, nginx (or another TLS proxy), a DNS name and a certificate (e.g. `certbot --nginx -d lab.example.com`).
-2. **Get the code and build** (on the server or in CI — the build needs the dev tools):
-   ```bash
-   git clone <repository> /srv/48hrs-dental-lab && cd /srv/48hrs-dental-lab
-   npm ci                    # full install (build tools) + prisma generate
-   npm run build             # apps/web/dist and apps/api/dist
-   npm ci --omit=dev         # reinstall runtime dependencies only; the dist folders are kept
-   ```
-   `npm ci --omit=dev` cannot come *before* `npm run build`: TypeScript, Vite and esbuild are devDependencies. Prisma, `tsx` and `dotenv` are runtime dependencies, so migrations and the seed work after the prune.
-3. **Configure** the environment from `deploy/production.env.example` (staging: `deploy/staging.env.example`): as `/srv/48hrs-dental-lab/.env` (read by `npm start` and the Prisma CLI) or as `/etc/48hrs/api.env` for systemd, `chmod 600`. Set a unique `JWT_SECRET` (`openssl rand -base64 48`), the real `DATABASE_URL`, `CORS_ORIGINS` and `APP_URL` (`https://…`), `SMTP_URL`, `MAIL_FROM`, `UPLOAD_DIR` (writable, backed up), `TRUST_PROXY=1` behind nginx. The API refuses to start while any production rule in §3 is violated.
-4. **Migrate and seed:**
-   ```bash
-   npx prisma migrate deploy   # = npm run db:deploy; applies prisma/migrations (safe to re-run)
-   npm run db:seed             # production: SEED_MODE=base — catalogue, roles, settings, first Super Admin (idempotent)
-   ```
-   Then remove `SEED_ADMIN_PASSWORD` from the environment and change that password after the first sign-in.
-5. **Start the API and the worker** as services (`deploy/systemd/48hrs-api.service`, `deploy/systemd/48hrs-worker.service`: `systemctl enable --now 48hrs-api 48hrs-worker`), or directly:
-   ```bash
-   npm start                   # API on PORT; with WEB_DIST_DIR=../web/dist it also serves the SPA (single origin)
-   npm run start:worker        # continuous deadline worker (several instances are safe)
-   ```
-   Instead of the continuous worker, cron can run one pass per minute — it exits non-zero when a pass fails:
-   `* * * * * cd /srv/48hrs-dental-lab && npm run start:worker:once >> /var/log/48hrs-worker.log 2>&1`
-6. **Reverse proxy + HTTPS:** install `deploy/nginx.conf.example` as the site (HTTP → HTTPS redirect, TLS 1.2/1.3, `X-Forwarded-Proto`, overwritten `X-Forwarded-For`, 55 MB body limit, streamed uploads), then `nginx -t && systemctl reload nginx`. Keep `COOKIE_SECURE=true` and `TRUST_PROXY=1`; the API adds HSTS and a strict CSP.
-7. **Verify:**
-   ```bash
-   curl -fsS https://lab.example.com/api/health        # {"status":"ok"}        liveness
-   curl -fsS https://lab.example.com/api/health/ready  # {"status":"ready"}     database reachable
-   ```
-   then sign in as the Super Admin in a browser.
-8. **Operate:** back up the database and `UPLOAD_DIR` together; updates repeat steps 2, 4 (`migrate deploy` only) and a service restart. Hosting `apps/web/dist` on a CDN instead is possible: build it with `VITE_API_URL=https://api.example.com/api` (the API must be on the same registrable domain as the web app, so its `SameSite=Lax` cookies are sent), add the web origin to `CORS_ORIGINS`, leave `WEB_DIST_DIR` empty.
-
-## 11. Known limitations
-
-- Rate-limit counters are per API process; with several API instances put a shared store (e.g. Redis) behind `express-rate-limit`. Account lockout is already database-backed.
-- Case files are stored on the API host's disk (`UPLOAD_DIR`); multiple API hosts need shared storage or an object store (`apps/api/src/lib/storage.ts` is the single place to change).
+- Hostinger's web server is LiteSpeed. The `.htaccess` and `laravel.php` layout was verified on Apache 2.4 with mod_php, but not on LiteSpeed itself.
+- MySQL 8 is the tested database. MariaDB (which some Hostinger plans offer) is untested; the schema uses `DATETIME(3)`, JSON columns and `REGEXP_REPLACE`.
+- The queue is drained by cron once a minute, so a password-reset mail can take up to about a minute to leave.
 - E-mail is sent only for password resets; other notifications are in-app.
-- Directory lists (doctors, clinics, technicians, users) are sorted in memory — right for a lab's tens-to-hundreds of records; cases, patients, invoices and payments are filtered, sorted and paginated in PostgreSQL.
+- Case files live on the hosting account's disk (`UPLOAD_DIR`): back them up with the database.
 
-## 12. Design notes
+## 11. Design notes
 
-Tokens come from the prototype's design-system files (navy `#0a1424`–`#17498a`, gold accent `#d9b53f`, neutral surfaces, 10 px radius, Plus Jakarta Sans + Playfair Display wordmark). Status colours follow the prototype; green, amber and tertiary-text tokens are one step darker so every label meets 4.5:1 contrast. Chart colours (navy + deep gold) were validated for colour-vision deficiency. Accessibility: labelled fields with `aria-describedby` errors, focus rings, focus-trapped dialogs with focus return, keyboard-operable tooth chart, comboboxes and segmented controls, skip link, `prefers-reduced-motion` respected. The universal-numbering reference image from the ZIP is available from the tooth chart ("Numbering guide").
+- **Colours:** tokens come from the prototype's design-system files: navy `#0a1424`–`#17498a`, gold accent `#d9b53f`, neutral surfaces, 10 px radius, Plus Jakarta Sans + Playfair Display wordmark.
+  - Status colours follow the prototype. The green, amber and tertiary-text tokens are one step darker, so every label meets 4.5:1 contrast.
+  - Chart colours (navy + deep gold) were validated for colour-vision deficiency.
+- **Accessibility:**
+  - labelled fields with `aria-describedby` errors;
+  - focus rings, and focus-trapped dialogs with focus return;
+  - a keyboard-operable tooth chart, comboboxes and segmented controls;
+  - a skip link;
+  - `prefers-reduced-motion` is respected.

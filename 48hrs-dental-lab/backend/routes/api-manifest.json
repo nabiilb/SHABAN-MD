@@ -1,0 +1,306 @@
+[
+    {
+        "method": "GET",
+        "path": "/activity"
+    },
+    {
+        "method": "GET",
+        "path": "/auth/csrf"
+    },
+    {
+        "method": "POST",
+        "path": "/auth/forgot-password"
+    },
+    {
+        "method": "POST",
+        "path": "/auth/login"
+    },
+    {
+        "method": "POST",
+        "path": "/auth/logout"
+    },
+    {
+        "method": "GET",
+        "path": "/auth/me"
+    },
+    {
+        "method": "POST",
+        "path": "/auth/refresh"
+    },
+    {
+        "method": "POST",
+        "path": "/auth/reset-password"
+    },
+    {
+        "method": "GET",
+        "path": "/cases"
+    },
+    {
+        "method": "POST",
+        "path": "/cases"
+    },
+    {
+        "method": "DELETE",
+        "path": "/cases/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/cases/:id"
+    },
+    {
+        "method": "PATCH",
+        "path": "/cases/:id"
+    },
+    {
+        "method": "POST",
+        "path": "/cases/:id/assign"
+    },
+    {
+        "method": "POST",
+        "path": "/cases/:id/attachments"
+    },
+    {
+        "method": "DELETE",
+        "path": "/cases/:id/attachments/:attachmentId"
+    },
+    {
+        "method": "GET",
+        "path": "/cases/:id/attachments/:attachmentId/download"
+    },
+    {
+        "method": "POST",
+        "path": "/cases/:id/delivery"
+    },
+    {
+        "method": "POST",
+        "path": "/cases/:id/notes"
+    },
+    {
+        "method": "POST",
+        "path": "/cases/:id/qc"
+    },
+    {
+        "method": "POST",
+        "path": "/cases/:id/rework"
+    },
+    {
+        "method": "POST",
+        "path": "/cases/:id/status"
+    },
+    {
+        "method": "GET",
+        "path": "/cases/counts"
+    },
+    {
+        "method": "GET",
+        "path": "/clinics"
+    },
+    {
+        "method": "POST",
+        "path": "/clinics"
+    },
+    {
+        "method": "DELETE",
+        "path": "/clinics/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/clinics/:id"
+    },
+    {
+        "method": "PUT",
+        "path": "/clinics/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/dashboard"
+    },
+    {
+        "method": "GET",
+        "path": "/deliveries"
+    },
+    {
+        "method": "GET",
+        "path": "/doctors"
+    },
+    {
+        "method": "POST",
+        "path": "/doctors"
+    },
+    {
+        "method": "DELETE",
+        "path": "/doctors/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/doctors/:id"
+    },
+    {
+        "method": "PUT",
+        "path": "/doctors/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/health"
+    },
+    {
+        "method": "GET",
+        "path": "/health/ready"
+    },
+    {
+        "method": "GET",
+        "path": "/invoices"
+    },
+    {
+        "method": "POST",
+        "path": "/invoices"
+    },
+    {
+        "method": "GET",
+        "path": "/invoices/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/notifications"
+    },
+    {
+        "method": "POST",
+        "path": "/notifications/:id/read"
+    },
+    {
+        "method": "POST",
+        "path": "/notifications/read-all"
+    },
+    {
+        "method": "GET",
+        "path": "/patients"
+    },
+    {
+        "method": "POST",
+        "path": "/patients"
+    },
+    {
+        "method": "DELETE",
+        "path": "/patients/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/patients/:id"
+    },
+    {
+        "method": "PUT",
+        "path": "/patients/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/payments"
+    },
+    {
+        "method": "POST",
+        "path": "/payments"
+    },
+    {
+        "method": "GET",
+        "path": "/permissions"
+    },
+    {
+        "method": "GET",
+        "path": "/quality-control"
+    },
+    {
+        "method": "GET",
+        "path": "/reports/cases"
+    },
+    {
+        "method": "GET",
+        "path": "/reports/clinics"
+    },
+    {
+        "method": "GET",
+        "path": "/reports/financial"
+    },
+    {
+        "method": "GET",
+        "path": "/reports/production"
+    },
+    {
+        "method": "GET",
+        "path": "/reports/technicians"
+    },
+    {
+        "method": "GET",
+        "path": "/roles"
+    },
+    {
+        "method": "PUT",
+        "path": "/roles/:key"
+    },
+    {
+        "method": "GET",
+        "path": "/search"
+    },
+    {
+        "method": "GET",
+        "path": "/services"
+    },
+    {
+        "method": "POST",
+        "path": "/services"
+    },
+    {
+        "method": "DELETE",
+        "path": "/services/:id"
+    },
+    {
+        "method": "PUT",
+        "path": "/services/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/settings"
+    },
+    {
+        "method": "PUT",
+        "path": "/settings"
+    },
+    {
+        "method": "GET",
+        "path": "/technicians"
+    },
+    {
+        "method": "POST",
+        "path": "/technicians"
+    },
+    {
+        "method": "DELETE",
+        "path": "/technicians/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/technicians/:id"
+    },
+    {
+        "method": "PUT",
+        "path": "/technicians/:id"
+    },
+    {
+        "method": "GET",
+        "path": "/users"
+    },
+    {
+        "method": "POST",
+        "path": "/users"
+    },
+    {
+        "method": "DELETE",
+        "path": "/users/:id"
+    },
+    {
+        "method": "PUT",
+        "path": "/users/:id"
+    },
+    {
+        "method": "PATCH",
+        "path": "/users/:id/status"
+    }
+]
