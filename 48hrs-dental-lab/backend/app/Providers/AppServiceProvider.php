@@ -50,6 +50,6 @@ class AppServiceProvider extends ServiceProvider
     private function isSetupCommand(): bool
     {
         return $this->app->runningInConsole()
-            && in_array($_SERVER['argv'][1] ?? '', ['key:generate', 'lab:check-config', 'config:clear', 'optimize:clear', 'cache:clear', 'down', 'up', 'list', 'about'], true);
+            && in_array($_SERVER['argv'][1] ?? '', ['key:generate', 'lab:check-config', 'config:clear', 'optimize:clear', 'cache:clear', 'down', 'up', 'list', 'about', 'package:discover', 'vendor:publish'], true);
     }
 }
