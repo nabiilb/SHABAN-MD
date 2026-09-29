@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
   // Fail the dev server / build on a VITE_API_URL that does not end in /api, or a bad base path.
   const apiBase = resolveApiBase(process.env.VITE_API_URL ?? fileEnv.VITE_API_URL);
   const base = resolveBasePath(process.env.VITE_BASE_PATH ?? fileEnv.VITE_BASE_PATH);
-  // Under a base path (e.g. /48hrs_lab/api) the proxy strips the prefix: Laravel serves /api.
+  // Under a URL sub-path (e.g. /lab/api) the proxy strips the prefix: Laravel serves /api.
   const apiPath = apiBase.startsWith('/') ? apiBase : '/api';
   const proxy = { [apiPath]: { target: apiTarget, changeOrigin: false, rewrite: (p: string) => p.replace(apiPath, '/api') } };
 

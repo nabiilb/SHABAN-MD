@@ -1,8 +1,9 @@
 /**
  * Environment for the full-stack end-to-end run: Apache (mod_php) serving the
- * production build exactly as on Hostinger — public_html/48hrs_lab with the
- * React build, .htaccess and the laravel.php front controller — and Laravel
- * (backend/) on a disposable MySQL database. Secrets are generated per run and
+ * production build exactly as https://lab.sooryoscan.com is served on Hostinger —
+ * the folder public_html/48hrs_lab is the (sub)domain's DOCUMENT ROOT, holding the
+ * React build, .htaccess and the laravel.php front controller; the app is at "/"
+ * and the API at "/api" — and Laravel (backend/) on a disposable MySQL database. Secrets are generated per run and
  * shared with Playwright workers via process.env.
  */
 import { randomBytes } from 'node:crypto';
@@ -14,12 +15,15 @@ import { fileURLToPath } from 'node:url';
 export const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 export const BACKEND = join(REPO_ROOT, 'backend');
 export const E2E_PORT = Number(process.env.E2E_PORT ?? 4100);
-/** The sub-folder the app is deployed in (as on Hostinger: public_html/48hrs_lab). */
-export const BASE_PATH = '/48hrs_lab';
+/** URL path of the app: the subdomain root, as in production. */
+export const BASE_PATH = '';
+/** Folder names on the server's disk (production layout). They must never appear in a URL. */
+export const DOCROOT_FOLDER = '48hrs_lab';
+export const APP_FOLDER = '48hrs_lab_app';
 export const ORIGIN = `http://localhost:${E2E_PORT}`;
 export const BASE_URL = `${ORIGIN}${BASE_PATH}`;
 
-/** App path → URL path under the deployment folder: app('/cases') === '/48hrs_lab/cases'. */
+/** App path → URL path (identity at the subdomain root). */
 export const app = (path: string) => `${BASE_PATH}${path}`;
 
 /** DB_* from backend/.env, so the run can reach the local MySQL server (override with E2E_DB_*). */
@@ -66,7 +70,7 @@ export function stackEnv(): Record<string, string> {
     DB_USERNAME: process.env.E2E_DB_USERNAME ?? process.env.DB_USERNAME ?? 'lab',
     DB_PASSWORD: process.env.E2E_DB_PASSWORD ?? process.env.DB_PASSWORD ?? '',
     SESSION_DRIVER: 'database',
-    SESSION_PATH: `${BASE_PATH}/`,
+    SESSION_PATH: '/',
     SESSION_SECURE_COOKIE: 'false',
     CACHE_STORE: 'database',
     QUEUE_CONNECTION: 'database',

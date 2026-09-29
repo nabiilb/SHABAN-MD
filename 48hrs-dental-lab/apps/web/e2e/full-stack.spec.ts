@@ -1,18 +1,23 @@
 /**
- * The real system end to end: browser → React production build → Apache
- * (Hostinger layout: public_html/48hrs_lab, .htaccess, laravel.php) → Laravel → MySQL.
+ * The real system end to end: browser → React production build → Apache → Laravel → MySQL,
+ * in the Hostinger layout of https://lab.sooryoscan.com: the folder public_html/48hrs_lab
+ * is the document root (app at "/", API at "/api"), Laravel lives in 48hrs_lab_app next to
+ * public_html, and neither folder name ever appears in a URL.
  * Nothing is mocked; the deadline scan runs as the cron job runs it.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, request, test, type Page } from '@playwright/test';
-import { app, ORIGIN } from './stack-env';
+import { app, APP_FOLDER, DOCROOT_FOLDER, ORIGIN } from './stack-env';
 import { act, all, apiWrite, db, dialog, expireSessions, one, registerCase, runDeadlineScan, signIn, toast } from './support';
 
 test.describe.configure({ mode: 'serial' });
 
 const consoleErrors: string[] = [];
+/** Every URL the browser requested: none may contain a folder name from the server's disk. */
+const requested: string[] = [];
 function watchConsole(page: Page) {
+  page.on('request', (r) => requested.push(r.url()));
   page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     // Google Fonts may be unreachable in CI sandboxes; that is not an application error.
@@ -22,6 +27,13 @@ function watchConsole(page: Page) {
 
 test.afterAll(async () => {
   await db.end();
+});
+
+test.afterEach(async ({ page }) => {
+  requested.push(page.url());
+  const leaked = requested.filter((u) => u.includes(DOCROOT_FOLDER) || u.includes(APP_FOLDER));
+  requested.length = 0;
+  expect(leaked).toEqual([]);
 });
 
 test('client portal → STL upload → accept with deposit → assign → production → QC fail → rework → QC pass → ready → delivery → final payment → completed', async ({ page }) => {
@@ -42,7 +54,7 @@ test('client portal → STL upload → accept with deposit → assign → produc
   const stl = Buffer.from('solid upper\n facet normal 0 0 1\n  outer loop\n   vertex 0 0 0\n   vertex 1 0 0\n   vertex 0 1 0\n  endloop\n endfacet\nendsolid upper\n');
   await page.locator('input[type=file]').setInputFiles({ name: 'upper-arch.stl', mimeType: 'model/stl', buffer: stl });
   await page.getByRole('button', { name: 'Submit case' }).first().click();
-  await page.waitForURL(/\/48hrs_lab\/cases\/(?!new)[\w-]+$/);
+  await page.waitForURL(new RegExp(`^${ORIGIN}/cases/(?!new)[\\w-]+$`));
   const c = { url: page.url(), id: page.url().split('/').pop()!, caseNumber: (await page.locator('header h1', { hasText: /^DL-/ }).innerText()).trim() };
   await expect(page.getByText('SLA NOT STARTED').first()).toBeVisible();
   await expect(page.getByText('upper-arch.stl').first()).toBeVisible();
@@ -53,12 +65,16 @@ test('client portal → STL upload → accept with deposit → assign → produc
   expect(Buffer.compare(readFileSync(join(process.env.E2E_UPLOAD_DIR!, file.storage_key)), stl)).toBe(0); // database and disk agree
   const anonymous = await request.newContext({ baseURL: ORIGIN }); // no session cookies
   expect((await anonymous.get(app(`/api/cases/${c.id}/attachments/${file.id}/download`))).status()).toBe(401);
-  for (const guess of [app(`/${file.storage_key}`), `/${file.storage_key}`, app(`/storage/${file.storage_key}`), app('/api/../laravel.php')]) {
+  for (const guess of [`/${file.storage_key}`, `/storage/${file.storage_key}`, `/storage/app/private/cases/${file.storage_key}`, '/api/../laravel.php']) {
     const res = await anonymous.get(guess);
     expect(res.headers()['content-type'] ?? '', guess).not.toMatch(/stl|octet/); // storage is not public
     expect((await res.body()).includes(stl)).toBe(false);
   }
-  for (const secret of [app('/.htaccess'), app('/.user.ini'), app('/../48hrs_lab_app/.env')]) expect((await anonymous.get(secret)).status(), secret).toBeGreaterThanOrEqual(403);
+  for (const secret of ['/.htaccess', '/.user.ini', `/../${APP_FOLDER}/.env`, `/${APP_FOLDER}/.env`, '/.env', '/api/.env']) {
+    const res = await anonymous.get(secret);
+    expect((await res.text()).includes('APP_KEY'), secret).toBe(false); // never the Laravel .env
+    if (secret.startsWith('/.')) expect(res.status(), secret).toBe(403);
+  }
   await anonymous.dispose();
   const own = await page.request.get(app(`/api/cases/${c.id}/attachments/${file.id}/download`));
   expect(own.status()).toBe(200);
@@ -228,10 +244,12 @@ for (const [label, skewHours] of [['ahead', 9], ['behind', -9]] as const) {
       await expect(page.getByText(/Overdue by 1h/).first()).toBeVisible();
     }
     await page.goto(app('/cases'));
-    await expect(page).toHaveURL(/\/48hrs_lab\/cases$/); // a valid server session is not ended by the device clock
+    await expect(page).toHaveURL(`${ORIGIN}/cases`); // a valid server session is not ended by the device clock
     await expect(page.locator('tbody tr').first()).toBeVisible();
 
-    // ...and an expired server session is not kept alive by it either.
+    // ...and an expired server session is not kept alive by it either. (The app is left first, so no
+    // in-flight request writes the session back over the edit — in real life the clock just passes.)
+    await page.goto('about:blank');
     expect(await expireSessions('usr_omar')).toBeGreaterThan(0);
     await page.goto(app('/patients'));
     await page.waitForURL(/\/login\?next=%2Fpatients/);
@@ -306,18 +324,20 @@ test('CSRF and session expiry: a lost or stale token is renewed transparently; a
   expect(forged.status()).toBe(419);
 
   // The session itself ends (8 hours): the user is signed out and sent back after signing in.
-  await expireSessions('usr_sagal');
+  await page.goto('about:blank');
+  expect(await expireSessions('usr_sagal')).toBeGreaterThan(0);
   await page.goto(app('/payments'));
   await page.waitForURL(/\/login\?next=%2Fpayments/);
   await expect(page.getByText(/Your session (has )?(expired|ended)/i).first()).toBeVisible();
   await page.fill('input[type=email]', 'sagal@48hrs.lab');
   await page.fill('input[autocomplete=current-password]', process.env.E2E_PASSWORD!);
   await page.click('button[type=submit]');
-  await page.waitForURL(/\/48hrs_lab\/payments$/);
+  await page.waitForURL(`${ORIGIN}/payments`);
 
-  // The session cookie is scoped to the app folder, HTTP-only and SameSite=Lax.
+  // The session cookie covers the whole (sub)domain root, host-only, HTTP-only and SameSite=Lax.
   const session = (await context.cookies()).find((k) => k.httpOnly);
-  expect(session).toMatchObject({ path: '/48hrs_lab/', httpOnly: true, sameSite: 'Lax' });
+  expect(session).toMatchObject({ path: '/', httpOnly: true, sameSite: 'Lax', domain: 'localhost' });
+  expect((await context.cookies()).find((k) => k.name === 'XSRF-TOKEN')).toMatchObject({ path: '/', httpOnly: false });
 });
 
 test('global search finds cases and patients from MySQL, within the user\'s scope', async ({ page }) => {
@@ -334,12 +354,12 @@ test('global search finds cases and patients from MySQL, within the user\'s scop
 
   await search(c.caseNumber);
   await results().getByRole('group', { name: 'Cases' }).getByRole('option', { name: new RegExp(c.caseNumber) }).click();
-  await page.waitForURL(`**/48hrs_lab/cases/${c.id}`);
+  await page.waitForURL(`${ORIGIN}/cases/${c.id}`);
 
   await search(patient);
   await expect(results().getByRole('group', { name: 'Cases' }).getByRole('option', { name: new RegExp(c.caseNumber) })).toBeVisible();
   await results().getByRole('group', { name: 'Patients' }).getByRole('option', { name: new RegExp(patient) }).click();
-  await page.waitForURL(/\/48hrs_lab\/patients\/[\w-]+$/);
+  await page.waitForURL(new RegExp(`^${ORIGIN}/patients/[\\w-]+$`));
 
   await search('zzqx-no-such-thing');
   await expect(results().getByText('No results for “zzqx-no-such-thing”.')).toBeVisible();
@@ -353,17 +373,30 @@ test('global search finds cases and patients from MySQL, within the user\'s scop
   expect(consoleErrors).toEqual([]);
 });
 
-test('deep links and reloads work under the sub-folder; the rest of the domain is untouched', async ({ page }) => {
+test('served from the subdomain root: deep links, reloads, /api and headers; no disk folder in any URL', async ({ page }) => {
+  watchConsole(page);
   await signIn(page, 'omar@48hrs.lab');
-  await page.goto(app('/reports'));
+  await page.goto('/reports');
   await page.reload();
-  await expect(page).toHaveURL(/\/48hrs_lab\/reports$/);
+  await expect(page).toHaveURL(`${ORIGIN}/reports`);
   await expect(page.getByRole('heading', { name: /Reports/ }).first()).toBeVisible();
-  const home = await page.request.get('/');
-  expect(await home.text()).toContain('sooryoscan.com'); // the domain's own page, not the app
-  const asset = (await page.request.get(app('/'))).headers();
-  expect(asset['cache-control']).toBe('no-cache');
-  expect(asset['content-security-policy']).toMatch(/frame-ancestors 'none'/);
-  const api = (await page.request.get(app('/api/health'))).headers();
+
+  // The built page references root-relative assets and the root /api only.
+  const html = await (await page.request.get('/')).text();
+  expect(html).toMatch(/src="\/assets\/[^"]+\.js"/);
+  expect(html).not.toContain(DOCROOT_FOLDER);
+  const health = await page.request.get('/api/health');
+  expect(health.status()).toBe(200);
+  expect(await health.json()).toEqual({ status: 'ok' });
+  expect((await page.request.get('/api/health/ready')).status()).toBe(200);
+
+  // The folder names are not routes: /48hrs_lab/… is just an unknown SPA path, never the API or files.
+  expect((await page.request.get(`/${DOCROOT_FOLDER}/api/health`)).headers()['content-type']).toMatch(/text\/html/);
+
+  const spa = (await page.request.get('/')).headers();
+  expect(spa['cache-control']).toBe('no-cache');
+  expect(spa['content-security-policy']).toMatch(/frame-ancestors 'none'/);
+  const api = (await page.request.get('/api/health')).headers();
   expect(api['content-security-policy']).toBe("default-src 'none'; frame-ancestors 'none'");
+  expect(consoleErrors).toEqual([]);
 });

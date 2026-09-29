@@ -5,7 +5,7 @@ initStackEnv();
 
 /**
  * Full-stack end-to-end tests: the production web build, Laravel and MySQL,
- * served by Apache with the Hostinger layout (public_html/48hrs_lab + .htaccess
+ * served by Apache with the Hostinger layout (document root public_html/48hrs_lab + .htaccess
  * + laravel.php). No Node backend, no mocks. Run with `npm run e2e`.
  */
 export default defineConfig({

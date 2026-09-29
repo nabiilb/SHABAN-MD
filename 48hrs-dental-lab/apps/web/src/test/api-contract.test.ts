@@ -26,7 +26,7 @@ describe('API base URL', () => {
     expect(resolveApiBase('/api/')).toBe('/api');
     expect(resolveApiBase('https://api.example.com/api')).toBe('https://api.example.com/api');
     expect(resolveApiBase('https://lab.example.com/backend/api//')).toBe('https://lab.example.com/backend/api');
-    expect(resolveApiBase('/48hrs_lab/api')).toBe('/48hrs_lab/api'); // Hostinger sub-folder deployment
+    expect(resolveApiBase('/lab/api')).toBe('/lab/api'); // a deployment under a URL sub-path
   });
 
   it('refuses a base that would send requests outside /api (e.g. /cases on the API root)', () => {
@@ -37,17 +37,17 @@ describe('API base URL', () => {
 });
 
 describe('base path (VITE_BASE_PATH)', () => {
-  it('serves from the root by default or from a sub-folder such as /48hrs_lab/', () => {
+  it('serves from the root by default (production) or from a URL sub-path such as /lab/', () => {
     expect(resolveBasePath(undefined)).toBe('/');
     expect(resolveBasePath('/')).toBe('/');
-    expect(resolveBasePath('/48hrs_lab')).toBe('/48hrs_lab/');
-    expect(resolveBasePath('/48hrs_lab/')).toBe('/48hrs_lab/');
+    expect(resolveBasePath('/lab')).toBe('/lab/');
+    expect(resolveBasePath('/lab/')).toBe('/lab/');
     expect(routerBasename('/')).toBe('');
-    expect(routerBasename('/48hrs_lab/')).toBe('/48hrs_lab');
+    expect(routerBasename('/lab/')).toBe('/lab');
   });
 
   it('refuses relative or URL-like base paths', () => {
-    for (const bad of ['48hrs_lab', 'https://x.com/lab/', '/a//b', '/lab?x=1', '/lab lab']) {
+    for (const bad of ['lab', 'https://x.com/lab/', '/a//b', '/lab?x=1', '/lab lab']) {
       expect(() => resolveBasePath(bad), bad).toThrow(/VITE_BASE_PATH/);
     }
   });
@@ -63,10 +63,10 @@ async function transportWith(base: string | undefined) {
 }
 
 describe('HTTP transport (VITE_USE_MOCKS=false)', () => {
-  it('a sub-folder API base is used for every request', async () => {
-    const { httpTransport, fetchMock } = await transportWith('/48hrs_lab/api');
+  it('a sub-path API base is used for every request', async () => {
+    const { httpTransport, fetchMock } = await transportWith('/lab/api');
     await httpTransport({ method: 'GET', path: '/cases/c1' });
-    expect((fetchMock.mock.calls as unknown as [string][])[0][0]).toBe('/48hrs_lab/api/cases/c1');
+    expect((fetchMock.mock.calls as unknown as [string][])[0][0]).toBe('/lab/api/cases/c1');
   });
 
   it('without VITE_API_URL every request goes to /api/…, with cookies and the CSRF header', async () => {

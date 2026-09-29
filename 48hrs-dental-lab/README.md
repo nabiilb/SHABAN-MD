@@ -14,7 +14,7 @@ MySQL 8                                  31 tables · foreign keys · unique ind
 Shared domain (packages/shared)          types · permissions · workflow · SLA · billing · analytics · Zod schemas
 ```
 
-Hosting target: **Hostinger shared hosting**, which provides PHP, MySQL, git and cron, but no Node.js and no daemons.
+Hosting target: **Hostinger shared hosting**, which provides PHP, MySQL, git and cron, but no Node.js and no daemons. Production: **https://lab.sooryoscan.com** (the app at `/`, the API at `/api`).
 - The React build is uploaded as static files.
 - Laravel runs from a folder outside `public_html`.
 - One cron entry drives the scheduler and the queue.
@@ -76,7 +76,7 @@ Demo accounts exist only after an explicit `SEED_MODE=demo` seed. The default (`
 | --- | --- |
 | `npm run dev` | `php artisan serve` + `queue:work` + `schedule:work` + the Vite dev server |
 | `npm run build` | Production web build (`apps/web/dist`) |
-| `npm run release` | Hostinger release: the web build for `/48hrs_lab/`, `.htaccess`, `laravel.php`, and Laravel with a `--no-dev` vendor, packed as `release/48hrs-lab-release.tar.gz` (§8) |
+| `npm run release` | Hostinger release for https://lab.sooryoscan.com: the web build (served at `/`, API `/api`) with `.htaccess` and `laravel.php` for the document root `public_html/48hrs_lab`, and Laravel with a `--no-dev` vendor for `48hrs_lab_app`, packed as `release/48hrs-lab-release.tar.gz` (§8) |
 | `npm run typecheck` · `npm run lint` | TypeScript in every workspace · ESLint |
 | `npm test` | shared + web unit tests (Vitest) |
 | `npm run test:api` | Laravel tests (PHPUnit on MySQL) |
@@ -96,7 +96,7 @@ backend/                  Laravel API — see backend/README.md (every endpoint)
   routes/api.php          the REST API · routes/console.php commands + schedule
   tests/Unit|Feature|Http parity, API and real-server tests
 packages/shared/          TypeScript domain shared by the web app and the mock backend
-deploy/hostinger/         public_html/48hrs_lab templates: .htaccess, .user.ini, laravel.php
+deploy/hostinger/         document-root templates (public_html/48hrs_lab): .htaccess, .user.ini, laravel.php
 deploy/production.env.example   Laravel .env template for Hostinger
 scripts/                  dev.mjs (local stack) · build-release.mjs (Hostinger release)
 ```
@@ -123,7 +123,7 @@ The Laravel settings are in `backend/.env`; templates are `backend/.env.example`
 | `SESSION_DRIVER` | `database` | Revocable sessions (required in production) |
 | `SESSION_TTL_MINUTES` | 480 | Absolute end of a sign-in (activity never extends it) |
 | `SESSION_LIFETIME` | = TTL | Idle limit |
-| `SESSION_PATH` | `/` | Cookie path. Hostinger: `/48hrs_lab/` |
+| `SESSION_PATH` | `/` | Cookie path: `/` (production is the root of lab.sooryoscan.com). Must match `APP_URL` |
 | `SESSION_SECURE_COOKIE` | — | `true` in production (HTTPS) |
 | `SESSION_SAME_SITE` | `lax` | |
 | `LOGIN_MAX_ATTEMPTS`, `LOGIN_LOCK_MINUTES` | 5, 15 | Per-account lockout |
@@ -136,8 +136,8 @@ The Laravel settings are in `backend/.env`; templates are `backend/.env.example`
 | `SEED_MODE`, `SEED_USER_PASSWORD`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_NAME`, `SEED_ADMIN_PASSWORD`, `ALLOW_DEMO_SEED` | `base` | Seeding (§4). Pass them on the command line, not in `.env` |
 
 The front-end settings (`apps/web/.env`) are public and baked in at build time:
-- `VITE_API_URL`: default `/api`; Hostinger uses `/48hrs_lab/api`.
-- `VITE_BASE_PATH`: default `/`; Hostinger uses `/48hrs_lab/`.
+- `VITE_API_URL`: `/api` (production too).
+- `VITE_BASE_PATH`: `/` (production too). Only a deployment under a URL sub-path would change it.
 - `VITE_USE_MOCKS`: `true` runs the in-browser mock backend instead of the API.
 
 ## 4. Database
@@ -269,52 +269,64 @@ Any open stage → Cancelled
 
 ## 8. Deploying to Hostinger
 
-Target layout (`sooryoscan.com`, home `~` = `/home/u123456789`):
+**Production:** **https://lab.sooryoscan.com**. The app is at `/`, the API at `/api` (for example `https://lab.sooryoscan.com/api/health`).
+
+The subdomain `lab.sooryoscan.com` already exists in hPanel. Its **document root** is the folder `public_html/48hrs_lab`, which is only a location on disk and never appears in a URL. There is no `https://sooryoscan.com/48hrs_lab` and no `/48hrs_lab/api`.
 
 ```
-~/domains/sooryoscan.com/
+/home/u501147781/domains/sooryoscan.com/
 ├── public_html/
-│   └── 48hrs_lab/            ← web root of the app: https://sooryoscan.com/48hrs_lab/
-│       ├── index.html, assets/     React build (base /48hrs_lab/, API /48hrs_lab/api)
+│   └── 48hrs_lab/            ← document root of https://lab.sooryoscan.com
+│       ├── index.html, assets/     React build (VITE_BASE_PATH=/, VITE_API_URL=/api)
 │       ├── .htaccess               SPA fallback · /api → laravel.php · dotfiles denied · headers
 │       ├── .user.ini               upload limits for PHP
 │       └── laravel.php             front controller: boots Laravel from ../../48hrs_lab_app
 └── 48hrs_lab_app/            ← Laravel (backend/): code, vendor, .env, storage, case files
-                                NOT under public_html: never reachable by URL
+                                outside public_html: never reachable by URL
 ```
 
-`/48hrs_lab/api/*` is rewritten to `laravel.php`, which runs Laravel exactly as its own `public/index.php` would. Laravel therefore still sees `/api/...`, and the rest of `public_html` is untouched.
+`https://lab.sooryoscan.com/api/*` is rewritten to `laravel.php`, which runs Laravel exactly as its own `public/index.php` would. The session and `XSRF-TOKEN` cookies are host-only, with path `/`, so `sooryoscan.com` and other subdomains never receive them.
 
 ### First deployment
 
 1. **hPanel** (settings in the Hostinger control panel):
    - **Advanced → PHP Configuration:** PHP **8.3** or newer, with the `pdo_mysql`, `mbstring`, `intl`, `bcmath`, `fileinfo` and `zip` extensions.
-   - **Databases → MySQL:** create a database and a user; note the `u…_` names and the password.
+   - **Databases → MySQL:** create a database and a user (for example `u501147781_dental_lab` / `u501147781_lab`) and note the password.
    - **Emails:** create `no-reply@sooryoscan.com` for the reset mails.
-   - **SSL:** make sure the domain is on HTTPS.
+   - **SSL:** make sure `lab.sooryoscan.com` has a certificate and forces HTTPS.
+   - **Subdomains:** `lab.sooryoscan.com` → document root `public_html/48hrs_lab` (already set up).
 2. **Build the release** on any machine with Node 22 and Composer 2. The server needs neither:
    ```bash
-   npm ci && npm run release        # → release/48hrs-lab-release.tar.gz
+   npm ci && npm run release        # → release/48hrs-lab-release.tar.gz  (app at /, API at /api)
    ```
-3. **Upload and unpack** over SSH (hPanel → Advanced → SSH access), or with the File Manager:
+3. **Upload and unpack** over SSH (hPanel → Advanced → SSH access):
    ```bash
-   scp -P 65002 release/48hrs-lab-release.tar.gz u123456789@<server-ip>:~/
-   ssh -p 65002 u123456789@<server-ip>
-   cd ~/domains/sooryoscan.com && tar -xzf ~/48hrs-lab-release.tar.gz && rm ~/48hrs-lab-release.tar.gz
+   scp -P 65002 release/48hrs-lab-release.tar.gz u501147781@<server-ip>:~/
+   ssh -p 65002 u501147781@<server-ip>
+   cd /home/u501147781/domains/sooryoscan.com
+   tar -xzf ~/48hrs-lab-release.tar.gz          # → public_html/48hrs_lab/  and  48hrs_lab_app/
+   rm ~/48hrs-lab-release.tar.gz
    ```
-   *Alternative with git:*
-   - `git clone` the repository to `~/48hrs-src`;
-   - copy `backend/` to `~/domains/sooryoscan.com/48hrs_lab_app` and run `composer install --no-dev --optimize-autoloader` there (Hostinger includes Composer);
-   - upload only `release/public_html/48hrs_lab` from a release build, since the React build needs Node.
+   If hPanel created a placeholder page in the document root (`public_html/48hrs_lab/default.php` or `index.php`), delete it; the app's `index.html` must be the page served at `/`.
 4. **Configure Laravel:**
    ```bash
-   cd ~/domains/sooryoscan.com/48hrs_lab_app
-   cp ~/48hrs-src/deploy/production.env.example .env    # or upload deploy/production.env.example as .env
-   nano .env            # DB_DATABASE / DB_USERNAME / DB_PASSWORD, MAIL_PASSWORD, domain URLs
+   cd /home/u501147781/domains/sooryoscan.com/48hrs_lab_app
+   nano .env            # paste deploy/production.env.example, then set DB_PASSWORD and MAIL_PASSWORD
    chmod 600 .env
    php artisan key:generate --force
    php artisan lab:check-config                  # must say: Configuration OK for production.
    ```
+   The important values:
+
+   | Variable | Value |
+   | --- | --- |
+   | `APP_URL` | `https://lab.sooryoscan.com` |
+   | `FRONTEND_URL` | `https://lab.sooryoscan.com` |
+   | `SESSION_PATH` | `/` |
+   | `SESSION_DOMAIN` | empty |
+   | `SESSION_SECURE_COOKIE` | `true` |
+
+   The configuration check refuses a `SESSION_PATH` that doesn't match `APP_URL`, such as `/48hrs_lab/`.
 5. **Create the database and the first Super Admin.** The password is typed, not stored in `.env` or the shell history:
    ```bash
    php artisan migrate --force
@@ -329,7 +341,7 @@ Target layout (`sooryoscan.com`, home `~` = `/home/u123456789`):
    ```
 7. **Cron** (hPanel → Advanced → Cron Jobs → Custom, every minute). One entry runs everything:
    ```
-   * * * * * cd /home/u123456789/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+   * * * * * cd /home/u501147781/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
    ```
    The scheduler runs:
 
@@ -342,22 +354,23 @@ Target layout (`sooryoscan.com`, home `~` = `/home/u123456789`):
 
    Use the PHP binary that `which php` shows over SSH, with the same version as the site. If the plan does not allow the scheduler to start sub-processes (`proc_open` disabled), use these two entries instead:
    ```
-   * * * * * cd /home/u123456789/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan lab:scan-deadlines >> /dev/null 2>&1
-   * * * * * cd /home/u123456789/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan queue:work --stop-when-empty --max-time=50 --tries=3 >> /dev/null 2>&1
+   * * * * * cd /home/u501147781/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan lab:scan-deadlines >> /dev/null 2>&1
+   * * * * * cd /home/u501147781/domains/sooryoscan.com/48hrs_lab_app && /usr/bin/php artisan queue:work --stop-when-empty --max-time=50 --tries=3 >> /dev/null 2>&1
    ```
 8. **Verify:**
    ```bash
-   curl -fsS https://sooryoscan.com/48hrs_lab/api/health         # {"status":"ok"}
-   curl -fsS https://sooryoscan.com/48hrs_lab/api/health/ready   # {"status":"ready"}  (database reachable)
-   php artisan schedule:list && php artisan queue:failed         # the schedule; failed jobs (should be none)
+   curl -fsS https://lab.sooryoscan.com/api/health         # {"status":"ok"}
+   curl -fsS https://lab.sooryoscan.com/api/health/ready   # {"status":"ready"}  (database reachable)
+   curl -sI https://lab.sooryoscan.com/.htaccess | head -1 # 403
+   php artisan schedule:list && php artisan queue:failed   # the schedule; failed jobs (should be none)
    ```
-   Then open https://sooryoscan.com/48hrs_lab/ and sign in as the Super Admin. Add the price list (Services), clinics, doctors, technicians and users.
+   Then open **https://lab.sooryoscan.com/** and sign in as the Super Admin. Add the price list (Services), clinics, doctors, technicians and users.
 
 ### Updates
 
-1. Build a new release.
-2. `php artisan down`.
-3. Unpack it over the two folders. `.env` and `storage/` are not part of the archive, so they are kept.
+1. Build a new release (`npm run release`).
+2. `cd /home/u501147781/domains/sooryoscan.com/48hrs_lab_app && php artisan down`.
+3. Unpack it in `/home/u501147781/domains/sooryoscan.com` over the two folders. `.env` and `storage/` are not part of the archive, so they are kept.
 4. Run `php artisan migrate --force && php artisan config:cache && php artisan route:cache && php artisan event:cache && php artisan up`.
 
 ### Backups
@@ -367,8 +380,8 @@ Back up the MySQL database (hPanel → Backups, or `mysqldump`) **together** wit
 ### Notes
 
 - **Behind a CDN or proxy** (Cloudflare, Hostinger CDN) that sets `X-Forwarded-*`, set `TRUSTED_PROXIES=*`, so rate limits see the real client IP and HTTPS is detected.
-- **Another folder or domain:** use `npm run release -- --base=/other/ --app=other_app`. Then set `APP_URL`, `FRONTEND_URL` and `SESSION_PATH` to match.
-- **Tested locally:** this exact layout was served by Apache 2.4 with mod_php 8.3, `.htaccess` and the shim, and the full browser suite and a production-mode smoke test were run against it (§9). Hostinger serves `.htaccess` with LiteSpeed, which reads the same directives but was not available for testing.
+- **Other folder names:** `npm run release -- --folder=<docroot folder> --app=<laravel folder>` changes only the disk layout; URLs stay at `/`. Only a site served under a URL sub-path needs `--base=/path/`, with `APP_URL`, `FRONTEND_URL` and `SESSION_PATH` set to match.
+- **Tested locally:** this layout was served by Apache 2.4 with mod_php 8.3, with `public_html/48hrs_lab` as the document root, `.htaccess`, `laravel.php` and the app folder beside `public_html`. The full browser suite and a production-mode smoke test ran against it (§9). Hostinger serves `.htaccess` with LiteSpeed, which reads the same directives but was not available for testing.
 
 ## 9. Testing
 
@@ -406,7 +419,7 @@ npm run test:e2e                           # Playwright: browser → Apache (Hos
 - concurrent deadline scans;
 - a failing job landing in `failed_jobs`.
 
-**Playwright end-to-end** (the production build, served through `.htaccess` and `laravel.php` under `/48hrs_lab`):
+**Playwright end-to-end** (the production build, served by Apache from the document root `public_html/48hrs_lab` through `.htaccess` and `laravel.php`, at `/`, as on lab.sooryoscan.com):
 - **The full journey:** client-portal submission with an STL upload → acceptance with a deposit → assignment → production → QC fail → rework → QC pass → ready → dispatch → delivered → final payment → completed. The file bytes are checked on disk, and the history, QC and ledger in MySQL.
 - **Deadlines:** a deadline passes → overdue, via the scheduled scan, with no duplicate alert.
 - **Device clock:** 9 h ahead and 9 h behind.
@@ -415,7 +428,7 @@ npm run test:e2e                           # Playwright: browser → Apache (Hos
 - **Tokens:** CSRF token loss → renewed, and a forged request → 419.
 - **Session end:** sign-out, then return after signing in.
 - **Search:** global search within scope.
-- **Deep links:** deep links and reloads under the sub-folder, with the rest of the domain untouched.
+- **Root serving:** deep links and reloads at `/`, `/api/health`, headers, and no disk folder name (`48hrs_lab`, `48hrs_lab_app`) in any URL the browser requests.
 
 ## 10. Known limitations
 

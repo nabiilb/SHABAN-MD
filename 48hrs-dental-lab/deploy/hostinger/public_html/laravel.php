@@ -9,8 +9,8 @@
 | exactly what Laravel's own public/index.php does.
 |
 | The app folder defaults to ../../48hrs_lab_app relative to this file, i.e.
-|   ~/domains/<domain>/public_html/48hrs_lab/laravel.php
-|   ~/domains/<domain>/48hrs_lab_app/            ← Laravel (backend/)
+|   ~/domains/sooryoscan.com/public_html/48hrs_lab/laravel.php   (document root of lab.sooryoscan.com)
+|   ~/domains/sooryoscan.com/48hrs_lab_app/                      ← Laravel (backend/)
 | Set LAB_APP_DIR (SetEnv in .htaccess) to use another location.
 */
 

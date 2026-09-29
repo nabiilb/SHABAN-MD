@@ -39,7 +39,7 @@ php artisan lab:route-manifest                         # rewrite routes/api-mani
 
 ## Conventions
 
-- **Base path:** `/api`. On Hostinger the whole app lives under `/48hrs_lab`, so the API is `https://sooryoscan.com/48hrs_lab/api`.
+- **Base path:** `/api`. Production: `https://lab.sooryoscan.com/api` (the subdomain's document root is the folder `public_html/48hrs_lab`, which never appears in a URL).
 - **Format:** JSON in, JSON out, camelCase keys.
 - **Lists:**
   - pagination: `?page=1&perPage=20` (max 200) returns `{ data, meta: { page, perPage, total, lastPage } }`;
@@ -154,7 +154,7 @@ php artisan lab:route-manifest                         # rewrite routes/api-mani
 ## Authentication
 
 - **Sessions:** Laravel's session guard, with the database session driver, puts the session id in an HTTP-only, `SameSite=Lax` cookie. It is `Secure` in production.
-  - Its path is `SESSION_PATH` (`/48hrs_lab/` on Hostinger), so other sites on the domain never receive it.
+  - It is host-only (no `SESSION_DOMAIN`) with path `SESSION_PATH` (`/` in production), so `sooryoscan.com` and its other subdomains never receive it.
   - JavaScript never sees a session token.
 - **Absolute end:** each sign-in ends `SESSION_TTL_MINUTES` after it started (8 h), whatever the activity. `Authenticate` checks it on every request.
   - Logout, a password reset or disabling the user deletes the session rows.

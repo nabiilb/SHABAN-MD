@@ -9,8 +9,8 @@ class ProductionConfigTest extends TestCase
 {
     private const GOOD = [
         'app.env' => 'production', 'app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', 'app.debug' => false,
-        'app.url' => 'https://sooryoscan.com/48hrs_lab', 'lab.frontend_url' => 'https://sooryoscan.com/48hrs_lab', 'lab.timezone' => 'Africa/Mogadishu',
-        'lab.allowed_origins' => [], 'session.secure' => true, 'session.same_site' => 'lax', 'session.driver' => 'database',
+        'app.url' => 'https://lab.sooryoscan.com', 'lab.frontend_url' => 'https://lab.sooryoscan.com', 'lab.timezone' => 'Africa/Mogadishu',
+        'lab.allowed_origins' => [], 'session.path' => '/', 'session.secure' => true, 'session.same_site' => 'lax', 'session.driver' => 'database',
         'mail.default' => 'smtp', 'mail.from.address' => 'no-reply@sooryoscan.com', 'mail.mailers.smtp.password' => 'real-secret', 'mail.mailers.smtp.username' => 'no-reply@sooryoscan.com',
         'database.connections.mysql.password' => 'real-db-secret', 'queue.default' => 'database',
     ];
@@ -30,10 +30,13 @@ class ProductionConfigTest extends TestCase
     {
         $this->fails(['app.key' => ''], 'APP_KEY');
         $this->fails(['app.debug' => true], 'APP_DEBUG');
-        $this->fails(['app.url' => 'http://sooryoscan.com'], 'APP_URL');
+        $this->fails(['app.url' => 'http://lab.sooryoscan.com'], 'APP_URL');
         $this->fails(['app.url' => 'https://localhost'], 'APP_URL');
         $this->fails(['lab.frontend_url' => 'http://localhost:5173'], 'FRONTEND_URL');
         $this->fails(['session.secure' => false], 'SESSION_SECURE_COOKIE');
+        // A disk folder name must not leak into the cookie path of a site served at the root.
+        $this->fails(['session.path' => '/48hrs_lab/'], 'SESSION_PATH');
+        $this->assertSame([], ProductionConfig::problems([...self::GOOD, 'app.url' => 'https://example.com/lab', 'session.path' => '/lab/']));
         $this->fails(['session.driver' => 'cookie'], 'SESSION_DRIVER');
         $this->fails(['mail.default' => 'log'], 'MAIL_MAILER');
         $this->fails(['mail.from.address' => 'hello@example.com.CHANGE_ME'], 'MAIL_FROM_ADDRESS');

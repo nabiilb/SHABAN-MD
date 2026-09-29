@@ -49,6 +49,13 @@ final class ProductionConfig
                 $p[] = "{$env}: set it to the public https:// address";
             }
         }
+        // The session cookie must be sent to the app's own URL: a cookie path that is not a prefix of
+        // APP_URL's path (e.g. a folder name from the server's disk) would make every sign-in fail.
+        $appPath = rtrim((string) (parse_url((string) ($c['app.url'] ?? ''), PHP_URL_PATH) ?? ''), '/').'/';
+        $cookiePath = rtrim((string) ($c['session.path'] ?? '/'), '/').'/';
+        if (! str_starts_with($appPath, $cookiePath)) {
+            $p[] = "SESSION_PATH: \"{$c['session.path']}\" does not match APP_URL (use / for a site at the domain root)";
+        }
         if (! ($c['session.secure'] ?? false)) {
             $p[] = 'SESSION_SECURE_COOKIE: cookies must be Secure in production (true)';
         }
@@ -75,7 +82,7 @@ final class ProductionConfig
 
     public static function current(): array
     {
-        return collect(['app.env', 'app.key', 'app.debug', 'app.url', 'lab.frontend_url', 'lab.timezone', 'lab.allowed_origins', 'session.secure', 'session.same_site', 'session.driver',
+        return collect(['app.env', 'app.key', 'app.debug', 'app.url', 'lab.frontend_url', 'lab.timezone', 'lab.allowed_origins', 'session.path', 'session.secure', 'session.same_site', 'session.driver',
             'mail.default', 'mail.from.address', 'mail.mailers.smtp.password', 'mail.mailers.smtp.username', 'database.connections.mysql.password', 'queue.default'])
             ->mapWithKeys(fn ($k) => [$k => config($k)])->all();
     }

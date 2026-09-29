@@ -1,14 +1,16 @@
 /**
  * Playwright's web server for the e2e run: Apache 2.4 + mod_php serving the
- * Hostinger layout. public_html/48hrs_lab is assembled from the e2e web build
- * (dist-e2e) and deploy/hostinger/public_html (.htaccess, .user.ini, laravel.php);
- * laravel.php boots backend/ through LAB_APP_DIR, as the app folder outside
- * public_html does in production.
+ * Hostinger layout of https://lab.sooryoscan.com. The folder public_html/48hrs_lab
+ * is assembled from the e2e web build (dist-e2e) and deploy/hostinger/public_html
+ * (.htaccess, .user.ini, laravel.php) and is the DOCUMENT ROOT, like the subdomain's:
+ * the app is at "/", the API at "/api". The Laravel app is placed next to
+ * public_html as 48hrs_lab_app (a symlink to backend/), so laravel.php finds it by
+ * its default path, exactly as in production.
  *
  * Env (from playwright.config via stackEnv): E2E_PORT and Laravel's settings.
  */
 import { spawn } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +19,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '../../..');
 const backend = join(repo, 'backend');
 const port = process.env.E2E_PORT ?? '4100';
-const folder = '48hrs_lab';
+const folder = '48hrs_lab'; // on disk only
 
 const work = mkdtempSync(join(tmpdir(), '48hrs-apache-'));
 chmodSync(work, 0o755); // Apache's workers run as www-data
@@ -26,18 +28,18 @@ const web = join(docroot, folder);
 mkdirSync(web, { recursive: true });
 cpSync(join(repo, 'apps/web/dist-e2e'), web, { recursive: true });
 for (const f of ['.htaccess', '.user.ini', 'laravel.php', 'assets/.htaccess']) {
-  const text = readFileSync(join(repo, 'deploy/hostinger/public_html', f), 'utf8').replaceAll('__BASE_PATH__', `/${folder}/`);
+  const text = readFileSync(join(repo, 'deploy/hostinger/public_html', f), 'utf8').replaceAll('__BASE_PATH__', '/');
   mkdirSync(dirname(join(web, f)), { recursive: true });
   writeFileSync(join(web, f), text);
 }
-// A page elsewhere on the domain: the app must not touch the rest of the site.
-writeFileSync(join(docroot, 'index.html'), '<!doctype html><title>sooryoscan.com</title>');
+// The Laravel app next to public_html, found by laravel.php's default ../../48hrs_lab_app.
+symlinkSync(backend, join(work, '48hrs_lab_app'));
 
 // Laravel writes caches and compiled files under storage/ and bootstrap/cache (www-data).
 for (const dir of ['storage', 'bootstrap/cache']) chmodSync(join(backend, dir), 0o777);
 spawn('chmod', ['-R', 'a+rwX', join(backend, 'storage'), join(backend, 'bootstrap/cache')], { stdio: 'inherit' });
 
-const setEnv = Object.entries({ ...process.env.E2E_LARAVEL_ENV ? JSON.parse(process.env.E2E_LARAVEL_ENV) : {}, LAB_APP_DIR: backend })
+const setEnv = Object.entries({ ...(process.env.E2E_LARAVEL_ENV ? JSON.parse(process.env.E2E_LARAVEL_ENV) : {}) })
   .map(([k, v]) => `SetEnv ${k} "${String(v).replaceAll('"', '\\"')}"`)
   .join('\n  ');
 const mods = '/usr/lib/apache2/modules';
@@ -62,12 +64,13 @@ TypesConfig /etc/mime.types
 StartServers 4
 MinSpareServers 4
 MaxRequestWorkers 20
-DocumentRoot "${docroot}"
+# Like Hostinger's lab.sooryoscan.com: the document root IS public_html/48hrs_lab.
+DocumentRoot "${web}"
 <Directory />
   AllowOverride None
   Require all denied
 </Directory>
-<Directory "${docroot}">
+<Directory "${web}">
   AllowOverride All
   Require all granted
   ${setEnv}
@@ -80,7 +83,7 @@ php_value upload_max_filesize 64M
 php_value post_max_size 64M
 `;
 writeFileSync(join(work, 'httpd.conf'), conf);
-console.log(`[e2e] Apache on http://localhost:${port}/${folder}/ (docroot ${docroot})`);
+console.log(`[e2e] Apache on http://localhost:${port}/ (document root ${web})`);
 const httpd = spawn('/usr/sbin/apache2', ['-f', join(work, 'httpd.conf'), '-DFOREGROUND'], { stdio: 'inherit', env: { ...process.env, APACHE_RUN_DIR: work, APACHE_LOCK_DIR: work, APACHE_LOG_DIR: work } });
 const tail = spawn('tail', ['-F', join(work, 'error.log')], { stdio: 'inherit' });
 const stop = () => {
